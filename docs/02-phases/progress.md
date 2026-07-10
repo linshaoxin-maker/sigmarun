@@ -64,6 +64,12 @@
 - backflow：`claim_not_found`/`not_claim_owner` 回填 docs/17 §3；minimatch 改派 FEAT-007（书面理由：真正的 file-vs-glob 场景在 evidence in_scope）；lock_takeover 事件顺延 FEAT-008。
 - 下一个：**FEAT-005 Context Plane**（hydrate 包 + messages.jsonl + run-memory；锚 UC-009 读路径 + 12 号合同）。
 
+## 2026-07-10（FEAT-005 交付）
+
+- **FEAT-005 Context Plane**：第五包 `context` 落地；RED 17 → GREEN 103/103（覆盖 92.6%/79.5%）；真机六命令冒烟（blocker/question 入池→--open 派生→memory update→hydrate→graph validate）。
+- 实现期修正：task-graph 边字段 `kind`（以 run-import 实写为准）——"跨包消费先读生产方"入知识卡。
+- 下一个：**FEAT-006 dispatch 端到端**（/team-dispatch 编排合同 + worktree register + task→working + 适配器 conformance，锚 UC-003/004 + 19 号）。
+
 ## 下一步队列
 
 1. **P5 开工（唯一剩余）**：`git commit` 设计基线（待用户发令）→ 仓库根建 TS monorepo（20 §3 九包）→ FEAT-001 起逐个走 `05-features/FEAT-XXX/`：mvp-scope → **失败测试先行**（BDD/合同用例）→ 最小实现 → verification/self-check/knowledge → 矩阵回填。

@@ -12,8 +12,8 @@
   "scripts": {
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "build": "tsc -b packages/storage packages/core packages/dispatch packages/cli",
-    "typecheck": "tsc -b packages/storage packages/core packages/dispatch packages/cli --force"
+    "build": "tsc -b packages/storage packages/core packages/dispatch packages/context packages/cli",
+    "typecheck": "tsc -b packages/storage packages/core packages/dispatch packages/context packages/cli --force"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

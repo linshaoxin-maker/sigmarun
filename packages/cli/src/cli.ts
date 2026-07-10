@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { initProject, doctorProject, importRun, publishTasks, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
 import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths } from '@sigmarun/dispatch';
+import { postMessage, listMessages, hydrateContext, validateGraph, updateRunMemory } from '@sigmarun/context';
 
 const EXIT_BY_CODE: Record<string, number> = {
   OK: 0,
@@ -126,6 +127,54 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       env = failEnvelope('usage_error', 'Usage: sigmarun reclaim <RUN-ID> <TASK-ID> [--json]');
     } else {
       env = reclaimTask({ cwd: opts.cwd, env: opts.env, runId, taskId });
+    }
+  } else if (cmd === 'msg' && args[1] === 'post') {
+    const runId = args[2];
+    const from = flag(argv, 'from');
+    const type = flag(argv, 'type');
+    const body = flag(argv, 'body');
+    if (!runId || !from || !type || !body) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun msg post <RUN-ID> --from=<AGENT-ID> --type=<type> --body=<text> [--task=<TASK-ID>] [--to=<route>] [--reply-to=<MSG-ID>] [--refs=a,b] [--json]');
+    } else {
+      env = postMessage({
+        cwd: opts.cwd, env: opts.env, runId, fromAgentId: from, type, body,
+        taskId: flag(argv, 'task'), to: flag(argv, 'to'), inReplyTo: flag(argv, 'reply-to'),
+        refs: flag(argv, 'refs')?.split(',').filter(Boolean),
+      });
+    }
+  } else if (cmd === 'msg' && args[1] === 'list') {
+    const runId = args[2];
+    if (!runId) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun msg list <RUN-ID> [--task=<TASK-ID>] [--type=<type>] [--open] [--json]');
+    } else {
+      env = listMessages({ cwd: opts.cwd, env: opts.env, runId, taskId: flag(argv, 'task'), type: flag(argv, 'type'), open: argv.includes('--open') });
+    }
+  } else if (cmd === 'context' && args[1] === 'hydrate') {
+    const runId = args[2];
+    const taskId = args[3];
+    if (!runId || !taskId) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun context hydrate <RUN-ID> <TASK-ID> [--agent=<AGENT-ID>] [--json]');
+    } else {
+      env = hydrateContext({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId: flag(argv, 'agent') });
+    }
+  } else if (cmd === 'graph' && args[1] === 'validate') {
+    const runId = args[2];
+    if (!runId) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun graph validate <RUN-ID> [--json]');
+    } else {
+      env = validateGraph({ cwd: opts.cwd, env: opts.env, runId });
+    }
+  } else if (cmd === 'memory' && args[1] === 'update') {
+    const runId = args[2];
+    const file = flag(argv, 'file');
+    if (!runId || !file) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun memory update <RUN-ID> --file=<memory.md> [--json]');
+    } else {
+      try {
+        env = updateRunMemory({ cwd: opts.cwd, env: opts.env, runId, content: readFileSync(file, 'utf8') });
+      } catch (e) {
+        env = failEnvelope('io_error', `Cannot read memory file: ${String(e)}`);
+      }
     }
   } else if (cmd === 'approve-paths') {
     const runId = args[1];

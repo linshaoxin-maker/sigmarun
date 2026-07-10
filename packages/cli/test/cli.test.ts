@@ -88,4 +88,28 @@ describe('cli front-end (contract: docs/17 §1/§2.2 — parse, delegate, map ex
     const r = runCli(['claim-next', 'RUN-0001', '--json'], { cwd: repo });
     expect(r.exitCode).toBe(2);
   });
+
+  it('msg post -> context hydrate roundtrip via argv (FEAT-005)', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const { writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    writeFileSync(join(repo, 'payload.json'), JSON.stringify(validPayload()));
+    runCli(['run', 'import', join(repo, 'payload.json'), '--json'], { cwd: repo });
+    runCli(['task', 'publish', 'RUN-0001', '--json'], { cwd: repo });
+    const reg = runCli(['agent', 'register', 'RUN-0001', '--tool=codex', '--label=w1', '--json'], { cwd: repo });
+    const agentId = JSON.parse(reg.stdout).data.agent_id;
+
+    const post = runCli(['msg', 'post', 'RUN-0001', `--from=${agentId}`, '--type=question', '--body=expiry rule?', '--json'], { cwd: repo });
+    expect(post.exitCode).toBe(0);
+    expect(JSON.parse(post.stdout).data.message_id).toBe('MSG-0001');
+
+    const hyd = runCli(['context', 'hydrate', 'RUN-0001', 'TASK-0002', `--agent=${agentId}`, '--json'], { cwd: repo });
+    expect(hyd.exitCode).toBe(0);
+    expect(JSON.parse(hyd.stdout).data.must_read).toContain('tasks/TASK-0002/task.md');
+
+    const graph = runCli(['graph', 'validate', 'RUN-0001', '--json'], { cwd: repo });
+    expect(graph.exitCode).toBe(0);
+  });
 });
