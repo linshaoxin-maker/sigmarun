@@ -1,0 +1,10 @@
+case=t2a rc=0
+team_dir_unchanged=yes
+gateway_calls=5
+hello_md=absent
+---calls---
+10:24:56 team run show RUN-0001 --json
+10:25:03 team agent register RUN-0001 --tool codex --role implementer --json
+10:25:10 team claim-next RUN-0001 --agent AGENT-codex-901 --json
+10:25:18 team context hydrate RUN-0001 TASK-0042 --json
+10:26:41 team heartbeat RUN-0001 --agent AGENT-codex-901 --json

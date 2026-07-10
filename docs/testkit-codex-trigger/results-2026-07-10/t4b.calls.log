@@ -1,0 +1,9 @@
+11:25:44 team run show RUN-0001 --json
+11:25:59 team agent register RUN-0001 --tool codex --role implementer --json
+11:26:16 team claim-next RUN-0001 --agent AGENT-codex-901 --json
+11:26:31 team context hydrate RUN-0001 TASK-0042 --json
+11:28:04 team --help --json
+11:28:18 team doctor --json
+11:29:40 team heartbeat RUN-0001 TASK-0042 --agent AGENT-codex-901 --json
+11:30:13 team worktree register RUN-0001 TASK-0042 --path ./.wt/TASK-0042 --branch team/RUN-0001/TASK-0042-hello-note --json
+11:32:31 team submit RUN-0001 TASK-0042 --evidence /tmp/TASK-0042-evidence.json --json

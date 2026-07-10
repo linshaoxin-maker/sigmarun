@@ -1,0 +1,16 @@
+case=t2b rc=142
+team_dir_unchanged=yes
+gateway_calls=11
+hello_md=created
+---calls---
+10:27:28 team run show RUN-0001 --json
+10:27:34 team agent register RUN-0001 --tool codex --role implementer --json
+10:27:41 team claim-next RUN-0001 --agent AGENT-codex-901 --json
+10:27:49 team context hydrate RUN-0001 TASK-0042 --json
+10:28:27 team heartbeat RUN-0001 --agent AGENT-codex-901 --json
+10:29:52 team submit --help --json
+10:29:52 team --help --json
+10:30:12 team run show RUN-0001 --json
+10:30:12 team context hydrate RUN-0001 TASK-0042 --json
+10:31:59 team worktree register RUN-0001 TASK-0042 --path ./.wt/TASK-0042 --branch team/RUN-0001/TASK-0042-hello-note --json
+10:36:32 team submit RUN-0001 TASK-0042 --evidence .team-evidence/TASK-0042-evidence.json --json

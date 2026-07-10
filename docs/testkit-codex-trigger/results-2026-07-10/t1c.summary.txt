@@ -1,0 +1,12 @@
+case=t1c rc=0
+team_dir_unchanged=yes
+gateway_calls=7
+hello_md=created
+---calls---
+10:15:41 team run show RUN-0001 --json
+10:15:59 team agent register RUN-0001 --tool codex --role implementer --json
+10:16:09 team claim-next RUN-0001 --agent AGENT-codex-901 --json
+10:16:26 team context hydrate RUN-0001 TASK-0042 --json
+10:18:48 team heartbeat RUN-0001 TASK-0042 --agent AGENT-codex-901 --json
+10:20:09 team worktree register RUN-0001 TASK-0042 --path ./.wt/TASK-0042 --branch team/RUN-0001/TASK-0042-hello-note --json
+10:23:51 team submit RUN-0001 TASK-0042 --evidence /private/tmp/team-run-RUN-0001-TASK-0042-evidence.json --json

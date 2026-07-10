@@ -1,0 +1,32 @@
+#!/bin/bash
+# Stub team gateway for Codex trigger test (D13 / 19 §8).
+# Logs every invocation; returns canned envelopes per 17 §2.
+echo "$(date +%H:%M:%S) team $*" >> "${TEAM_CALL_LOG:-/tmp/team-calls.log}"
+
+ok() { printf '{"ok":true,"code":"OK","message":"%s","data":%s,"warnings":[],"next_actions":[],"meta":{"gateway_version":"0.0.0-stub","envelope_version":"team.envelope.v1","run_id":"RUN-0001"}}\n' "$1" "$2"; }
+
+case "$1 $2" in
+  "doctor "*|"doctor ")
+    ok "environment ok" '{"git":"ok","team_root":"ok","lock":"ok"}' ;;
+  "run show")
+    ok "run found" '{"run_id":"RUN-0001","title":"Hello note run","status":"active","mode":"feature","base_branch":"main","task_count":1,"ready":1}' ;;
+  "agent register")
+    ok "agent registered" '{"agent_id":"AGENT-codex-901","run_id":"RUN-0001","role":"implementer"}' ;;
+  "claim-next "*)
+    ok "task claimed" '{"kind":"task","task_id":"TASK-0042","claim_id":"CLAIM-task-0007","agent_id":"AGENT-codex-901","lease_until":"2099-01-01T00:00:00+08:00","worktree":{"suggested_branch":"team/RUN-0001/TASK-0042-hello-note","suggested_path":"./.wt/TASK-0042"},"task_ref":".team/runs/RUN-0001/tasks/TASK-0042/task.md"}' ;;
+  "context hydrate")
+    ok "context pack" '{"must_read":[".team/runs/RUN-0001/tasks/TASK-0042/task.md",".team/runs/RUN-0001/context/run-memory.md"],"messages":[],"open_questions":[],"risks":["Keep the change minimal; only create the one file the task asks for."]}' ;;
+  "worktree register")
+    ok "worktree recorded" '{"worktree_id":"WT-TASK-0042","status":"active"}' ;;
+  "heartbeat "*)
+    ok "lease extended" '{"lease_until":"2099-01-01T00:00:00+08:00"}' ;;
+  "message post")
+    ok "message stored" '{"message_id":"MSG-0001"}' ;;
+  "submit "*)
+    ok "evidence accepted, task submitted" '{"task_id":"TASK-0042","status":"submitted","revision":1}' ;;
+  "worktree adopt"|"task show"|"task list"|"progress "*|"run list")
+    ok "ok" '{}' ;;
+  *)
+    printf '{"ok":false,"code":"usage_error","message":"Unknown or malformed command.","data":{"argv":"%s"},"warnings":[],"next_actions":["run: team doctor --json"],"meta":{"gateway_version":"0.0.0-stub","envelope_version":"team.envelope.v1"}}\n' "$*"
+    exit 2 ;;
+esac
