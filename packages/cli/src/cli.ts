@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { initProject, doctorProject, importRun, publishTasks, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
+import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths } from '@sigmarun/dispatch';
 
 const EXIT_BY_CODE: Record<string, number> = {
   OK: 0,
@@ -9,15 +10,29 @@ const EXIT_BY_CODE: Record<string, number> = {
   rev_conflict: 6,
   duplicate_payload: 6,
   cross_run_conflict: 6,
+  task_already_claimed: 6,
+  path_conflict: 6,
+  requires_approval: 6,
+  not_claim_owner: 6,
   run_not_found: 5,
   task_not_found: 5,
+  agent_not_registered: 5,
+  claim_not_found: 5,
   run_not_active: 7,
+  run_paused: 7,
+  invalid_transition: 7,
   not_a_git_repo: 8,
   bare_repo_unsupported: 8,
   team_root_not_found: 8,
   io_error: 8,
   unsupported_schema_version: 8,
 };
+
+/** `--name=value` flag lookup. */
+function flag(argv: string[], name: string): string | undefined {
+  const hit = argv.find((a) => a.startsWith(`--${name}=`));
+  return hit ? hit.slice(name.length + 3) : undefined;
+}
 
 export interface CliResult {
   exitCode: number;
@@ -68,6 +83,58 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       } catch (e) {
         env = failEnvelope('schema_invalid', `Payload file is not valid JSON: ${String(e)}`);
       }
+    }
+  } else if (cmd === 'agent' && args[1] === 'register') {
+    const runId = args[2];
+    const tool = flag(argv, 'tool');
+    if (!runId || !tool) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun agent register <RUN-ID> --tool=<tool> [--role=<role>] [--label=<window>] [--json]');
+    } else {
+      env = registerAgent({ cwd: opts.cwd, env: opts.env, runId, tool, role: flag(argv, 'role'), label: flag(argv, 'label') });
+    }
+  } else if (cmd === 'claim-next') {
+    const runId = args[1];
+    const agentId = flag(argv, 'agent');
+    if (!runId || !agentId) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun claim-next <RUN-ID> --agent=<AGENT-ID> [--role=<role>] [--task=<TASK-ID>] [--dry-run] [--json]');
+    } else {
+      env = claimNext({
+        cwd: opts.cwd,
+        env: opts.env,
+        runId,
+        agentId,
+        role: flag(argv, 'role'),
+        taskId: flag(argv, 'task'),
+        dryRun: argv.includes('--dry-run'),
+      });
+    }
+  } else if (cmd === 'heartbeat' || cmd === 'release') {
+    const runId = args[1];
+    const taskId = args[2];
+    const agentId = flag(argv, 'agent');
+    if (!runId || !taskId || !agentId) {
+      env = failEnvelope('usage_error', `Usage: sigmarun ${cmd} <RUN-ID> <TASK-ID> --agent=<AGENT-ID> [--json]`);
+    } else if (cmd === 'heartbeat') {
+      env = heartbeat({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId });
+    } else {
+      env = releaseTask({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, reason: flag(argv, 'reason') });
+    }
+  } else if (cmd === 'reclaim') {
+    const runId = args[1];
+    const taskId = args[2];
+    if (!runId || !taskId) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun reclaim <RUN-ID> <TASK-ID> [--json]');
+    } else {
+      env = reclaimTask({ cwd: opts.cwd, env: opts.env, runId, taskId });
+    }
+  } else if (cmd === 'approve-paths') {
+    const runId = args[1];
+    const taskId = args[2];
+    const paths = flag(argv, 'paths')?.split(',').filter(Boolean);
+    if (!runId || !taskId || !paths || paths.length === 0) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun approve-paths <RUN-ID> <TASK-ID> --paths=<glob,...> [--json]');
+    } else {
+      env = approvePaths({ cwd: opts.cwd, env: opts.env, runId, taskId, paths });
     }
   } else {
     env = failEnvelope('usage_error', `Unknown command: ${cmd ?? '(none)'}`);

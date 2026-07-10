@@ -58,6 +58,12 @@
 - 书面留待 FEAT-004：BDD-002-02 claim 拒绝半场、minimatch 级重叠判定（当前为 10 §8.2 保守前缀法）。
 - 下一个：**FEAT-004 claim-next + 锁 + 回收**（DAG 最重一环：认领守卫 BR-001、租约/心跳捎带、3×TTL sweep、previous_attempts、AUD-001/002 inline，锚 BDD-003 全组 + BDD-007-02/03）。
 
+## 2026-07-10（FEAT-004 交付）
+
+- **FEAT-004 claim-next + 锁 + 回收**：第四包 `dispatch` 落地；RED 23 → GREEN 85/85（覆盖 93.2%/80.2%）；真机 12 事件全链冒烟。BR-001 九守卫全实现（行 9 并行上限代码在、压测豁免留 CI）；BDD-002-02（FEAT-003 留债）闭合。
+- backflow：`claim_not_found`/`not_claim_owner` 回填 docs/17 §3；minimatch 改派 FEAT-007（书面理由：真正的 file-vs-glob 场景在 evidence in_scope）；lock_takeover 事件顺延 FEAT-008。
+- 下一个：**FEAT-005 Context Plane**（hydrate 包 + messages.jsonl + run-memory；锚 UC-009 读路径 + 12 号合同）。
+
 ## 下一步队列
 
 1. **P5 开工（唯一剩余）**：`git commit` 设计基线（待用户发令）→ 仓库根建 TS monorepo（20 §3 九包）→ FEAT-001 起逐个走 `05-features/FEAT-XXX/`：mvp-scope → **失败测试先行**（BDD/合同用例）→ 最小实现 → verification/self-check/knowledge → 矩阵回填。

@@ -17,7 +17,7 @@ export interface PublishOptions extends ResolveOptions {
   force?: boolean;
 }
 
-/** Conservative glob-overlap: ancestor-prefix rule (docs/10 §8.2); full minimatch tier lands with FEAT-004. */
+/** Conservative glob-overlap: ancestor-prefix rule (docs/10 §8.2); full minimatch tier lands with FEAT-007 (file-vs-glob in_scope). */
 function globPrefix(g: string): string {
   const i = g.search(/[*?[]/);
   return i === -1 ? g : g.slice(0, i);

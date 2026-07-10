@@ -6,6 +6,7 @@ export default defineConfig({
     alias: {
       '@sigmarun/storage': fileURLToPath(new URL('./packages/storage/src/index.ts', import.meta.url)),
       '@sigmarun/core': fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),
+      '@sigmarun/dispatch': fileURLToPath(new URL('./packages/dispatch/src/index.ts', import.meta.url)),
     },
   },
   test: {

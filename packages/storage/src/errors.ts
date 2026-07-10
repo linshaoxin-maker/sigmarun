@@ -12,7 +12,20 @@ export type ReasonCode =
   | 'run_not_found'
   | 'task_not_found'
   | 'run_not_active'
+  | 'run_paused'
   | 'cross_run_conflict'
+  | 'agent_not_registered'
+  | 'agent_claim_limit'
+  | 'no_claimable_task'
+  | 'task_already_claimed'
+  | 'deps_blocked'
+  | 'capability_mismatch'
+  | 'path_conflict'
+  | 'requires_approval'
+  | 'parallel_limit_reached'
+  | 'invalid_transition'
+  | 'claim_not_found'
+  | 'not_claim_owner'
   | 'io_error';
 
 /** Internal error carrying a contract reason code (docs/17 §3); converted to an envelope at the primitive layer (docs/20 §3 R2). */

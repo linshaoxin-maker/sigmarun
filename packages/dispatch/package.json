@@ -1,0 +1,13 @@
+{
+  "name": "@sigmarun/dispatch",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@sigmarun/core": "0.1.0",
+    "@sigmarun/storage": "0.1.0"
+  }
+}

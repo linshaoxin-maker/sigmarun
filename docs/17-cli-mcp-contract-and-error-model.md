@@ -130,6 +130,8 @@
 | `task_already_claimed` | 任务已被占 | claim-next --task | 可领取任务列表提示 |
 | `path_conflict` | 路径占用冲突 | claim-next | blocked_by 详情（§2.1 示例） |
 | `requires_approval` | 命中需批准路径 | claim-next、submit | `team approve-paths` 命令模板 |
+| `claim_not_found` | 目标 task 无 active claim（exit 5；FEAT-004 实现期定名回填） | heartbeat、release、reclaim | 当前 claim 状态查询 |
+| `not_claim_owner` | claim 属他人，拒绝续租/释放（exit 6；FEAT-004 实现期定名回填） | heartbeat、release | 持有者身份提示；非 owner 走 reclaim |
 | `lock_timeout` | 未获得锁 | 所有写命令 | 重试建议 + `team doctor` |
 | `rev_conflict` | 乐观锁版本不符（疑似绕过 CLI 直改文件） | 所有写命令 | `team audit run` |
 | `invalid_transition` | 状态机拒绝（含执行者身份不符） | 状态类命令 | 当前状态 + 合法转换列表 |
