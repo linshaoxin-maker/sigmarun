@@ -11,6 +11,7 @@ import {
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { synthesizeReview } from './review.js';
+import { synthesizeVerify } from './verify.js';
 import {
   appendEvent,
   failEnvelope,
@@ -109,6 +110,8 @@ interface RunPolicy {
   path_conflict_policy: string;
   max_active_claims_per_agent: number;
   reclaim_policy?: { auto_after_ttl_multiple?: number };
+  /** docs/10 §6: strict MVP default ['done']; runs may relax via policy. */
+  deps_satisfied_when?: string[];
 }
 
 export function openRun(opts: ResolveOptions & { runId: string }): RunCtx | GatewayError {
@@ -416,8 +419,9 @@ function candidateGuard(
   role: string,
   stores: ClaimStores,
   approvals: Array<{ task_id: string; paths: string[]; status: string }>,
+  depsSatisfiedWhen: string[] = ['done'],
 ): GuardFailure | null {
-  const unmet = row.depends_on.filter((dep) => rowsById.get(dep)?.status !== 'done');
+  const unmet = row.depends_on.filter((dep) => !depsSatisfiedWhen.includes(rowsById.get(dep)?.status ?? ''));
   if (unmet.length > 0) {
     return { code: 'deps_blocked', message: `Task ${row.task_id} waits on ${unmet.join(', ')}.`, data: { unmet } };
   }
@@ -552,6 +556,9 @@ export function claimNext(opts: ClaimOptions): Envelope {
     if (role === 'reviewer' && !opts.taskId) {
       return synthesizeReview(runDir, runId, opts.agentId, startedAt);
     }
+    if (role === 'verifier' && !opts.taskId) {
+      return synthesizeVerify(runDir, runId, opts.agentId, startedAt);
+    }
 
     // Guard #4: candidates. Directed claims answer with the specific guard code (D17).
     if (opts.taskId) {
@@ -570,7 +577,7 @@ export function claimNext(opts: ClaimOptions): Envelope {
         }
         return failEnvelope('no_claimable_task', `Task ${row.task_id} is ${row.status}, not ready.`, { startedAt });
       }
-      const failure = candidateGuard(row, rowsById, role, stores, approvals);
+      const failure = candidateGuard(row, rowsById, role, stores, approvals, policy.deps_satisfied_when ?? ['done']);
       if (failure) {
         return failEnvelope(failure.code, failure.message, {
           data: { candidate_task_id: row.task_id, ...(failure.data ?? {}) },
@@ -584,7 +591,7 @@ export function claimNext(opts: ClaimOptions): Envelope {
     const excluded: Array<{ task_id: string; reason: string }> = [];
     const claimable: TaskRow[] = [];
     for (const row of rows.filter((r) => r.status === 'ready' && typeFilter(r))) {
-      const failure = candidateGuard(row, rowsById, role, stores, approvals);
+      const failure = candidateGuard(row, rowsById, role, stores, approvals, policy.deps_satisfied_when ?? ['done']);
       if (failure) excluded.push({ task_id: row.task_id, reason: failure.code });
       else claimable.push(row);
     }

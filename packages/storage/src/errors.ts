@@ -28,6 +28,8 @@ export type ReasonCode =
   | 'not_claim_owner'
   | 'evidence_invalid'
   | 'self_approval_forbidden'
+  | 'export_target_invalid'
+  | 'export_redaction_hit'
   | 'io_error';
 
 /** Internal error carrying a contract reason code (docs/17 §3); converted to an envelope at the primitive layer (docs/20 §3 R2). */

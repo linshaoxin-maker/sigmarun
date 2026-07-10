@@ -94,6 +94,13 @@
 - 闭合 FEAT-007 留口（skip 最小记录）与 FEAT-008 改派（模板补装）；返工环全链（复活→resume→rev 2→round 2）经测试锁定。
 - 下一个：**FEAT-010 verify + integrate + export**（子项 010.1–.3：VERIFY 记录/gates/failures_mapped、拓扑序合并+revert、脱敏阻断式 export，锚 BDD-006-06/07 + BDD-008 全组）。
 
+## 2026-07-11（FEAT-010 交付 · **MVP 主链 FEAT-001…010 闭合**）
+
+- **FEAT-010 verify + integrate + export**：RED 13 → GREEN 172/172（覆盖 89.7%/73.5%）；真机**北极星全链**：plan→import→publish→register→claim→worktree→submit→review→verify→integrate→report→export（7 文件脱敏归档落 docs/team-runs/）。
+- 依赖门冲突化解：BDD-008 背景 vs 10 §6 严格档——落既写策略位 `deps_satisfied_when`（默认 ['done'] 不变）；字段名回填 10 §6 挂账。
+- 十包监控：storage/core/dispatch/context/adapters/watch/audit/cli 八包 + 172 用例全绿。
+- 下一个：**FEAT-011 project memory promote（L4，P1 首位）**；其后收尾轮（rev_after 债、SCA、CI、模板余量、conformance、回填批）。
+
 ## 下一步队列
 
 1. FEAT-009 → FEAT-010 →（P1 首位）FEAT-011；随后收尾轮：rev_after 债（AUD-032）、npm audit 补跑（SCA BLOCKED）、CI 三平台矩阵 + NFR-001 压测、team-status 等其余模板补装、conformance suite。

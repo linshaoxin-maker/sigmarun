@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { initProject, doctorProject, importRun, publishTasks, runShow, submitEvidence, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
-import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask } from '@sigmarun/dispatch';
+import { initProject, doctorProject, importRun, publishTasks, runShow, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
+import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, verifySubmit } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, updateRunMemory } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
 import { statusRun, runList, taskShow, evidenceShow, watchOnce } from '@sigmarun/watch';
@@ -12,6 +12,8 @@ const EXIT_BY_CODE: Record<string, number> = {
   lock_timeout: 3,
   schema_invalid: 4,
   evidence_invalid: 4,
+  export_redaction_hit: 4,
+  export_target_invalid: 4,
   rev_conflict: 6,
   duplicate_payload: 6,
   cross_run_conflict: 6,
@@ -199,6 +201,40 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     } else {
       env = adoptWorktree({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId });
     }
+  } else if (cmd === 'verify' && args[1] === 'submit') {
+    const runId = args[2];
+    const agentId = flag(argv, 'agent');
+    const verifyFile = flag(argv, 'verify');
+    env = !runId || !agentId || !verifyFile
+      ? failEnvelope('usage_error', 'Usage: sigmarun verify submit <RUN-ID> --agent=<AGENT-ID> --verify=<verify.json> [--json]')
+      : verifySubmit({ cwd: opts.cwd, env: opts.env, runId, agentId, verifyPath: verifyFile });
+  } else if (cmd === 'integrate' && (args[1] === 'start' || args[1] === 'record')) {
+    const runId = args[2];
+    if (!runId) {
+      env = failEnvelope('usage_error', `Usage: sigmarun integrate ${args[1]} <RUN-ID>${args[1] === 'record' ? ' <TASK-ID> --merge-commit=<sha> | --failed --reason=...' : ''} [--json]`);
+    } else if (args[1] === 'start') {
+      env = integrateStart({ cwd: opts.cwd, env: opts.env, runId });
+    } else {
+      const taskId = args[3];
+      env = !taskId
+        ? failEnvelope('usage_error', 'integrate record needs a TASK-ID.')
+        : integrateRecord({
+            cwd: opts.cwd, env: opts.env, runId, taskId,
+            mergeCommit: flag(argv, 'merge-commit'),
+            failed: argv.includes('--failed'),
+            reason: flag(argv, 'reason'),
+          });
+    }
+  } else if (cmd === 'report') {
+    const runId = args[1];
+    env = !runId
+      ? failEnvelope('usage_error', 'Usage: sigmarun report <RUN-ID> [--json]')
+      : reportRun({ cwd: opts.cwd, env: opts.env, runId });
+  } else if (cmd === 'export') {
+    const runId = args[1];
+    env = !runId
+      ? failEnvelope('usage_error', 'Usage: sigmarun export <RUN-ID> [--to=<dir>] [--full] [--force] [--json]')
+      : exportRun({ cwd: opts.cwd, env: opts.env, runId, to: flag(argv, 'to'), full: argv.includes('--full'), force });
   } else if (cmd === 'review' && (args[1] === 'claim' || args[1] === 'approve' || args[1] === 'request-changes')) {
     const runId = args[2];
     const taskId = args[3];

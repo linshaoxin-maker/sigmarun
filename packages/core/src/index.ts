@@ -18,3 +18,7 @@ export { runShow } from './run-query.js';
 export type { RunShowOptions } from './run-query.js';
 export { submitEvidence, fileInScope } from './submit.js';
 export type { SubmitOptions } from './submit.js';
+export { integrateStart, integrateRecord, reportRun } from './integrate.js';
+export type { IntegrateStartOptions, IntegrateRecordOptions } from './integrate.js';
+export { exportRun } from './export.js';
+export type { ExportOptions } from './export.js';

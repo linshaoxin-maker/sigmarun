@@ -1,0 +1,225 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { readJsonState, redactText, writeJsonStateAtomic, writeJsonStateNew, type ResolveOptions } from '@sigmarun/storage';
+import { appendEvent, failEnvelope, okEnvelope, type Envelope } from '@sigmarun/core';
+import { findActiveClaim, loadClaims, withRunLock, type ClaimStores, type TaskRow } from './claim-engine.js';
+
+export interface VerifyOptions extends ResolveOptions {
+  runId: string;
+  agentId: string;
+  verifyPath: string;
+}
+
+interface VerifyDraft {
+  target?: { kind: string; task_id?: string };
+  checks?: Array<{ name: string; cmd: string; exit_code: number; output_file?: string | null; status: string }>;
+  gates?: Record<string, string>;
+  skip_reasons?: Record<string, string>;
+  verdict?: string;
+  failures_mapped?: string[];
+}
+
+const GATE_KEYS = ['build', 'focused_tests', 'regression_tests', 'scope_check', 'evidence_complete'];
+
+/** Flip a task back to changes_requested and revive its owner claim (shared by review/verify fail paths). */
+export function mapTaskToRework(runDir: string, runId: string, taskId: string, stores: ClaimStores): void {
+  const taskFile = join(runDir, 'tasks', taskId, 'task.json');
+  if (!existsSync(taskFile)) return;
+  const task = readJsonState(taskFile);
+  (task.doc as { status: string }).status = 'changes_requested';
+  writeJsonStateAtomic(taskFile, task.doc as Record<string, unknown>, { expectedRev: task.rev });
+  const listFile = join(runDir, 'team-task-list.json');
+  const list = readJsonState(listFile);
+  const row = (list.doc as { tasks: TaskRow[] }).tasks.find((r) => r.task_id === taskId);
+  if (row) row.status = 'changes_requested';
+  writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
+  const owner = stores.taskClaims.doc.claims.find((c) => c.task_id === taskId && c.status === 'submitted');
+  if (owner) {
+    const run = readJsonState(join(runDir, 'run.json')).doc as { default_policy?: { claim_ttl_minutes?: number } };
+    owner.status = 'active';
+    owner.lease_until = new Date(Date.now() + (run.default_policy?.claim_ttl_minutes ?? 30) * 60_000).toISOString();
+  }
+}
+
+/**
+ * Verify submission (docs/14 §4): the agent executed the checks; the gateway validates structure,
+ * persists the record, and drives approved -> verified / changes_requested (D11 boundary).
+ */
+export function verifySubmit(opts: VerifyOptions): Envelope {
+  const startedAt = Date.now();
+  return withRunLock(opts, startedAt, (runDir, runId) => {
+    let draft: VerifyDraft;
+    try {
+      draft = JSON.parse(readFileSync(opts.verifyPath, 'utf8')) as VerifyDraft;
+    } catch (e) {
+      return failEnvelope('schema_invalid', `Verify draft is not readable JSON: ${String(e)}`, { startedAt });
+    }
+    const errors: string[] = [];
+    const kind = draft.target?.kind;
+    if (kind !== 'task' && kind !== 'run') errors.push('target.kind must be task or run');
+    const taskId = draft.target?.task_id;
+    if (kind === 'task' && !taskId) errors.push('task target needs target.task_id');
+
+    const checks = draft.checks ?? [];
+    checks.forEach((c) => {
+      if (!['pass', 'fail', 'skipped'].includes(c.status)) errors.push(`check "${c.name}": status must be pass/fail/skipped`);
+      if (c.status === 'pass' && c.exit_code !== 0) errors.push(`check "${c.name}": status pass contradicts exit_code ${c.exit_code}`);
+      if (c.status === 'fail' && c.exit_code === 0) errors.push(`check "${c.name}": status fail contradicts exit_code 0`);
+      if (c.output_file && !existsSync(c.output_file)) errors.push(`check "${c.name}": output file missing: ${c.output_file}`);
+    });
+    const gates = draft.gates ?? {};
+    for (const key of GATE_KEYS) {
+      const v = gates[key];
+      if (!v || !['pass', 'fail', 'skipped'].includes(v)) errors.push(`gate "${key}" must be pass/fail/skipped`);
+      if (v === 'skipped' && !draft.skip_reasons?.[key]) errors.push(`gate "${key}": skipped requires a reason (14 §4 rule 2)`);
+    }
+    const verdict = draft.verdict;
+    if (verdict !== 'pass' && verdict !== 'fail') errors.push('verdict must be pass or fail');
+    const nonSkippedAllPass = GATE_KEYS.every((k) => gates[k] === 'skipped' || gates[k] === 'pass');
+    if (verdict === 'pass' && !nonSkippedAllPass) errors.push('verdict pass requires every non-skipped gate to pass (14 §4 rule 4)');
+    if (kind === 'run' && verdict === 'fail' && (draft.failures_mapped ?? []).length === 0) {
+      errors.push('run-level fail must map failures back to task ids (failures_mapped)');
+    }
+    if (errors.length > 0) {
+      return failEnvelope('schema_invalid', `Verify draft failed ${errors.length} mechanical check(s).`, { data: { errors }, startedAt });
+    }
+
+    const stores = loadClaims(runDir, runId);
+    if (kind === 'task') {
+      const taskFile = join(runDir, 'tasks', taskId!, 'task.json');
+      if (!existsSync(taskFile)) return failEnvelope('task_not_found', `Task ${taskId} does not exist on ${runId}.`, { startedAt });
+      const status = (readJsonState(taskFile).doc as { status: string }).status;
+      if (status !== 'approved') {
+        return failEnvelope('invalid_transition', `Task ${taskId} is ${status}; verification targets approved tasks.`, { startedAt });
+      }
+    }
+
+    const countersFile = join(runDir, 'counters.json');
+    const counters = readJsonState(countersFile);
+    const cdoc = counters.doc as Record<string, unknown>;
+    const n = Number(cdoc.next_verify ?? 1);
+    const verifyId = `VERIFY-${String(n).padStart(4, '0')}`;
+    const verDir = join(runDir, 'verification');
+    const outDir = join(verDir, 'outputs');
+    mkdirSync(outDir, { recursive: true });
+
+    const canonicalChecks = checks.map((c, i) => {
+      let outputRef: string | null = null;
+      if (c.output_file && existsSync(c.output_file)) {
+        outputRef = `outputs/${verifyId}-${String(i + 1).padStart(2, '0')}.log`;
+        writeFileSync(join(verDir, outputRef), redactText(readFileSync(c.output_file, 'utf8')).text, 'utf8');
+      }
+      return { name: c.name, cmd: c.cmd, exit_code: c.exit_code, output_ref: outputRef, status: c.status };
+    });
+
+    writeJsonStateNew(join(verDir, `${verifyId}.json`), {
+      schema_version: 'team.verification.v1',
+      verify_id: verifyId,
+      run_id: runId,
+      target: draft.target,
+      verifier_agent_id: opts.agentId,
+      executed_at: new Date().toISOString(),
+      checks: canonicalChecks,
+      gates,
+      skip_reasons: draft.skip_reasons ?? {},
+      verdict,
+      failures_mapped: draft.failures_mapped ?? [],
+    });
+    writeJsonStateAtomic(countersFile, { ...cdoc, next_verify: n + 1 }, { expectedRev: counters.rev });
+
+    appendEvent(runDir, {
+      event: 'verification_started',
+      actor: { type: 'agent', id: opts.agentId },
+      run_id: runId,
+      ...(taskId ? { task_id: taskId } : {}),
+      payload: { verify_id: verifyId, target: draft.target },
+    });
+
+    if (verdict === 'pass') {
+      if (kind === 'task') {
+        const taskFile = join(runDir, 'tasks', taskId!, 'task.json');
+        const task = readJsonState(taskFile);
+        (task.doc as { status: string }).status = 'verified';
+        writeJsonStateAtomic(taskFile, task.doc as Record<string, unknown>, { expectedRev: task.rev });
+        const listFile = join(runDir, 'team-task-list.json');
+        const list = readJsonState(listFile);
+        const row = (list.doc as { tasks: TaskRow[] }).tasks.find((r) => r.task_id === taskId);
+        if (row) row.status = 'verified';
+        writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
+      }
+      appendEvent(runDir, {
+        event: 'verification_passed',
+        actor: { type: 'agent', id: opts.agentId },
+        run_id: runId,
+        ...(taskId ? { task_id: taskId } : {}),
+        payload: { verify_id: verifyId, target: draft.target },
+      });
+      return okEnvelope({
+        message: `${verifyId}: pass${kind === 'task' ? `; ${taskId} is verified` : ' (run level)'}.`,
+        data: { verify_id: verifyId, verdict, target: draft.target },
+        startedAt,
+      });
+    }
+
+    const mapped = kind === 'task' ? [taskId!] : (draft.failures_mapped ?? []);
+    for (const t of mapped) mapTaskToRework(runDir, runId, t, stores);
+    if (mapped.length > 0) {
+      const { saveState } = { saveState: null as never };
+      void saveState;
+    }
+    // persist any claim revivals
+    if (stores.taskClaims.rev !== null) {
+      writeJsonStateAtomic(stores.taskClaims.file, stores.taskClaims.doc, { expectedRev: stores.taskClaims.rev });
+    }
+    appendEvent(runDir, {
+      event: 'verification_failed',
+      actor: { type: 'agent', id: opts.agentId },
+      run_id: runId,
+      payload: { verify_id: verifyId, failures_mapped: mapped },
+    });
+    return okEnvelope({
+      message: `${verifyId}: fail; ${mapped.length} task(s) mapped back to changes_requested.`,
+      data: { verify_id: verifyId, verdict, failures_mapped: mapped },
+      startedAt,
+    });
+  });
+}
+
+/** D15 verifier synthesis: stateless suggestion from the approved queue (no verify-claim schema in 14 §4). */
+export function synthesizeVerify(runDir: string, runId: string, agentId: string, startedAt: number): Envelope {
+  const rows = (readJsonState(join(runDir, 'team-task-list.json')).doc as { tasks: TaskRow[] }).tasks;
+  const stores = loadClaims(runDir, runId);
+  const owners = (taskId: string): Set<string> => {
+    const set = new Set<string>();
+    for (const c of stores.taskClaims.doc.claims.filter((c) => c.task_id === taskId)) set.add(c.agent_id);
+    const f = join(runDir, 'tasks', taskId, 'task.json');
+    if (existsSync(f)) {
+      for (const a of ((readJsonState(f).doc as { previous_attempts?: Array<{ agent_id: string }> }).previous_attempts ?? [])) {
+        set.add(a.agent_id);
+      }
+    }
+    return set;
+  };
+  const candidate = rows
+    .filter((r) => r.status === 'approved')
+    .filter((r) => !owners(r.task_id).has(agentId))
+    .sort((a, b) => a.task_id.localeCompare(b.task_id))[0];
+  if (!candidate) {
+    return failEnvelope('no_claimable_task', `No approved task is waiting for verification on ${runId}.`, { startedAt });
+  }
+  return okEnvelope({
+    message: `Verify work: ${candidate.task_id} awaits independent verification.`,
+    data: {
+      kind: 'verify_work',
+      task_id: candidate.task_id,
+      evidence_ref: `evidence/${candidate.task_id}/evidence.json`,
+      gates: GATE_KEYS,
+    },
+    nextActions: [
+      `Run the checks yourself, then: sigmarun verify submit ${runId} --agent=${agentId} --verify=<file> (target.kind=task).`,
+    ],
+    startedAt,
+  });
+}
+
+void findActiveClaim;
