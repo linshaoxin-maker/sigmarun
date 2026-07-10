@@ -18,3 +18,5 @@ export type {
 } from './claim-engine.js';
 export { registerWorktree, adoptWorktree } from './worktree.js';
 export type { WorktreeRegisterOptions, WorktreeAdoptOptions } from './worktree.js';
+export { reviewClaim, reviewDecide, resumeTask, synthesizeReview } from './review.js';
+export type { ReviewClaimOptions, ReviewDecideOptions, ResumeOptions } from './review.js';

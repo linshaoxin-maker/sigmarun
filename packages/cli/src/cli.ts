@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { initProject, doctorProject, importRun, publishTasks, runShow, submitEvidence, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
-import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree } from '@sigmarun/dispatch';
+import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, updateRunMemory } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
 import { statusRun, runList, taskShow, evidenceShow, watchOnce } from '@sigmarun/watch';
@@ -19,6 +19,7 @@ const EXIT_BY_CODE: Record<string, number> = {
   path_conflict: 6,
   requires_approval: 6,
   not_claim_owner: 6,
+  self_approval_forbidden: 6,
   run_not_found: 5,
   task_not_found: 5,
   agent_not_registered: 5,
@@ -198,6 +199,37 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     } else {
       env = adoptWorktree({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId });
     }
+  } else if (cmd === 'review' && (args[1] === 'claim' || args[1] === 'approve' || args[1] === 'request-changes')) {
+    const runId = args[2];
+    const taskId = args[3];
+    const agentId = flag(argv, 'agent');
+    if (!runId || !taskId || !agentId) {
+      env = failEnvelope('usage_error', `Usage: sigmarun review ${args[1]} <RUN-ID> <TASK-ID> --agent=<AGENT-ID>${args[1] === 'claim' ? '' : ' --review=<review.json>'} [--json]`);
+    } else if (args[1] === 'claim') {
+      env = reviewClaim({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId });
+    } else {
+      const reviewFile = flag(argv, 'review');
+      if (!reviewFile) {
+        env = failEnvelope('usage_error', 'review approve/request-changes needs --review=<review.json>.');
+      } else {
+        try {
+          const review = JSON.parse(readFileSync(reviewFile, 'utf8'));
+          env = reviewDecide({
+            cwd: opts.cwd, env: opts.env, runId, taskId, agentId,
+            decision: args[1] === 'approve' ? 'approve' : 'request_changes', review,
+          });
+        } catch (e) {
+          env = failEnvelope('schema_invalid', `Review file is not valid JSON: ${String(e)}`);
+        }
+      }
+    }
+  } else if (cmd === 'resume') {
+    const runId = args[1];
+    const taskId = args[2];
+    const agentId = flag(argv, 'agent');
+    env = !runId || !taskId || !agentId
+      ? failEnvelope('usage_error', 'Usage: sigmarun resume <RUN-ID> <TASK-ID> --agent=<AGENT-ID> [--json]')
+      : resumeTask({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId });
   } else if (cmd === 'submit') {
     const runId = args[1];
     const taskId = args[2];

@@ -88,6 +88,12 @@
 - 随做修复：FEAT-004 sweep 半提交隐患（多出口函数"稍后统一保存"教训）；**登记实现债：rev_after（AUD-032 依赖，18 §3 要求写事务事件必带）**。
 - 下一个：**FEAT-009 review gate**（review claim 合成 D15、INV-008 自批禁令、approve/request-changes 回环、changes_requested→working 复活续租，锚 BDD-006 全组）。
 
+## 2026-07-11（FEAT-009 交付）
+
+- **FEAT-009 review gate**：RED 10 → GREEN 159/159（覆盖 90.7%/75.3%）；真机（自批 INV-008 拒、D15 合成、approve 不可变记录、/team-review+/team-status 模板落装）。
+- 闭合 FEAT-007 留口（skip 最小记录）与 FEAT-008 改派（模板补装）；返工环全链（复活→resume→rev 2→round 2）经测试锁定。
+- 下一个：**FEAT-010 verify + integrate + export**（子项 010.1–.3：VERIFY 记录/gates/failures_mapped、拓扑序合并+revert、脱敏阻断式 export，锚 BDD-006-06/07 + BDD-008 全组）。
+
 ## 下一步队列
 
 1. FEAT-009 → FEAT-010 →（P1 首位）FEAT-011；随后收尾轮：rev_after 债（AUD-032）、npm audit 补跑（SCA BLOCKED）、CI 三平台矩阵 + NFR-001 压测、team-status 等其余模板补装、conformance suite。

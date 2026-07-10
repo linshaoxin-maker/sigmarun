@@ -31,6 +31,10 @@ const EVENT_STATUS: Record<string, string> = {
   task_reclaimed: 'ready',
   evidence_submitted: 'submitted',
   review_skipped: 'approved',
+  review_claimed: 'reviewing',
+  review_released: 'submitted',
+  review_approved: 'approved',
+  changes_requested: 'changes_requested',
   task_blocked: 'blocked',
   task_unblocked: 'working',
 };

@@ -348,12 +348,35 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
       payload: { revision, checks_pass_count: passCount, out_of_scope_count: outOfScope.length },
     });
     if (!reviewRequired) {
+      // docs/14 §3.2 skip rule: every approved task still gets a review record — no audit exceptions.
+      const reviewsDir = join(runDir, 'reviews', opts.taskId);
+      mkdirSync(reviewsDir, { recursive: true });
+      const reviewId = `REVIEW-${opts.taskId}-${String(revision).padStart(2, '0')}`;
+      const skipFile = join(reviewsDir, `${reviewId}.json`);
+      if (!existsSync(skipFile)) {
+        writeJsonStateNew(skipFile, {
+          schema_version: 'team.review.v1',
+          review_id: reviewId,
+          run_id: opts.runId,
+          task_id: opts.taskId,
+          round: revision,
+          reviewer_agent_id: null,
+          evidence_revision: revision,
+          started_at: now,
+          completed_at: now,
+          decision: 'skipped_by_policy',
+          checklist: [],
+          findings: [],
+          scope_check: { out_of_scope_files: outOfScope.map((f) => f.path), verdict: outOfScope.length > 0 ? 'warn' : 'pass' },
+          acceptance_opinion: [],
+        });
+      }
       appendEvent(runDir, {
         event: 'review_skipped',
         actor: { type: 'policy', id: 'require_review=false' },
         run_id: opts.runId,
         task_id: opts.taskId,
-        payload: { revision },
+        payload: { revision, review_id: reviewId },
       });
     }
 

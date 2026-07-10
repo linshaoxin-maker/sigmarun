@@ -10,6 +10,7 @@ import {
   type ReasonCode,
   type ResolveOptions,
 } from '@sigmarun/storage';
+import { synthesizeReview } from './review.js';
 import {
   appendEvent,
   failEnvelope,
@@ -546,6 +547,11 @@ export function claimNext(opts: ClaimOptions): Envelope {
       : [];
 
     const role = opts.role ?? (agent.role as string) ?? 'implementer';
+
+    // D15: reviewer/verifier work is synthesized from the submitted/approved queues, not the task list.
+    if (role === 'reviewer' && !opts.taskId) {
+      return synthesizeReview(runDir, runId, opts.agentId, startedAt);
+    }
 
     // Guard #4: candidates. Directed claims answer with the specific guard code (D17).
     if (opts.taskId) {

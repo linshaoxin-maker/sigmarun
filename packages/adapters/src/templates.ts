@@ -188,6 +188,65 @@ Follow exactly the flow below.
 ${DISPATCH_FLOW('codex')}
 `;
 
+const TEAM_REVIEW = `---
+description: Claim and perform an independent review of a submitted Team Run task
+allowed-tools: ["Bash", "Read", "Grep", "Glob"]
+argument-hint: <RUN-ID> [<TASK-ID>] [--as <window-name>]
+---
+${versionHeader}
+
+# Team Review
+
+${RULES_BLOCK}
+
+Required flow:
+1. \`sigmarun run show <RUN-ID> --json\`; stop with next_actions if not ok.
+2. \`sigmarun agent register <RUN-ID> --tool=claude-code --role=reviewer
+   [--label="<window-name from --as>"] --json\`.
+3. Claim: with a TASK-ID use
+   \`sigmarun review claim <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --json\`;
+   without one use \`sigmarun claim-next <RUN-ID> --agent=<AGENT-ID>
+   --role=reviewer --json\` (synthesized review_work, D15).
+   \`self_approval_forbidden\` means you owned this task — report and STOP;
+   never review your own work (RULE 9 / INV-008).
+4. \`sigmarun context hydrate <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --json\`;
+   read the evidence (data.evidence_ref), the diff in the task worktree,
+   and every must_read file.
+5. Review against: acceptance item-by-item, required check outputs,
+   out-of-scope changes, error paths, tests. Build a review JSON file:
+   { "checklist": [...], "findings": [{ "finding_id", "severity",
+     "kind", "file", "message", "must_fix" }], "scope_check": {...},
+     "acceptance_opinion": [...] }.
+6. Decide ONE of:
+   \`sigmarun review approve <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --review=<file> --json\`
+   \`sigmarun review request-changes <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --review=<file> --json\`
+   request-changes requires at least one must_fix finding; the gateway
+   mirrors them into the message pool for the owner automatically.
+7. Report: decision, round, findings summary, and the run's next step.
+`;
+
+const TEAM_STATUS = `---
+description: Show Team Run progress, risks, and the Needs-user list
+allowed-tools: ["Bash", "Read"]
+argument-hint: <RUN-ID>
+---
+${versionHeader}
+
+# Team Status
+
+${RULES_BLOCK}
+
+Required flow:
+1. \`sigmarun status <RUN-ID> --json\`.
+2. Report in the user's language: progress_pct and counts; every risk
+   (stale leases, unresolved blockers); open questions; and the
+   **Needs user** block — list each item with its ready-to-copy command.
+3. Optionally deepen with \`sigmarun audit run <RUN-ID> --json\` (read-only;
+   findings carry rule_id + next_action) and
+   \`sigmarun task show / evidence show\` for specific tasks.
+4. Do NOT claim, submit, or mutate anything from this command.
+`;
+
 /** docs/19 §6 — pasted into repo AGENTS.md between managed markers. */
 export const AGENTS_SECTION = `<!-- sigmarun:adapter-section:begin (managed by sigmarun adapter install) -->
 ## Team Run Protocol (.team/)
@@ -217,6 +276,8 @@ export const TEMPLATES: Record<string, Record<string, string>> = {
     '.claude/commands/team-plan.md': TEAM_PLAN,
     '.claude/commands/team-dispatch.md': TEAM_DISPATCH,
     '.claude/commands/team-publish.md': TEAM_PUBLISH,
+    '.claude/commands/team-review.md': TEAM_REVIEW,
+    '.claude/commands/team-status.md': TEAM_STATUS,
   },
   codex: {
     '.codex/skills/team-run-dispatch/SKILL.md': CODEX_DISPATCH_SKILL,
