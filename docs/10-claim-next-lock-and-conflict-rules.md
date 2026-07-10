@@ -233,6 +233,8 @@ depends_on task status in [done]
 approved / verified / integrated / done
 ```
 
+放宽档的策略字段（FEAT-010 实现期定名回填）：`policy.deps_satisfied_when: string[]`，默认 `["done"]`；BDD-008 的"链上任务先后 verified"旅程即以 `["approved","verified","integrated","done"]` 档达成。
+
 ---
 
 ## 7. Candidate 选择策略
