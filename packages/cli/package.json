@@ -16,6 +16,7 @@
   "dependencies": {
     "@sigmarun/core": "0.1.0",
     "@sigmarun/dispatch": "0.1.0",
-    "@sigmarun/context": "0.1.0"
+    "@sigmarun/context": "0.1.0",
+    "@sigmarun/adapters": "0.1.0"
   }
 }

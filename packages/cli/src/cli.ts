@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
-import { initProject, doctorProject, importRun, publishTasks, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
-import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths } from '@sigmarun/dispatch';
+import { initProject, doctorProject, importRun, publishTasks, runShow, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
+import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, updateRunMemory } from '@sigmarun/context';
+import { installAdapters } from '@sigmarun/adapters';
 
 const EXIT_BY_CODE: Record<string, number> = {
   OK: 0,
@@ -127,6 +128,35 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       env = failEnvelope('usage_error', 'Usage: sigmarun reclaim <RUN-ID> <TASK-ID> [--json]');
     } else {
       env = reclaimTask({ cwd: opts.cwd, env: opts.env, runId, taskId });
+    }
+  } else if (cmd === 'run' && args[1] === 'show') {
+    const runId = args[2];
+    if (!runId) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun run show <RUN-ID> [--json]');
+    } else {
+      env = runShow({ cwd: opts.cwd, env: opts.env, runId });
+    }
+  } else if (cmd === 'worktree' && (args[1] === 'register' || args[1] === 'adopt')) {
+    const runId = args[2];
+    const taskId = args[3];
+    const agentId = flag(argv, 'agent');
+    if (!runId || !taskId || !agentId) {
+      env = failEnvelope('usage_error', `Usage: sigmarun worktree ${args[1]} <RUN-ID> <TASK-ID> --agent=<AGENT-ID>${args[1] === 'register' ? ' --path=<dir> --branch=<team/RUN/TASK-slug>' : ''} [--json]`);
+    } else if (args[1] === 'register') {
+      const path = flag(argv, 'path');
+      const branch = flag(argv, 'branch');
+      env = !path || !branch
+        ? failEnvelope('usage_error', 'worktree register needs both --path and --branch.')
+        : registerWorktree({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, path, branch });
+    } else {
+      env = adoptWorktree({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId });
+    }
+  } else if (cmd === 'adapter' && args[1] === 'install') {
+    const tool = flag(argv, 'tool');
+    if (!tool) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun adapter install --tool=claude-code|codex [--update] [--json]');
+    } else {
+      env = installAdapters({ cwd: opts.cwd, env: opts.env, tool, update: argv.includes('--update') });
     }
   } else if (cmd === 'msg' && args[1] === 'post') {
     const runId = args[2];

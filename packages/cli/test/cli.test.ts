@@ -112,4 +112,22 @@ describe('cli front-end (contract: docs/17 §1/§2.2 — parse, delegate, map ex
     const graph = runCli(['graph', 'validate', 'RUN-0001', '--json'], { cwd: repo });
     expect(graph.exitCode).toBe(0);
   });
+
+  it('run show + adapter install routes (FEAT-006)', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const { writeFileSync, existsSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    writeFileSync(join(repo, 'payload.json'), JSON.stringify(validPayload()));
+    runCli(['run', 'import', join(repo, 'payload.json'), '--json'], { cwd: repo });
+
+    const show = runCli(['run', 'show', 'RUN-0001', '--json'], { cwd: repo });
+    expect(show.exitCode).toBe(0);
+    expect(JSON.parse(show.stdout).data.counts.draft).toBe(2);
+
+    const install = runCli(['adapter', 'install', '--tool=claude-code', '--json'], { cwd: repo });
+    expect(install.exitCode).toBe(0);
+    expect(existsSync(join(repo, '.claude', 'commands', 'team-dispatch.md'))).toBe(true);
+  });
 });

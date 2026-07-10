@@ -70,6 +70,12 @@
 - 实现期修正：task-graph 边字段 `kind`（以 run-import 实写为准）——"跨包消费先读生产方"入知识卡。
 - 下一个：**FEAT-006 dispatch 端到端**（/team-dispatch 编排合同 + worktree register + task→working + 适配器 conformance，锚 UC-003/004 + 19 号）。
 
+## 2026-07-11（FEAT-006 交付）
+
+- **FEAT-006 dispatch 端到端**：第六包 `adapters` 落地；RED 13 → GREEN 117/117（覆盖 92.7%/79.7%）；真机全链（run show→claim→worktree register→working→双工具 adapter install→AGENTS 标记恰一对）。
+- 书面改派：`run show` 自 FEAT-008 提前（dispatch 第 1 步硬依赖）；base_branch 祖先校验随 FEAT-010；submit 步骤为模板前向引用。
+- 下一个：**FEAT-007 evidence 门禁 submit**（14 §2 evidence schema + submit 事务 + handoff 写半场 + context_ack + in_scope minimatch + 脱敏管道升级，锚 BDD-005 全组）。
+
 ## 下一步队列
 
 1. **P5 开工（唯一剩余）**：`git commit` 设计基线（待用户发令）→ 仓库根建 TS monorepo（20 §3 九包）→ FEAT-001 起逐个走 `05-features/FEAT-XXX/`：mvp-scope → **失败测试先行**（BDD/合同用例）→ 最小实现 → verification/self-check/knowledge → 矩阵回填。

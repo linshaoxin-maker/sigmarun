@@ -14,3 +14,5 @@ export { importRun } from './run-import.js';
 export type { ImportOptions } from './run-import.js';
 export { publishTasks, pathsOverlapConservative } from './publish.js';
 export type { PublishOptions } from './publish.js';
+export { runShow } from './run-query.js';
+export type { RunShowOptions } from './run-query.js';

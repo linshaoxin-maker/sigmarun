@@ -64,7 +64,7 @@ interface RunCtx {
   runId: string;
 }
 
-interface TaskRow {
+export interface TaskRow {
   task_id: string;
   title: string;
   type: string;
@@ -78,7 +78,7 @@ interface TaskRow {
   paths: { allow?: string[]; avoid?: string[]; requires_approval?: string[] };
 }
 
-interface TaskClaim {
+export interface TaskClaim {
   claim_id: string;
   task_id: string;
   agent_id: string;
@@ -110,7 +110,7 @@ interface RunPolicy {
   reclaim_policy?: { auto_after_ttl_multiple?: number };
 }
 
-function openRun(opts: ResolveOptions & { runId: string }): RunCtx | GatewayError {
+export function openRun(opts: ResolveOptions & { runId: string }): RunCtx | GatewayError {
   const resolved = (() => {
     try {
       return resolveTeamRoot(opts);
@@ -127,18 +127,18 @@ function openRun(opts: ResolveOptions & { runId: string }): RunCtx | GatewayErro
 }
 
 /** Read a mutable JSON state file, falling back to a default doc when absent (first write creates it). */
-function readOrDefault(file: string, def: Record<string, unknown>): { doc: Record<string, unknown>; rev: number | null } {
+export function readOrDefault(file: string, def: Record<string, unknown>): { doc: Record<string, unknown>; rev: number | null } {
   if (!existsSync(file)) return { doc: def, rev: null };
   const { doc, rev } = readJsonState(file);
   return { doc: doc as Record<string, unknown>, rev };
 }
 
-function saveState(file: string, doc: Record<string, unknown>, rev: number | null): void {
+export function saveState(file: string, doc: Record<string, unknown>, rev: number | null): void {
   if (rev === null) writeJsonStateNew(file, doc);
   else writeJsonStateAtomic(file, doc, { expectedRev: rev });
 }
 
-const ACTIVE = (c: { status: string }) => c.status === 'active';
+export const ACTIVE = (c: { status: string }) => c.status === 'active';
 
 function slugify(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'task';
@@ -232,12 +232,12 @@ export function registerAgent(opts: RegisterOptions): Envelope {
 
 // ---------- claim-next (BR-001 guards, docs/10) ----------
 
-interface ClaimStores {
+export interface ClaimStores {
   taskClaims: { doc: { claims: TaskClaim[] } & Record<string, unknown>; rev: number | null; file: string };
   pathClaims: { doc: { claims: PathClaim[] } & Record<string, unknown>; rev: number | null; file: string };
 }
 
-function loadClaims(runDir: string, runId: string): ClaimStores {
+export function loadClaims(runDir: string, runId: string): ClaimStores {
   const claimsDir = join(runDir, 'claims');
   mkdirSync(claimsDir, { recursive: true });
   const tf = join(claimsDir, 'task-claims.json');
@@ -304,6 +304,23 @@ function applyReclaim(
     pc.status = terminal;
     releasedPathIds.push(pc.claim_id);
   }
+  // docs/16 §3.5: the worktree survives a release/reclaim — entry goes abandoned, owner moves to history.
+  const wtFile = join(runDir, 'worktrees.json');
+  let abandonedWt: { path?: string; branch?: string } = {};
+  if (existsSync(wtFile)) {
+    const wt = readJsonState(wtFile);
+    const entries = (wt.doc as { entries?: Array<Record<string, unknown>> }).entries ?? [];
+    const entry = entries.find((e) => e.task_id === claim.task_id && e.status === 'active');
+    if (entry) {
+      entry.status = 'abandoned';
+      const history = (entry.previous_owner_agent_ids as string[] | undefined) ?? [];
+      if (entry.owner_agent_id) history.push(entry.owner_agent_id as string);
+      entry.previous_owner_agent_ids = history;
+      entry.owner_agent_id = null;
+      abandonedWt = { path: entry.path as string, branch: entry.branch as string };
+      writeJsonStateAtomic(wtFile, wt.doc as Record<string, unknown>, { expectedRev: wt.rev });
+    }
+  }
   const tdoc = task.doc as Record<string, unknown>;
   tdoc.status = 'ready';
   const attempts = (tdoc.previous_attempts as Array<Record<string, unknown>> | undefined) ?? [];
@@ -314,6 +331,7 @@ function applyReclaim(
     last_heartbeat_at: claim.last_heartbeat_at,
     ended_at: now,
     reclaim_reason: how.reason,
+    ...(abandonedWt.path ? { worktree_path: abandonedWt.path, branch: abandonedWt.branch } : {}),
   });
   tdoc.previous_attempts = attempts;
   writeJsonStateAtomic(join(runDir, 'tasks', claim.task_id, 'task.json'), tdoc, { expectedRev: task.rev });
@@ -670,7 +688,7 @@ export function claimNext(opts: ClaimOptions): Envelope {
 // ---------- heartbeat / release / reclaim ----------
 
 /** Locate the active claim for (task, agent-optional); shared guard for lease commands. */
-function findActiveClaim(
+export function findActiveClaim(
   stores: ClaimStores,
   taskId: string,
   agentId?: string,
@@ -688,7 +706,7 @@ function findActiveClaim(
   return { claim };
 }
 
-function withRunLock(
+export function withRunLock(
   opts: ResolveOptions & { runId: string },
   startedAt: number,
   body: (runDir: string, runId: string) => Envelope,
