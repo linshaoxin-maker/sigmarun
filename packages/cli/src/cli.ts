@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { initProject, doctorProject, importRun, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
+import { initProject, doctorProject, importRun, publishTasks, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
 
 const EXIT_BY_CODE: Record<string, number> = {
   OK: 0,
@@ -8,6 +8,10 @@ const EXIT_BY_CODE: Record<string, number> = {
   schema_invalid: 4,
   rev_conflict: 6,
   duplicate_payload: 6,
+  cross_run_conflict: 6,
+  run_not_found: 5,
+  task_not_found: 5,
+  run_not_active: 7,
   not_a_git_repo: 8,
   bare_repo_unsupported: 8,
   team_root_not_found: 8,
@@ -44,6 +48,15 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     env = initProject({ cwd: opts.cwd, env: opts.env });
   } else if (cmd === 'doctor') {
     env = doctorProject({ cwd: opts.cwd, env: opts.env });
+  } else if (cmd === 'task' && args[1] === 'publish') {
+    const runId = args[2];
+    if (!runId) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun task publish <RUN-ID> [--tasks=TASK-0001,...] [--force] [--json]');
+    } else {
+      const tasksFlag = argv.find((a) => a.startsWith('--tasks='));
+      const taskIds = tasksFlag ? tasksFlag.slice('--tasks='.length).split(',').filter(Boolean) : undefined;
+      env = publishTasks({ cwd: opts.cwd, env: opts.env, runId, taskIds, force });
+    }
   } else if (cmd === 'run' && args[1] === 'import') {
     const file = args[2];
     if (!file) {

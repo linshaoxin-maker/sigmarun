@@ -12,3 +12,5 @@ export { validatePayload, payloadHash, PayloadSchema, TASK_TYPES } from './paylo
 export type { PlanPayload, ValidationIssue, ValidationWarning } from './payload.js';
 export { importRun } from './run-import.js';
 export type { ImportOptions } from './run-import.js';
+export { publishTasks, pathsOverlapConservative } from './publish.js';
+export type { PublishOptions } from './publish.js';

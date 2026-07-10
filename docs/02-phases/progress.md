@@ -52,6 +52,12 @@
 - 书面 scope cut：`initial_status: ready` 降级 draft + 警告，待 FEAT-003。
 - 下一个：**FEAT-003 publish**（draft→ready、run 激活、D18 跨 run 检查，锚 BDD-002-01…04）。
 
+## 2026-07-10（FEAT-003 交付）
+
+- **FEAT-003 publish**：RED 8 → GREEN 60/60（覆盖 93.5%/80.5%）；真机冒烟含幂等；D18 warn/block 双策略 + 零变更断言；FEAT-002 的 ready 降级警告文案改指向本命令（scope cut 收敛为"publish 永远显式"的既定语义）。
+- 书面留待 FEAT-004：BDD-002-02 claim 拒绝半场、minimatch 级重叠判定（当前为 10 §8.2 保守前缀法）。
+- 下一个：**FEAT-004 claim-next + 锁 + 回收**（DAG 最重一环：认领守卫 BR-001、租约/心跳捎带、3×TTL sweep、previous_attempts、AUD-001/002 inline，锚 BDD-003 全组 + BDD-007-02/03）。
+
 ## 下一步队列
 
 1. **P5 开工（唯一剩余）**：`git commit` 设计基线（待用户发令）→ 仓库根建 TS monorepo（20 §3 九包）→ FEAT-001 起逐个走 `05-features/FEAT-XXX/`：mvp-scope → **失败测试先行**（BDD/合同用例）→ 最小实现 → verification/self-check/knowledge → 矩阵回填。

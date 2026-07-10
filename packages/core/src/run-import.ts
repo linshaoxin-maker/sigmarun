@@ -101,7 +101,7 @@ export function importRun(opts: ImportOptions): Envelope {
     const publication = payload.publication ?? {};
     const moreWarnings: EnvelopeWarning[] = [...warnings];
     if (publication.initial_status === 'ready') {
-      moreWarnings.push({ code: 'publication_downgraded', message: 'initial_status "ready" downgraded to "draft"; publish lands with FEAT-003.' });
+      moreWarnings.push({ code: 'publication_downgraded', message: 'initial_status "ready" downgraded to "draft"; publishing is an explicit user action: sigmarun task publish <RUN-ID>.' });
     }
 
     const keyToId = new Map<string, string>();

@@ -9,6 +9,10 @@ export type ReasonCode =
   | 'schema_invalid'
   | 'duplicate_payload'
   | 'lock_timeout'
+  | 'run_not_found'
+  | 'task_not_found'
+  | 'run_not_active'
+  | 'cross_run_conflict'
   | 'io_error';
 
 /** Internal error carrying a contract reason code (docs/17 §3); converted to an envelope at the primitive layer (docs/20 §3 R2). */
