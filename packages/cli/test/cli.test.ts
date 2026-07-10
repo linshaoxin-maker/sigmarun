@@ -35,4 +35,24 @@ describe('cli front-end (contract: docs/17 §1/§2.2 — parse, delegate, map ex
     expect(r.exitCode).toBe(8);
     expect(JSON.parse(r.stdout).code).toBe('not_a_git_repo');
   });
+
+  it('run import <file> --json imports and exits 0 (FEAT-002)', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const { writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    const f = join(repo, 'payload.json');
+    writeFileSync(f, JSON.stringify(validPayload()));
+    const r = runCli(['run', 'import', f, '--json'], { cwd: repo });
+    expect(r.exitCode).toBe(0);
+    expect(JSON.parse(r.stdout).data.run_id).toBe('RUN-0001');
+  });
+
+  it('run import without a file argument is a usage error', () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    const r = runCli(['run', 'import', '--json'], { cwd: repo });
+    expect(r.exitCode).toBe(2);
+    expect(JSON.parse(r.stdout).code).toBe('usage_error');
+  });
 });

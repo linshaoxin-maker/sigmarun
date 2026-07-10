@@ -135,6 +135,7 @@
 | `invalid_transition` | 状态机拒绝（含执行者身份不符） | 状态类命令 | 当前状态 + 合法转换列表 |
 | `evidence_invalid` | evidence 校验失败 | submit | 逐条缺失项（[14](14-evidence-review-verification-contract.md) §2.3） |
 | `memory_entry_invalid` | L4 晋升条目非法（无 refs / refs 失效 / 命中 secret / supersedes 悬空） | memory promote | [25](25-project-memory-and-knowledge-promotion.md) §4/§6 |
+| `duplicate_payload` | 计划指纹与既有 run 相同（D17 防重；exit 6 冲突类；FEAT-002 实现期 backflow 补入） | run import | 查看既有 run / `--force` 显式越过 |
 | `self_approval_forbidden` | reviewer 是历任 owner | review claim/approve | 换 reviewer 提示 |
 | `schema_invalid` / `unsupported_schema_version` | 输入或存量文件版本问题；后者 `data.kind` ∈ `gateway_too_old` / `migration_required` / `unknown_major`（[21](21-schema-versioning-and-migration.md) §4.1） | import、全部读 | 升级/迁移指引（[21](21-schema-versioning-and-migration.md)） |
 | `not_a_git_repo` / `bare_repo_unsupported` / `team_root_not_found` | 环境问题 | 全部 | `team doctor` |

@@ -3,27 +3,13 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, writeFileSy
 import { dirname, join, resolve } from 'node:path';
 import { realpathSync } from 'node:fs';
 
-export type ReasonCode =
-  | 'OK'
-  | 'usage_error'
-  | 'not_a_git_repo'
-  | 'bare_repo_unsupported'
-  | 'team_root_not_found'
-  | 'rev_conflict'
-  | 'unsupported_schema_version'
-  | 'io_error';
-
-/** Internal error carrying a contract reason code (docs/17 §3); converted to an envelope at the primitive layer (docs/20 §3 R2). */
-export class GatewayError extends Error {
-  constructor(
-    public readonly code: ReasonCode,
-    message: string,
-    public readonly detail?: Record<string, unknown>,
-  ) {
-    super(message);
-    this.name = 'GatewayError';
-  }
-}
+export { GatewayError } from './errors.js';
+export type { ReasonCode } from './errors.js';
+export { acquireLock } from './lock.js';
+export type { LockOptions } from './lock.js';
+export { scanForSecrets, SECRET_PATTERNS } from './redaction.js';
+export type { SecretHit } from './redaction.js';
+import { GatewayError } from './errors.js';
 
 export interface TeamRootResolution {
   repoRoot: string;

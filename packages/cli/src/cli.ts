@@ -1,10 +1,13 @@
-import { initProject, doctorProject, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
+import { readFileSync } from 'node:fs';
+import { initProject, doctorProject, importRun, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
 
 const EXIT_BY_CODE: Record<string, number> = {
   OK: 0,
   usage_error: 2,
   lock_timeout: 3,
+  schema_invalid: 4,
   rev_conflict: 6,
+  duplicate_payload: 6,
   not_a_git_repo: 8,
   bare_repo_unsupported: 8,
   team_root_not_found: 8,
@@ -33,18 +36,28 @@ function render(env: Envelope, json: boolean): string {
  */
 export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string, string | undefined> } = {}): CliResult {
   const json = argv.includes('--json');
-  const args = argv.filter((a) => a !== '--json');
+  const force = argv.includes('--force');
+  const args = argv.filter((a) => !a.startsWith('--'));
   const cmd = args[0];
   let env: Envelope;
-  switch (cmd) {
-    case 'init':
-      env = initProject({ cwd: opts.cwd, env: opts.env });
-      break;
-    case 'doctor':
-      env = doctorProject({ cwd: opts.cwd, env: opts.env });
-      break;
-    default:
-      env = failEnvelope('usage_error', `Unknown command: ${cmd ?? '(none)'}`);
+  if (cmd === 'init') {
+    env = initProject({ cwd: opts.cwd, env: opts.env });
+  } else if (cmd === 'doctor') {
+    env = doctorProject({ cwd: opts.cwd, env: opts.env });
+  } else if (cmd === 'run' && args[1] === 'import') {
+    const file = args[2];
+    if (!file) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun run import <payload.json> [--force] [--json]');
+    } else {
+      try {
+        const payload = JSON.parse(readFileSync(file, 'utf8'));
+        env = importRun({ cwd: opts.cwd, env: opts.env, payload, force });
+      } catch (e) {
+        env = failEnvelope('schema_invalid', `Payload file is not valid JSON: ${String(e)}`);
+      }
+    }
+  } else {
+    env = failEnvelope('usage_error', `Unknown command: ${cmd ?? '(none)'}`);
   }
   return { exitCode: EXIT_BY_CODE[env.code] ?? 1, stdout: render(env, json) };
 }

@@ -44,6 +44,14 @@
 - **FEAT-001 交付**（完整两阶段）：测试先行（RED 6/6 → GREEN 25/25，覆盖 91%/73%）→ init/doctor + envelope + team-root + 原子写/rev → 真机冒烟 → verification（G5 全表：13 PASS、3 N/A、SCA BLOCKED 留痕）→ 知识沉淀与矩阵回填 → commit（Refs: FEAT-001）。
 - 残余：CI 工具化（P1）、npm audit 补跑、worktree 警告分支随 FEAT-004。
 
+## 2026-07-10（FEAT-002 交付）
+
+- **FEAT-002 plan 导入**完整两阶段：RED 26 → GREEN 52/52（覆盖 93.8%/80.8%）；真机冒烟含 dedup；G5 全表（G5-4 回归=FEAT-001 25 用例持续绿）。
+- **合同 backflow**：`duplicate_payload` reason code 实现期定名，回填 17 §3 / 09 §6（规则 3 显式处理）。
+- 新增基元：mkdir 锁（超时/接管）、secret 模式集（warn-only，FEAT-007 升级为替换管道）、events 写入器（seq/提交点）。
+- 书面 scope cut：`initial_status: ready` 降级 draft + 警告，待 FEAT-003。
+- 下一个：**FEAT-003 publish**（draft→ready、run 激活、D18 跨 run 检查，锚 BDD-002-01…04）。
+
 ## 下一步队列
 
 1. **P5 开工（唯一剩余）**：`git commit` 设计基线（待用户发令）→ 仓库根建 TS monorepo（20 §3 九包）→ FEAT-001 起逐个走 `05-features/FEAT-XXX/`：mvp-scope → **失败测试先行**（BDD/合同用例）→ 最小实现 → verification/self-check/knowledge → 矩阵回填。
