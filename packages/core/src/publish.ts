@@ -2,7 +2,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   GatewayError,
-  acquireLock,
+  tryAcquireLock,
+  runLockPath,
   readJsonState,
   resolveTeamRoot,
   writeJsonStateAtomic,
@@ -77,11 +78,9 @@ export function publishTasks(opts: PublishOptions): Envelope {
     return failEnvelope('run_not_found', `Run not found: ${opts.runId}`, { startedAt });
   }
 
-  const release = (() => {
-    try {
-      return acquireLock(join(runDir, 'locks', 'run.lock'), { timeoutMs: 5000, staleMs: 30_000 });
-    } catch (e) { return e as GatewayError; }
-  })();
+  // Canonical run lock — publish previously locked runDir/locks/run.lock and was
+  // not mutually exclusive with claim/submit/heartbeat on the same run (review finding #1).
+  const release = tryAcquireLock(runLockPath(runDir));
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   try {

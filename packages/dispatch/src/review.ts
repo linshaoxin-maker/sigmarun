@@ -40,7 +40,7 @@ function loadReviewClaims(runDir: string, runId: string) {
 }
 
 /** All agents that ever owned the task: current/former claims + previous_attempts (INV-008 surface). */
-function historicalOwners(runDir: string, taskId: string, stores: ClaimStores): Set<string> {
+export function historicalOwners(runDir: string, taskId: string, stores: ClaimStores): Set<string> {
   const owners = new Set<string>();
   for (const c of stores.taskClaims.doc.claims.filter((c) => c.task_id === taskId)) owners.add(c.agent_id);
   const taskFile = join(runDir, 'tasks', taskId, 'task.json');
@@ -56,10 +56,14 @@ function evidenceRevision(runDir: string, taskId: string): number {
   return existsSync(f) ? Number((readJsonState(f).doc as { revision?: number }).revision ?? 1) : 1;
 }
 
-/** Lazy sweep for expired review leases: claim released, task back to submitted (BDD-006-05). */
+/**
+ * Lazy sweep for expired review leases: claim released, task back to submitted (BDD-006-05).
+ * Persists review-claims.json ITSELF and appends events only after that write — a caller's
+ * guard-failure return must never leave the release half-committed (review finding #3).
+ */
 function sweepReviewClaims(runDir: string, runId: string, rc: ReturnType<typeof loadReviewClaims>): number {
   const now = Date.now();
-  let swept = 0;
+  const released: ReviewClaim[] = [];
   for (const claim of rc.doc.claims.filter((c) => c.status === 'active' && now > Date.parse(c.lease_until))) {
     claim.status = 'released';
     const taskFile = join(runDir, 'tasks', claim.task_id, 'task.json');
@@ -77,17 +81,23 @@ function sweepReviewClaims(runDir: string, runId: string, rc: ReturnType<typeof 
         }
       }
     }
-    appendEvent(runDir, {
-      event: 'review_released',
-      actor: { type: 'sweep', id: 'sweep' },
-      run_id: runId,
-      task_id: claim.task_id,
-      claim_id: claim.claim_id,
-      payload: {},
-    });
-    swept++;
+    released.push(claim);
   }
-  return swept;
+  if (released.length > 0) {
+    saveState(rc.file, rc.doc, rc.rev);
+    rc.rev = (rc.rev ?? 0) + 1;
+    for (const claim of released) {
+      appendEvent(runDir, {
+        event: 'review_released',
+        actor: { type: 'sweep', id: 'sweep' },
+        run_id: runId,
+        task_id: claim.task_id,
+        claim_id: claim.claim_id,
+        payload: {},
+      });
+    }
+  }
+  return released.length;
 }
 
 interface GrantResult {

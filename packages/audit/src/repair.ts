@@ -2,13 +2,14 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import {
   GatewayError,
-  acquireLock,
+  tryAcquireLock,
+  runLockPath,
   readJsonState,
   resolveTeamRoot,
   writeJsonStateAtomic,
   type ResolveOptions,
 } from '@sigmarun/storage';
-import { appendEvent, failEnvelope, okEnvelope, type Envelope } from '@sigmarun/core';
+import { appendEvent, failEnvelope, okEnvelope, readEventsSafe, type Envelope } from '@sigmarun/core';
 
 export interface RepairOptions extends ResolveOptions {
   runId: string;
@@ -35,6 +36,8 @@ const EVENT_STATUS: Record<string, string> = {
   review_released: 'submitted',
   review_approved: 'approved',
   changes_requested: 'changes_requested',
+  verification_passed: 'verified',
+  task_integrated: 'integrated',
   task_blocked: 'blocked',
   task_unblocked: 'working',
 };
@@ -57,26 +60,19 @@ export function repairRun(opts: RepairOptions): Envelope {
     return failEnvelope('run_not_found', `Run ${opts.runId} does not exist under .team/runs/.`, { startedAt });
   }
 
-  const release = (() => {
-    try {
-      return acquireLock(join(runDir, 'run.lock'));
-    } catch (err) {
-      return err as GatewayError;
-    }
-  })();
+  const release = tryAcquireLock(runLockPath(runDir));
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   try {
-    const eventsFile = join(runDir, 'events.jsonl');
-    const events = existsSync(eventsFile)
-      ? readFileSync(eventsFile, 'utf8').trim().split('\n').filter(Boolean).map(
-          (l) => JSON.parse(l) as { seq: number; event: string; task_id?: string; actor?: { id: string }; claim_id?: string },
-        )
-      : [];
+    const safe = readEventsSafe(runDir);
+    const events = safe.events as Array<{ seq: number; event: string; task_id?: string; actor?: { id: string }; claim_id?: string; payload?: Record<string, unknown> }>;
 
     // ----- plan (dry) -----
     const plan: RepairAction[] = [];
     const findings: string[] = [];
+    for (const line of safe.corrupt_lines) {
+      findings.push(`events.jsonl line ${line} is unparseable (torn write?) — repair skipped it; restore or truncate manually.`);
+    }
 
     const metaFile = join(runDir, 'events.meta.json');
     const maxSeq = events.length > 0 ? events[events.length - 1]!.seq : 0;
@@ -87,11 +83,20 @@ export function repairRun(opts: RepairOptions): Envelope {
 
     const ledger = new Map<string, { status: string; owner: string | null; claim: string | null }>();
     for (const e of events) {
+      // Run-level verification failures name their tasks in payload.failures_mapped, not task_id.
+      if (e.event === 'verification_failed') {
+        const mappedIds = (e.payload?.failures_mapped as string[] | undefined) ?? (e.task_id ? [e.task_id] : []);
+        for (const id of mappedIds) {
+          const prev = ledger.get(id);
+          ledger.set(id, { status: 'changes_requested', owner: prev?.owner ?? null, claim: prev?.claim ?? null });
+        }
+        continue;
+      }
       const status = EVENT_STATUS[e.event];
       if (!status || !e.task_id) continue;
       const owner = ['task_claimed', 'task_started'].includes(e.event) ? (e.actor?.id ?? null) : null;
       const claim = ['task_claimed', 'task_started'].includes(e.event) ? (e.claim_id ?? null) : null;
-      const keepOwner = ['evidence_submitted', 'review_skipped', 'task_blocked', 'task_unblocked'].includes(e.event);
+      const keepOwner = ['evidence_submitted', 'review_skipped', 'review_claimed', 'review_released', 'review_approved', 'verification_passed', 'task_integrated', 'task_blocked', 'task_unblocked'].includes(e.event);
       const prev = ledger.get(e.task_id);
       ledger.set(e.task_id, {
         status,

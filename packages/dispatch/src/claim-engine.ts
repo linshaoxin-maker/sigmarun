@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   GatewayError,
-  acquireLock,
+  tryAcquireLock,
+  runLockPath,
   readJsonState,
   resolveTeamRoot,
   writeJsonStateAtomic,
@@ -19,6 +20,7 @@ import {
   pathsOverlapConservative,
   type Envelope,
   type EventActor,
+  type EventInput,
 } from '@sigmarun/core';
 
 export interface RegisterOptions extends ResolveOptions {
@@ -158,13 +160,7 @@ export function registerAgent(opts: RegisterOptions): Envelope {
   const agentsDir = join(runDir, 'agents');
   mkdirSync(agentsDir, { recursive: true });
 
-  const release = (() => {
-    try {
-      return acquireLock(join(runDir, 'run.lock'));
-    } catch (err) {
-      return err as GatewayError;
-    }
-  })();
+  const release = tryAcquireLock(runLockPath(runDir));
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   try {
@@ -256,6 +252,7 @@ export function loadClaims(runDir: string, runId: string): ClaimStores {
 
 interface SweepResult {
   reclaimed: Array<{ task_id: string; claim_id: string; agent_id: string }>;
+  events: EventInput[];
 }
 
 /** Lazy 3xTTL sweep (D9/BR-004): runs inside the claim transaction; blocked tasks are exempt (AUD-003). */
@@ -270,7 +267,7 @@ function sweepExpired(
   const ttlMs = policy.claim_ttl_minutes * 60_000;
   const multiple = policy.reclaim_policy?.auto_after_ttl_multiple ?? 3;
   const now = Date.now();
-  const result: SweepResult = { reclaimed: [] };
+  const result: SweepResult = { reclaimed: [], events: [] };
   for (const claim of stores.taskClaims.doc.claims.filter(ACTIVE)) {
     const deadline = Date.parse(claim.lease_until) + (multiple - 1) * ttlMs;
     if (now <= deadline) continue;
@@ -278,17 +275,21 @@ function sweepExpired(
     const taskFile = join(runDir, 'tasks', claim.task_id, 'task.json');
     const task = readJsonState(taskFile);
     if ((task.doc as { status: string }).status === 'blocked') continue;
-    applyReclaim(runDir, runId, stores, row, claim, task, {
+    result.events.push(applyReclaim(runDir, runId, stores, row, claim, task, {
       reason: 'stale_lease_auto',
       actor: { type: 'sweep', id: 'sweep' },
       triggeredBy,
-    });
+    }));
     result.reclaimed.push({ task_id: claim.task_id, claim_id: claim.claim_id, agent_id: claim.agent_id });
   }
   return result;
 }
 
-/** Shared release/reclaim state flip: claim terminal status + task back to ready + previous_attempts. */
+/**
+ * Shared release/reclaim state flip: claim terminal status + task back to ready + previous_attempts.
+ * Returns the ledger event WITHOUT appending it — the caller appends after persisting the claims/list
+ * files, keeping "events.jsonl last = commit point" true (docs/17 §5.3; review finding #5).
+ */
 function applyReclaim(
   runDir: string,
   runId: string,
@@ -297,7 +298,7 @@ function applyReclaim(
   claim: TaskClaim,
   task: { doc: unknown; rev: number },
   how: { reason: string; actor: EventActor; triggeredBy?: string; terminal?: string },
-): void {
+): EventInput {
   const now = new Date().toISOString();
   const terminal = how.terminal ?? 'reclaimed';
   claim.status = terminal;
@@ -345,7 +346,7 @@ function applyReclaim(
     row.claim_id = null;
   }
   const eventName = terminal === 'released' ? 'task_released' : 'task_reclaimed';
-  appendEvent(runDir, {
+  return {
     event: eventName,
     actor: how.actor,
     run_id: runId,
@@ -355,7 +356,7 @@ function applyReclaim(
       terminal === 'released'
         ? { attempt: claim.attempt, released_claim_ids: [claim.claim_id, ...releasedPathIds], reason: how.reason }
         : { reclaim_reason: how.reason, triggered_by: how.triggeredBy ?? null },
-  });
+  };
 }
 
 /** Save claim stores + task list after a sweep and keep the in-memory revs usable for later writes. */
@@ -364,12 +365,13 @@ function persistSweep(
   listFile: string,
   list: { doc: unknown; rev: number },
 ): void {
+  // docs/17 §5.3 order: index -> claims (details were written inside applyReclaim); events follow at the caller.
+  writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
+  list.rev += 1;
   saveState(stores.taskClaims.file, stores.taskClaims.doc, stores.taskClaims.rev);
   stores.taskClaims.rev = (stores.taskClaims.rev ?? 0) + 1;
   saveState(stores.pathClaims.file, stores.pathClaims.doc, stores.pathClaims.rev);
   stores.pathClaims.rev = (stores.pathClaims.rev ?? 0) + 1;
-  writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
-  list.rev += 1;
 }
 
 /** Standalone sweep tick — the same code path claim-next uses (docs/17 §7 watch loop body). */
@@ -391,7 +393,10 @@ export function sweepRun(opts: ResolveOptions & { runId: string; triggeredBy?: s
     const rows = (list.doc as { tasks: TaskRow[] }).tasks;
     const stores = loadClaims(runDir, runId);
     const swept = sweepExpired(runDir, runId, stores, rows, policy, opts.triggeredBy ?? 'watch');
-    if (swept.reclaimed.length > 0) persistSweep(stores, listFile, list);
+    if (swept.reclaimed.length > 0) {
+      persistSweep(stores, listFile, list);
+      for (const e of swept.events) appendEvent(runDir, e);
+    }
     return okEnvelope({
       message: `Sweep on ${runId}: ${swept.reclaimed.length} claim(s) reclaimed.`,
       data: { reclaimed: swept.reclaimed },
@@ -479,13 +484,7 @@ export function claimNext(opts: ClaimOptions): Envelope {
   if (ctx instanceof GatewayError) return failEnvelope(ctx.code, ctx.message, { startedAt });
   const { runDir, runId } = ctx;
 
-  const release = (() => {
-    try {
-      return acquireLock(join(runDir, 'run.lock'));
-    } catch (err) {
-      return err as GatewayError;
-    }
-  })();
+  const release = tryAcquireLock(runLockPath(runDir));
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   try {
@@ -530,9 +529,12 @@ export function claimNext(opts: ClaimOptions): Envelope {
 
     // Lazy sweep before limits so a dead claim does not wedge the queue (D9).
     const swept = sweepExpired(runDir, runId, stores, rows, policy, opts.agentId);
-    // Persist sweep mutations immediately: a later guard failure must not leave
-    // task.json/events reclaimed while the claims/list files still say active.
-    if (swept.reclaimed.length > 0) persistSweep(stores, listFile, list);
+    // Persist sweep mutations immediately (a later guard failure must not leave half-commits),
+    // then append the reclaim events — events.jsonl stays the commit point (docs/17 §5.3).
+    if (swept.reclaimed.length > 0) {
+      persistSweep(stores, listFile, list);
+      for (const e of swept.events) appendEvent(runDir, e);
+    }
 
     // Guard #3: per-agent cap (M36/D17).
     const mine = stores.taskClaims.doc.claims.filter((c) => c.agent_id === opts.agentId && ACTIVE(c));
@@ -583,6 +585,15 @@ export function claimNext(opts: ClaimOptions): Envelope {
           data: { candidate_task_id: row.task_id, ...(failure.data ?? {}) },
           startedAt,
         });
+      }
+      // Guard #9 applies to directed claims too — BR-001 row 9 is run-wide (review finding #7).
+      const directedActive = stores.taskClaims.doc.claims.filter(ACTIVE).length;
+      if (directedActive >= policy.max_parallel_tasks) {
+        return failEnvelope(
+          'parallel_limit_reached',
+          `Run ${runId} already has ${directedActive} active claims (limit ${policy.max_parallel_tasks}).`,
+          { startedAt },
+        );
       }
       return finishClaim(row);
     }
@@ -771,13 +782,7 @@ export function withRunLock(
 ): Envelope {
   const ctx = openRun(opts);
   if (ctx instanceof GatewayError) return failEnvelope(ctx.code, ctx.message, { startedAt });
-  const release = (() => {
-    try {
-      return acquireLock(join(ctx.runDir, 'run.lock'));
-    } catch (err) {
-      return err as GatewayError;
-    }
-  })();
+  const release = tryAcquireLock(runLockPath(ctx.runDir));
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
   try {
     return body(ctx.runDir, ctx.runId);
@@ -838,20 +843,22 @@ export function releaseTask(opts: ReleaseOptions): Envelope {
     const list = readJsonState(listFile);
     const row = (list.doc as { tasks: TaskRow[] }).tasks.find((r) => r.task_id === opts.taskId);
     const task = readJsonState(join(runDir, 'tasks', opts.taskId, 'task.json'));
-    applyReclaim(runDir, runId, stores, row, found.claim, task, {
+    const releaseEvent = applyReclaim(runDir, runId, stores, row, found.claim, task, {
       reason: opts.reason ?? 'released_by_owner',
       actor: { type: 'agent', id: opts.agentId },
       terminal: 'released',
     });
+    // docs/17 §5.3: index -> claims -> event; the append is the commit point.
+    writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
     saveState(stores.taskClaims.file, stores.taskClaims.doc, stores.taskClaims.rev);
     saveState(stores.pathClaims.file, stores.pathClaims.doc, stores.pathClaims.rev);
-    writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
     const agentFile = join(runDir, 'agents', `${opts.agentId}.json`);
     if (existsSync(agentFile)) {
       const agent = readJsonState(agentFile);
       (agent.doc as Record<string, unknown>).current_task_id = null;
       writeJsonStateAtomic(agentFile, agent.doc as Record<string, unknown>, { expectedRev: agent.rev });
     }
+    appendEvent(runDir, releaseEvent);
     return okEnvelope({
       message: `Released ${opts.taskId}; it is claimable again.`,
       data: { task_id: opts.taskId, claim_id: found.claim.claim_id },
@@ -877,13 +884,15 @@ export function reclaimTask(opts: ReclaimOptions): Envelope {
     const list = readJsonState(listFile);
     const row = (list.doc as { tasks: TaskRow[] }).tasks.find((r) => r.task_id === opts.taskId);
     const task = readJsonState(join(runDir, 'tasks', opts.taskId, 'task.json'));
-    applyReclaim(runDir, runId, stores, row, found.claim, task, {
+    const reclaimEvent = applyReclaim(runDir, runId, stores, row, found.claim, task, {
       reason: 'stale_lease_manual',
       actor: { type: 'user', id: 'user' },
     });
+    // docs/17 §5.3: index -> claims -> event; the append is the commit point.
+    writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
     saveState(stores.taskClaims.file, stores.taskClaims.doc, stores.taskClaims.rev);
     saveState(stores.pathClaims.file, stores.pathClaims.doc, stores.pathClaims.rev);
-    writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
+    appendEvent(runDir, reclaimEvent);
     return okEnvelope({
       message: `Reclaimed ${opts.taskId} from ${found.claim.agent_id}; progress kept in previous_attempts.`,
       data: { task_id: opts.taskId, claim_id: found.claim.claim_id, previous_agent: found.claim.agent_id },

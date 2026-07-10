@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJsonState, redactText, writeJsonStateAtomic, writeJsonStateNew, type ResolveOptions } from '@sigmarun/storage';
-import { appendEvent, failEnvelope, okEnvelope, type Envelope } from '@sigmarun/core';
-import { findActiveClaim, loadClaims, withRunLock, type ClaimStores, type TaskRow } from './claim-engine.js';
+import { appendEvent, failEnvelope, okEnvelope, truncateOutput, type Envelope } from '@sigmarun/core';
+import { loadClaims, withRunLock, type ClaimStores, type TaskRow } from './claim-engine.js';
+import { historicalOwners } from './review.js';
 
 export interface VerifyOptions extends ResolveOptions {
   runId: string;
@@ -21,10 +22,16 @@ interface VerifyDraft {
 
 const GATE_KEYS = ['build', 'focused_tests', 'regression_tests', 'scope_check', 'evidence_complete'];
 
-/** Flip a task back to changes_requested and revive its owner claim (shared by review/verify fail paths). */
-export function mapTaskToRework(runDir: string, runId: string, taskId: string, stores: ClaimStores): void {
+/** Statuses a run-level verification failure may legitimately map back to rework (docs/16 §4.1 node J). */
+const REVERTIBLE = new Set(['approved', 'verified', 'integrated']);
+
+/**
+ * Flip a task back to changes_requested and revive its owner claim (shared by review/verify fail paths).
+ * Returns true when an owner claim was revived — the caller persists the claims file only then.
+ */
+export function mapTaskToRework(runDir: string, runId: string, taskId: string, stores: ClaimStores): boolean {
   const taskFile = join(runDir, 'tasks', taskId, 'task.json');
-  if (!existsSync(taskFile)) return;
+  if (!existsSync(taskFile)) return false;
   const task = readJsonState(taskFile);
   (task.doc as { status: string }).status = 'changes_requested';
   writeJsonStateAtomic(taskFile, task.doc as Record<string, unknown>, { expectedRev: task.rev });
@@ -38,16 +45,26 @@ export function mapTaskToRework(runDir: string, runId: string, taskId: string, s
     const run = readJsonState(join(runDir, 'run.json')).doc as { default_policy?: { claim_ttl_minutes?: number } };
     owner.status = 'active';
     owner.lease_until = new Date(Date.now() + (run.default_policy?.claim_ttl_minutes ?? 30) * 60_000).toISOString();
+    return true;
   }
+  return false;
 }
 
 /**
  * Verify submission (docs/14 §4): the agent executed the checks; the gateway validates structure,
  * persists the record, and drives approved -> verified / changes_requested (D11 boundary).
+ * Independence is enforced inline: a historical owner cannot verify their own task (INV-008 family;
+ * review finding #4 — previously only the claim-next synthesis filtered owners).
  */
 export function verifySubmit(opts: VerifyOptions): Envelope {
   const startedAt = Date.now();
   return withRunLock(opts, startedAt, (runDir, runId) => {
+    if (!existsSync(join(runDir, 'agents', `${opts.agentId}.json`))) {
+      return failEnvelope('agent_not_registered', `Agent ${opts.agentId} is not registered on ${runId}.`, {
+        nextActions: [`Register first: sigmarun agent register ${runId} --tool=<tool> --label=<window>`],
+        startedAt,
+      });
+    }
     let draft: VerifyDraft;
     try {
       draft = JSON.parse(readFileSync(opts.verifyPath, 'utf8')) as VerifyDraft;
@@ -77,20 +94,40 @@ export function verifySubmit(opts: VerifyOptions): Envelope {
     if (verdict !== 'pass' && verdict !== 'fail') errors.push('verdict must be pass or fail');
     const nonSkippedAllPass = GATE_KEYS.every((k) => gates[k] === 'skipped' || gates[k] === 'pass');
     if (verdict === 'pass' && !nonSkippedAllPass) errors.push('verdict pass requires every non-skipped gate to pass (14 §4 rule 4)');
-    if (kind === 'run' && verdict === 'fail' && (draft.failures_mapped ?? []).length === 0) {
-      errors.push('run-level fail must map failures back to task ids (failures_mapped)');
+
+    const stores = loadClaims(runDir, runId);
+    // Run-level failure mapping is validated BEFORE any write: mapped ids must exist and be in a
+    // revertible state — no phantom ids, no silent flips of never-verified tasks (review finding #6).
+    const mapped = kind === 'task' ? (taskId ? [taskId] : []) : (draft.failures_mapped ?? []);
+    if (kind === 'run' && verdict === 'fail') {
+      if (mapped.length === 0) errors.push('run-level fail must map failures back to task ids (failures_mapped)');
+      for (const t of mapped) {
+        const f = join(runDir, 'tasks', t, 'task.json');
+        if (!existsSync(f)) {
+          errors.push(`failures_mapped: task ${t} does not exist`);
+          continue;
+        }
+        const st = (readJsonState(f).doc as { status: string }).status;
+        if (!REVERTIBLE.has(st)) errors.push(`failures_mapped: task ${t} is ${st}; only approved/verified/integrated can be mapped to rework`);
+      }
     }
     if (errors.length > 0) {
       return failEnvelope('schema_invalid', `Verify draft failed ${errors.length} mechanical check(s).`, { data: { errors }, startedAt });
     }
 
-    const stores = loadClaims(runDir, runId);
     if (kind === 'task') {
       const taskFile = join(runDir, 'tasks', taskId!, 'task.json');
       if (!existsSync(taskFile)) return failEnvelope('task_not_found', `Task ${taskId} does not exist on ${runId}.`, { startedAt });
       const status = (readJsonState(taskFile).doc as { status: string }).status;
       if (status !== 'approved') {
         return failEnvelope('invalid_transition', `Task ${taskId} is ${status}; verification targets approved tasks.`, { startedAt });
+      }
+      if (historicalOwners(runDir, taskId!, stores).has(opts.agentId)) {
+        return failEnvelope(
+          'self_approval_forbidden',
+          `Agent ${opts.agentId} owned ${taskId} at some point; independent verification forbids verifying your own work (INV-008).`,
+          { startedAt },
+        );
       }
     }
 
@@ -105,11 +142,15 @@ export function verifySubmit(opts: VerifyOptions): Envelope {
 
     const canonicalChecks = checks.map((c, i) => {
       let outputRef: string | null = null;
+      let truncated = false;
       if (c.output_file && existsSync(c.output_file)) {
+        // Same cut-then-redact pipeline as evidence outputs (D8; review finding: unbounded verify logs).
+        const cut = truncateOutput(readFileSync(c.output_file, 'utf8'));
+        truncated = cut.truncated;
         outputRef = `outputs/${verifyId}-${String(i + 1).padStart(2, '0')}.log`;
-        writeFileSync(join(verDir, outputRef), redactText(readFileSync(c.output_file, 'utf8')).text, 'utf8');
+        writeFileSync(join(verDir, outputRef), redactText(cut.text).text, 'utf8');
       }
-      return { name: c.name, cmd: c.cmd, exit_code: c.exit_code, output_ref: outputRef, status: c.status };
+      return { name: c.name, cmd: c.cmd, exit_code: c.exit_code, output_ref: outputRef, output_truncated: truncated, status: c.status };
     });
 
     writeJsonStateNew(join(verDir, `${verifyId}.json`), {
@@ -161,20 +202,16 @@ export function verifySubmit(opts: VerifyOptions): Envelope {
       });
     }
 
-    const mapped = kind === 'task' ? [taskId!] : (draft.failures_mapped ?? []);
-    for (const t of mapped) mapTaskToRework(runDir, runId, t, stores);
-    if (mapped.length > 0) {
-      const { saveState } = { saveState: null as never };
-      void saveState;
-    }
-    // persist any claim revivals
-    if (stores.taskClaims.rev !== null) {
+    let revived = false;
+    for (const t of mapped) revived = mapTaskToRework(runDir, runId, t, stores) || revived;
+    if (revived && stores.taskClaims.rev !== null) {
       writeJsonStateAtomic(stores.taskClaims.file, stores.taskClaims.doc, { expectedRev: stores.taskClaims.rev });
     }
     appendEvent(runDir, {
       event: 'verification_failed',
       actor: { type: 'agent', id: opts.agentId },
       run_id: runId,
+      ...(kind === 'task' && taskId ? { task_id: taskId } : {}),
       payload: { verify_id: verifyId, failures_mapped: mapped },
     });
     return okEnvelope({
@@ -189,20 +226,9 @@ export function verifySubmit(opts: VerifyOptions): Envelope {
 export function synthesizeVerify(runDir: string, runId: string, agentId: string, startedAt: number): Envelope {
   const rows = (readJsonState(join(runDir, 'team-task-list.json')).doc as { tasks: TaskRow[] }).tasks;
   const stores = loadClaims(runDir, runId);
-  const owners = (taskId: string): Set<string> => {
-    const set = new Set<string>();
-    for (const c of stores.taskClaims.doc.claims.filter((c) => c.task_id === taskId)) set.add(c.agent_id);
-    const f = join(runDir, 'tasks', taskId, 'task.json');
-    if (existsSync(f)) {
-      for (const a of ((readJsonState(f).doc as { previous_attempts?: Array<{ agent_id: string }> }).previous_attempts ?? [])) {
-        set.add(a.agent_id);
-      }
-    }
-    return set;
-  };
   const candidate = rows
     .filter((r) => r.status === 'approved')
-    .filter((r) => !owners(r.task_id).has(agentId))
+    .filter((r) => !historicalOwners(runDir, r.task_id, stores).has(agentId))
     .sort((a, b) => a.task_id.localeCompare(b.task_id))[0];
   if (!candidate) {
     return failEnvelope('no_claimable_task', `No approved task is waiting for verification on ${runId}.`, { startedAt });
@@ -221,5 +247,3 @@ export function synthesizeVerify(runDir: string, runId: string, agentId: string,
     startedAt,
   });
 }
-
-void findActiveClaim;

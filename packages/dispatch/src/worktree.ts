@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJsonState, writeJsonStateAtomic, type ResolveOptions } from '@sigmarun/storage';
 import { appendEvent, failEnvelope, okEnvelope, type Envelope } from '@sigmarun/core';
-import { ACTIVE, findActiveClaim, loadClaims, readOrDefault, saveState, withRunLock, type TaskRow } from './claim-engine.js';
+import { findActiveClaim, loadClaims, readOrDefault, saveState, withRunLock, type TaskRow } from './claim-engine.js';
 
 export interface WorktreeRegisterOptions extends ResolveOptions {
   runId: string;
@@ -187,5 +187,3 @@ export function adoptWorktree(opts: WorktreeAdoptOptions): Envelope {
   });
 }
 
-/** keep TaskRow/ACTIVE imports referenced for isolatedModules-friendly builds */
-void ACTIVE;

@@ -2,7 +2,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeF
 import { join } from 'node:path';
 import {
   GatewayError,
-  acquireLock,
+  tryAcquireLock,
+  runLockPath,
   readJsonState,
   resolveTeamRoot,
   scanForSecrets,
@@ -133,13 +134,7 @@ export function postMessage(opts: PostMessageOptions): Envelope {
     });
   }
 
-  const release = (() => {
-    try {
-      return acquireLock(join(runDir, 'run.lock'));
-    } catch (err) {
-      return err as GatewayError;
-    }
-  })();
+  const release = tryAcquireLock(runLockPath(runDir));
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   try {
@@ -256,13 +251,7 @@ export function hydrateContext(opts: HydrateOptions): Envelope {
   for (const g of task.paths?.avoid ?? []) risks.push(`Avoid ${g} (declared avoid path).`);
   for (const g of task.paths?.requires_approval ?? []) risks.push(`${g} requires approval before changes (run: sigmarun approve-paths).`);
 
-  const release = (() => {
-    try {
-      return acquireLock(join(runDir, 'run.lock'));
-    } catch (err) {
-      return err as GatewayError;
-    }
-  })();
+  const release = tryAcquireLock(runLockPath(runDir));
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
   try {
     appendEvent(runDir, {

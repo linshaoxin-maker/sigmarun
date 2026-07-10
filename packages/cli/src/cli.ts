@@ -164,10 +164,15 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     } else {
       // looped mode: synchronous ticks until the run is terminal (D14 passive CLI — no daemon)
       const intervalSec = Number(flag(argv, 'interval') ?? 30);
-      env = watchOnce({ cwd: opts.cwd, env: opts.env, runId, force: argv.includes('--force') });
-      while (env.ok && !(env.data as { terminal?: boolean }).terminal) {
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(5, intervalSec) * 1000);
-        env = watchOnce({ cwd: opts.cwd, env: opts.env, runId, force: true });
+      if (!Number.isFinite(intervalSec) || intervalSec <= 0) {
+        // NaN would coerce Atomics.wait's timeout to +Infinity and hang forever (review finding #10)
+        env = failEnvelope('usage_error', `--interval must be a positive number of seconds, got "${flag(argv, 'interval')}".`);
+      } else {
+        env = watchOnce({ cwd: opts.cwd, env: opts.env, runId, force: argv.includes('--force') });
+        while (env.ok && !(env.data as { terminal?: boolean }).terminal) {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(5, intervalSec) * 1000);
+          env = watchOnce({ cwd: opts.cwd, env: opts.env, runId, force: true });
+        }
       }
     }
   } else if (cmd === 'audit' && args[1] === 'run') {

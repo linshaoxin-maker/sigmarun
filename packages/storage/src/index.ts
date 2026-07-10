@@ -5,7 +5,7 @@ import { realpathSync } from 'node:fs';
 
 export { GatewayError } from './errors.js';
 export type { ReasonCode } from './errors.js';
-export { acquireLock } from './lock.js';
+export { acquireLock, tryAcquireLock, runLockPath } from './lock.js';
 export type { LockOptions } from './lock.js';
 export { scanForSecrets, redactText, SECRET_PATTERNS } from './redaction.js';
 export type { SecretHit } from './redaction.js';

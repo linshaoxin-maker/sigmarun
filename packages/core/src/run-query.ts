@@ -37,7 +37,7 @@ export function runShow(opts: RunShowOptions): Envelope {
           mode: run.mode,
           goal: run.goal,
           base_branch: run.base_branch,
-          policy: run.policy,
+          policy: run.default_policy,
         },
         tasks: list.tasks.map((t) => ({
           task_id: t.task_id,

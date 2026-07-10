@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFile
 import { dirname, join, resolve } from 'node:path';
 import {
   GatewayError,
-  acquireLock,
+  tryAcquireLock,
   readJsonState,
   resolveTeamRoot,
   scanForSecrets,
@@ -108,13 +108,7 @@ export function promoteMemory(opts: PromoteOptions): Envelope {
   })();
   if (ignored) return invalid(`${memRel} is gitignored; project memory must be git-tracked (docs/25 §3.1).`, startedAt);
 
-  const release = (() => {
-    try {
-      return acquireLock(join(teamRoot, 'locks', 'project.lock'), { timeoutMs: 5000, staleMs: 30_000 });
-    } catch (err) {
-      return err as GatewayError;
-    }
-  })();
+  const release = tryAcquireLock(join(teamRoot, 'locks', 'project.lock'));
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   try {

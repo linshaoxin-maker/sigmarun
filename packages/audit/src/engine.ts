@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { GatewayError, readJsonState, resolveTeamRoot, type ResolveOptions } from '@sigmarun/storage';
-import { failEnvelope, fileInScope, okEnvelope, pathsOverlapConservative, type Envelope } from '@sigmarun/core';
+import { failEnvelope, fileInScope, okEnvelope, pathsOverlapConservative, readEventsSafe, type Envelope } from '@sigmarun/core';
 
 export interface AuditOptions extends ResolveOptions {
   runId: string;
@@ -467,12 +467,9 @@ export function auditRun(opts: AuditOptions): Envelope {
     const f = join(runDir, rel);
     return existsSync(f) ? ((readJsonState(f).doc as { claims: T[] }).claims ?? []) : [];
   };
-  const eventsFile = join(runDir, 'events.jsonl');
-  const readEvents = () =>
-    existsSync(eventsFile)
-      ? readFileSync(eventsFile, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as { seq: number; event: string })
-      : [];
-  const events = readEvents();
+  const readEvents = () => readEventsSafe(runDir);
+  const safe = readEvents();
+  const events = safe.events as Array<{ seq: number; event: string }>;
   const snapshotSeq = events.length > 0 ? events[events.length - 1]!.seq : 0;
 
   const detailCache = new Map<string, Record<string, unknown> | null>();
@@ -503,6 +500,12 @@ export function auditRun(opts: AuditOptions): Envelope {
   };
 
   const findings: Finding[] = [];
+  if (safe.corrupt_lines.length > 0) {
+    findings.push(
+      finding('AUD-033', 'error', `events.jsonl has ${safe.corrupt_lines.length} unparseable line(s) at ${safe.corrupt_lines.join(', ')} (torn write or tampering).`,
+        `Run sigmarun repair ${opts.runId}; if the tail line is torn, restore it from the backup or truncate it manually.`, []),
+    );
+  }
   const rulesRun: string[] = [];
   for (const rule of RULES) {
     rulesRun.push(rule.id);
@@ -513,8 +516,8 @@ export function auditRun(opts: AuditOptions): Envelope {
     }
   }
 
-  const after = readEvents();
-  const concurrent = (after.length > 0 ? after[after.length - 1]!.seq : 0) !== snapshotSeq;
+  const after = readEvents().events;
+  const concurrent = (after.length > 0 ? (after[after.length - 1]! as { seq: number }).seq : 0) !== snapshotSeq;
   const errors = findings.filter((f) => f.severity === 'error').length;
   return okEnvelope({
     message: `Audit of ${opts.runId} (snapshot seq ${snapshotSeq}): ${findings.length} finding(s) — ${errors} error, ${findings.length - errors} warn; ${rulesRun.length} rule(s) run, ${SKIPPED.length} skipped.`,

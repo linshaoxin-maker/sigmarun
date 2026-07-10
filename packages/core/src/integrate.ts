@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   GatewayError,
-  acquireLock,
+  tryAcquireLock,
+  runLockPath,
   readJsonState,
   resolveTeamRoot,
   writeJsonStateAtomic,
@@ -10,7 +11,7 @@ import {
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope } from './envelope.js';
-import { appendEvent } from './events.js';
+import { appendEvent, readEventsSafe } from './events.js';
 
 export interface IntegrateStartOptions extends ResolveOptions {
   runId: string;
@@ -43,13 +44,7 @@ function withLock(opts: ResolveOptions & { runId: string }, startedAt: number, b
   if (!existsSync(join(runDir, 'run.json'))) {
     return failEnvelope('run_not_found', `Run ${opts.runId} does not exist under .team/runs/.`, { startedAt });
   }
-  const release = (() => {
-    try {
-      return acquireLock(join(runDir, 'run.lock'));
-    } catch (err) {
-      return err as GatewayError;
-    }
-  })();
+  const release = tryAcquireLock(runLockPath(runDir));
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
   try {
     return body(runDir);
@@ -208,8 +203,9 @@ export function integrateRecord(opts: IntegrateRecordOptions): Envelope {
           (c) => c.task_id === opts.taskId && c.status === 'submitted',
         );
         if (owner) {
+          const runPolicy = readJsonState(join(runDir, 'run.json')).doc as { default_policy?: { claim_ttl_minutes?: number } };
           owner.status = 'active';
-          owner.lease_until = new Date(Date.now() + 30 * 60_000).toISOString();
+          owner.lease_until = new Date(Date.now() + (runPolicy.default_policy?.claim_ttl_minutes ?? 30) * 60_000).toISOString();
           writeJsonStateAtomic(claimsFile, claims.doc as Record<string, unknown>, { expectedRev: claims.rev });
         }
       }
@@ -278,7 +274,7 @@ export function reportRun(opts: IntegrateStartOptions): Envelope {
       return failEnvelope('invalid_transition', `${remaining.length} verified task(s) still await integrate record: ${remaining.map((r) => r.task_id).join(', ')}.`, { startedAt });
     }
 
-    const events = readFileSync(join(runDir, 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { event: string; task_id?: string; payload?: Record<string, unknown> });
+    const events = readEventsSafe(runDir).events;
     const integrated = events.filter((e) => e.event === 'task_integrated');
     const reverted = events.filter((e) => e.event === 'verification_failed' && e.payload?.reason);
     const integrationMd = [

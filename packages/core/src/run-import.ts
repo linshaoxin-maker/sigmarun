@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import {
   GatewayError,
-  acquireLock,
+  tryAcquireLock,
   readJsonState,
   resolveTeamRoot,
   writeJsonStateAtomic,
@@ -77,13 +77,7 @@ export function importRun(opts: ImportOptions): Envelope {
     }
   }
 
-  const release = (() => {
-    try {
-      return acquireLock(join(root.teamRoot, 'locks', 'project.lock'), { timeoutMs: 5000, staleMs: 30_000 });
-    } catch (e) {
-      return e as GatewayError;
-    }
-  })();
+  const release = tryAcquireLock(join(root.teamRoot, 'locks', 'project.lock'));
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   let runDir = '';

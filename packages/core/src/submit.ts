@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { minimatch } from 'minimatch';
 import {
   GatewayError,
-  acquireLock,
+  tryAcquireLock,
+  runLockPath,
   readJsonState,
   redactText,
   resolveTeamRoot,
@@ -12,7 +13,7 @@ import {
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope, type EnvelopeWarning } from './envelope.js';
-import { appendEvent } from './events.js';
+import { appendEvent, readEventsSafe } from './events.js';
 
 export interface SubmitOptions extends ResolveOptions {
   runId: string;
@@ -53,7 +54,7 @@ const HEAD_LINES = 50;
 const TAIL_LINES = 200;
 const MAX_BYTES = 256 * 1024;
 
-function truncateOutput(raw: string): { text: string; truncated: boolean } {
+export function truncateOutput(raw: string): { text: string; truncated: boolean } {
   const lines = raw.split('\n');
   let text = raw;
   let truncated = false;
@@ -91,13 +92,7 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
     return failEnvelope('task_not_found', `Task ${opts.taskId} does not exist on ${opts.runId}.`, { startedAt });
   }
 
-  const release = (() => {
-    try {
-      return acquireLock(join(runDir, 'run.lock'));
-    } catch (err) {
-      return err as GatewayError;
-    }
-  })();
+  const release = tryAcquireLock(runLockPath(runDir));
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   try {
@@ -223,15 +218,9 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
     }
 
     // AUD-028 half: reconcile context_ack against the latest hydrate must_read.
-    const eventsFile = join(runDir, 'events.jsonl');
-    const hydrated = existsSync(eventsFile)
-      ? readFileSync(eventsFile, 'utf8')
-          .trim()
-          .split('\n')
-          .map((l) => JSON.parse(l) as { event: string; task_id?: string; payload?: { must_read?: string[] } })
-          .filter((e) => e.event === 'context_hydrated' && e.task_id === opts.taskId)
-          .pop()
-      : undefined;
+    const hydrated = readEventsSafe(runDir)
+      .events.filter((e) => e.event === 'context_hydrated' && e.task_id === opts.taskId)
+      .pop() as { payload?: { must_read?: string[] } } | undefined;
     if (hydrated?.payload?.must_read) {
       const acked = new Set(draft.context_ack ?? []);
       const missing = hydrated.payload.must_read.filter((m) => !acked.has(m));

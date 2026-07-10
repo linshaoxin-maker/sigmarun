@@ -40,3 +40,39 @@ export function appendEvent(runDir: string, evt: EventInput): number {
   writeFileSync(metaFile, JSON.stringify({ next_seq: seq + 1 }));
   return seq;
 }
+
+export interface LedgerEvent {
+  seq: number;
+  event: string;
+  task_id?: string;
+  claim_id?: string;
+  actor?: { type: string; id: string };
+  payload?: Record<string, unknown>;
+  [k: string]: unknown;
+}
+
+export interface SafeEvents {
+  events: LedgerEvent[];
+  /** 1-based line numbers that failed to parse (torn tail line after ENOSPC/power loss). */
+  corrupt_lines: number[];
+}
+
+/**
+ * Tolerant ledger reader: a torn line must degrade to a finding, never crash the reader —
+ * submit, report, audit AND repair all parse this file (review finding #9).
+ */
+export function readEventsSafe(runDir: string): SafeEvents {
+  const file = join(runDir, 'events.jsonl');
+  const out: SafeEvents = { events: [], corrupt_lines: [] };
+  if (!existsSync(file)) return out;
+  const lines = readFileSync(file, 'utf8').split('\n');
+  lines.forEach((line, i) => {
+    if (line.trim() === '') return;
+    try {
+      out.events.push(JSON.parse(line) as LedgerEvent);
+    } catch {
+      out.corrupt_lines.push(i + 1);
+    }
+  });
+  return out;
+}

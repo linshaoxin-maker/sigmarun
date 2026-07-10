@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 审查修复轮：全量 8 角度审查（43 候选 → 16 验证 → 14 成立）后修复 14 项——publish 锁路径统一（互斥恢复）、repair 重放表补 verified/integrated（修复工具不再损坏健康 run）、review sweep 半提交、verify 独立性守卫（作者不可自验）、applyReclaim 提交点次序、failures_mapped 守卫、定向领取并行上限、memory promote 双锁与路径逃逸、events.jsonl 容错读取（readEventsSafe）、watch NaN 挂起、run show 策略字段、integrate 租约策略化、verify 输出截断；storage 新增 tryAcquireLock/runLockPath 收敛 11 处锁样板。测试 192/192（+12 回归锁）。详见 docs/02-phases/code-review-2026-07-11.md。
+
 - FEAT-011 project memory promote（L4，**P4 特性全集收官**）：`memory promote`（refs 必填可解析（INV-012 项目级）、secret 拒收、MEM 项目级编号、出处戳、--supersedes 移入 Superseded 区留痕、memory_promoted/superseded 事件、三层出库防线）、`memory candidates`（只列不选）；audit 补 AUD-036…040；status 超限风险；doctor 补 project_memory_committable。测试 180/180，覆盖 89.4%/73.2%。（Refs: FEAT-011）
 
 - FEAT-010 verify + integrate + export（**MVP 主链闭合**）：`verify submit`（14 §4 结构校验、task/run 双目标、失败映射返工）、`claim-next --role=verifier` 合成、`integrate start/record`（拓扑序下发、gateway 不碰 git、--failed 单点回退不卡全局、path claim hold 终点释放）、`report`（integration.md+report.md、run→reported、不合 main）、`export`（阻断式脱敏归档，`export_redaction_hit` 即中止零写入）；依赖门策略位 `deps_satisfied_when`（10 §6 放宽档）。测试 172/172，覆盖 89.7%/73.5%。（Refs: FEAT-010）

@@ -107,7 +107,13 @@
 - 八包 · 180 用例 · 11 FEAT · 11 次原子提交（Refs 链完整）。
 - **收尾轮待办**（优先序）：① rev_after 债（AUD-032 解锁）② 回填批（10 §6 deps_satisfied_when、04 §1.1 命令面对齐 resume/verify submit/integrate record/memory candidates 等实现期定名）③ SCA 补跑 ④ CI 三平台 + NFR-001 压测 ⑤ review block/task 级 review.required ⑥ team-integrate/team-verify/team-tasks/team-task/team-evidence/team-submit/team-runs 模板余量 + Codex skills 三件 ⑦ conformance suite（19 §9/M38）。
 
+## 2026-07-11（全量审查 + 修复轮）
+
+- **审查**：8 查找角度扫 `faafeae...HEAD` 全量（9591 行）→ 43 候选 → 16 条对抗验证 → 14 成立（4 条重伤：publish 锁路径互斥失效、repair 重放表损坏健康 run、review sweep 半提交、verify 可自验）/ 2 驳回（含 15 §2.4 paused 期回收属设计）。
+- **修复**：14 项全修 + 12 回归锁；storage 收敛 `tryAcquireLock`/`runLockPath`（锁样板 11 处漂移根因）；core 新增 `readEventsSafe`（账本容错读）。192/192 绿、build 0、真机冒烟过。记录：[code-review-2026-07-11.md](code-review-2026-07-11.md)。
+- 登记收尾轮卫生项：grantReviewClaim/reviewDecide 内 claims-先于-详情 写序、效率三候选（audit evidence 缓存/synthesizeReview 预建 owners Map/repair 批量 meta 写）、worktree 正则转义。
+
 ## 下一步队列
 
-1. 收尾轮（上表 ①–⑦，按序）；完成后 22 号 §MVP 打包面（npm 发布物）评估。
+1. 收尾轮（原 ①–⑦ + 上表卫生项，按序）；完成后 22 号 §MVP 打包面（npm 发布物）评估。
 2. 沿途维护：ASM-004/005/006 按期限确认；backflow 事件显式标注。

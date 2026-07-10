@@ -16,6 +16,24 @@ function sleepSync(ms: number): void {
  * mkdir-based advisory lock.
  * @contract docs/17 §4 — exponential backoff, total timeout -> lock_timeout; stale takeover: seize first, record after.
  */
+/**
+ * Non-throwing acquire: the single entry point transactions should use.
+ * One helper instead of eleven hand-rolled try/catch IIFEs — the copies had
+ * already drifted (publish locked a different path than every other run mutator).
+ */
+export function tryAcquireLock(lockDir: string, opts: LockOptions = {}): (() => void) | GatewayError {
+  try {
+    return acquireLock(lockDir, opts);
+  } catch (err) {
+    return err as GatewayError;
+  }
+}
+
+/** Canonical run-transaction lock path: <runDir>/run.lock — every run mutator must use this. */
+export function runLockPath(runDir: string): string {
+  return join(runDir, 'run.lock');
+}
+
 export function acquireLock(lockDir: string, opts: LockOptions = {}): () => void {
   const timeoutMs = opts.timeoutMs ?? 5000;
   const staleMs = opts.staleMs ?? 30_000;
