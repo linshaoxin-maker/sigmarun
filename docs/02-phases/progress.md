@@ -101,7 +101,13 @@
 - 十包监控：storage/core/dispatch/context/adapters/watch/audit/cli 八包 + 172 用例全绿。
 - 下一个：**FEAT-011 project memory promote（L4，P1 首位）**；其后收尾轮（rev_after 债、SCA、CI、模板余量、conformance、回填批）。
 
+## 2026-07-11（FEAT-011 交付 · **P4 特性全集 FEAT-001…011 交付完毕**）
+
+- **FEAT-011 L4 memory promote**：GREEN 180/180（覆盖 89.4%/73.2%）；真机五步（decision→candidates→promote→拒收→doctor）。audit 覆盖推进：SKIPPED 仅剩 rev_after（AUD-032）与重放（AUD-034）。
+- 八包 · 180 用例 · 11 FEAT · 11 次原子提交（Refs 链完整）。
+- **收尾轮待办**（优先序）：① rev_after 债（AUD-032 解锁）② 回填批（10 §6 deps_satisfied_when、04 §1.1 命令面对齐 resume/verify submit/integrate record/memory candidates 等实现期定名）③ SCA 补跑 ④ CI 三平台 + NFR-001 压测 ⑤ review block/task 级 review.required ⑥ team-integrate/team-verify/team-tasks/team-task/team-evidence/team-submit/team-runs 模板余量 + Codex skills 三件 ⑦ conformance suite（19 §9/M38）。
+
 ## 下一步队列
 
-1. FEAT-009 → FEAT-010 →（P1 首位）FEAT-011；随后收尾轮：rev_after 债（AUD-032）、npm audit 补跑（SCA BLOCKED）、CI 三平台矩阵 + NFR-001 压测、team-status 等其余模板补装、conformance suite。
+1. 收尾轮（上表 ①–⑦，按序）；完成后 22 号 §MVP 打包面（npm 发布物）评估。
 2. 沿途维护：ASM-004/005/006 按期限确认；backflow 事件显式标注。

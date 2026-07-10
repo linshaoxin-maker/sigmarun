@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- FEAT-011 project memory promote（L4，**P4 特性全集收官**）：`memory promote`（refs 必填可解析（INV-012 项目级）、secret 拒收、MEM 项目级编号、出处戳、--supersedes 移入 Superseded 区留痕、memory_promoted/superseded 事件、三层出库防线）、`memory candidates`（只列不选）；audit 补 AUD-036…040；status 超限风险；doctor 补 project_memory_committable。测试 180/180，覆盖 89.4%/73.2%。（Refs: FEAT-011）
+
 - FEAT-010 verify + integrate + export（**MVP 主链闭合**）：`verify submit`（14 §4 结构校验、task/run 双目标、失败映射返工）、`claim-next --role=verifier` 合成、`integrate start/record`（拓扑序下发、gateway 不碰 git、--failed 单点回退不卡全局、path claim hold 终点释放）、`report`（integration.md+report.md、run→reported、不合 main）、`export`（阻断式脱敏归档，`export_redaction_hit` 即中止零写入）；依赖门策略位 `deps_satisfied_when`（10 §6 放宽档）。测试 172/172，覆盖 89.7%/73.5%。（Refs: FEAT-010）
 
 - FEAT-009 review gate：`review claim/approve/request-changes` + `resume`（14 §3 全节：INV-008 自批双点拦截（含 previous_attempts 历任 owner）、D15 `claim-next --role=reviewer` 合成 review_work、20 分钟评审租约 + 惰性回收、must_fix 镜像 message pool 回链、owner claim 原地复活返工环、REVIEW 每轮新文件、require_review=false 的 skipped_by_policy 最小记录）；adapter 补 /team-review、/team-status。测试 159/159，覆盖 90.7%/75.3%。（Refs: FEAT-009）

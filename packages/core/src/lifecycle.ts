@@ -145,6 +145,32 @@ export function doctorProject(opts: ResolveOptions = {}): Envelope {
       : `tracked .team files found; run: git rm -r --cached .team/ (AUD-030). Files: ${tracked.split('\n').length}`,
   );
 
+  // docs/25 §6: the L4 memory path must stay committable — a gitignored path defeats promotion.
+  if (initialized) {
+    const memRel = (() => {
+      try {
+        return ((JSON.parse(readFileSync(join(root.teamRoot, 'project.json'), 'utf8')) as { project_memory_path?: string })
+          .project_memory_path) ?? 'docs/team/MEMORY.md';
+      } catch {
+        return 'docs/team/MEMORY.md';
+      }
+    })();
+    let memIgnored = false;
+    try {
+      execSync(`git check-ignore -q ${JSON.stringify(memRel)}`, { cwd: root.repoRoot });
+      memIgnored = true;
+    } catch {
+      memIgnored = false;
+    }
+    add(
+      'project_memory_committable',
+      memIgnored ? 'fail' : 'pass',
+      memIgnored
+        ? `${memRel} is covered by .gitignore; project memory must be git-tracked (docs/25 §3.1)`
+        : `${memRel} is committable`,
+    );
+  }
+
   if (initialized) {
     for (const [name, file, schema, object] of [
       ['project_schema', 'project.json', ProjectSchema, 'project'],

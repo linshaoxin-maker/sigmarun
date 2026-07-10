@@ -48,10 +48,6 @@ const SKIPPED: Array<{ rule_id: string; reason: string }> = [
   })),
   { rule_id: 'AUD-032', reason: 'rev_after is not yet emitted by write transactions (implementation debt, backlog)' },
   { rule_id: 'AUD-034', reason: 'event replay engine is a P1 item' },
-  ...['AUD-036', 'AUD-037', 'AUD-038', 'AUD-039', 'AUD-040'].map((r) => ({
-    rule_id: r,
-    reason: 'L4 project memory plane lands with FEAT-011',
-  })),
 ];
 
 type Rule = { id: string; check: (ctx: Ctx) => Finding[] };
@@ -362,6 +358,92 @@ const RULES: Rule[] = [
     },
   },
 ];
+
+/** Locate the L4 project memory file (docs/25 §3.1); null when it does not exist yet. */
+function memoryFile(ctx: Ctx): { path: string; rel: string; text: string } | null {
+  const project = readJsonState(join(ctx.runDir, '..', '..', 'project.json')).doc as { project_memory_path?: string };
+  const rel = project.project_memory_path ?? 'docs/team/MEMORY.md';
+  const path = join(ctx.repoRoot, rel);
+  if (!existsSync(path)) return null;
+  return { path, rel, text: readFileSync(path, 'utf8') };
+}
+
+const MEMORY_RULES: Rule[] = [
+  {
+    id: 'AUD-036',
+    check: (ctx) => {
+      const mem = memoryFile(ctx);
+      if (!mem) return [];
+      const out: Finding[] = [];
+      const lines = mem.text.split('\n');
+      lines.forEach((l, i) => {
+        const m = /^- \[(MEM-\d{4})\]/.exec(l);
+        if (m && !(lines[i + 1] ?? '').trim().startsWith('⟨')) {
+          out.push(finding('AUD-036', 'error', `${m[1]} has no provenance stamp (INV-012 project level).`,
+            'Re-establish it via sigmarun memory promote --supersedes, or delete the line.', [m[1]!]));
+        }
+      });
+      return out;
+    },
+  },
+  {
+    id: 'AUD-037',
+    check: (ctx) => {
+      const mem = memoryFile(ctx);
+      if (!mem) return [];
+      const lines = mem.text.split('\n').length;
+      const kb = Buffer.byteLength(mem.text, 'utf8') / 1024;
+      return lines > 200 || kb > 25
+        ? [finding('AUD-037', 'warn', `Project memory oversize (${lines} lines / ${kb.toFixed(1)}KB; limits 200/25KB).`,
+            'Merge or retire entries via --supersedes (they move to the Superseded section).', [mem.rel])]
+        : [];
+    },
+  },
+  {
+    id: 'AUD-038',
+    check: (ctx) => {
+      const mem = memoryFile(ctx);
+      if (!mem) return [];
+      const ids = new Set([...mem.text.matchAll(/^- \[(MEM-\d{4})\]/gm)].map((m) => m[1]));
+      const out: Finding[] = [];
+      for (const m of mem.text.matchAll(/supersedes (MEM-\d{4})/g)) {
+        if (!ids.has(m[1])) {
+          out.push(finding('AUD-038', 'error', `Supersede chain broken: ${m[1]} does not exist in the file.`,
+            'Fix the supersedes pointer or restore the old entry.', [m[1]!]));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: 'AUD-039',
+    check: (ctx) => {
+      const project = readJsonState(join(ctx.runDir, '..', '..', 'project.json')).doc as { project_memory_path?: string };
+      const rel = project.project_memory_path ?? 'docs/team/MEMORY.md';
+      const resolved = join(ctx.repoRoot, rel);
+      const teamRoot = join(ctx.runDir, '..', '..');
+      return resolved.startsWith(teamRoot)
+        ? [finding('AUD-039', 'error', `Project memory sits inside .team/ (${rel}) and will vanish with it (D4).`,
+            'Move it to a git-tracked path and update project.json.', [rel])]
+        : [];
+    },
+  },
+  {
+    id: 'AUD-040',
+    check: (ctx) => {
+      const cap = ((ctx.run.default_policy as { max_active_claims_per_agent?: number } | undefined)?.max_active_claims_per_agent) ?? 1;
+      const byAgent = new Map<string, number>();
+      for (const c of ctx.taskClaims.filter(ACTIVE)) byAgent.set(c.agent_id, (byAgent.get(c.agent_id) ?? 0) + 1);
+      return [...byAgent.entries()]
+        .filter(([, n]) => n > cap)
+        .map(([agent, n]) =>
+          finding('AUD-040', 'error', `${agent} holds ${n} active claims (cap ${cap}; M36/D17 bypass suspected).`,
+            'Check label-idempotent registration; release or reclaim the surplus claims.', [agent]),
+        );
+    },
+  },
+];
+RULES.push(...MEMORY_RULES);
 
 /** Read-only batch audit — findings are data, exit stays 0 (docs/18 §7). */
 export function auditRun(opts: AuditOptions): Envelope {

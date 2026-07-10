@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { initProject, doctorProject, importRun, publishTasks, runShow, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
 import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, verifySubmit } from '@sigmarun/dispatch';
-import { postMessage, listMessages, hydrateContext, validateGraph, updateRunMemory } from '@sigmarun/context';
+import { postMessage, listMessages, hydrateContext, validateGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
 import { statusRun, runList, taskShow, evidenceShow, watchOnce } from '@sigmarun/watch';
 import { auditRun, repairRun } from '@sigmarun/audit';
@@ -14,6 +14,7 @@ const EXIT_BY_CODE: Record<string, number> = {
   evidence_invalid: 4,
   export_redaction_hit: 4,
   export_target_invalid: 4,
+  memory_entry_invalid: 4,
   rev_conflict: 6,
   duplicate_payload: 6,
   cross_run_conflict: 6,
@@ -319,6 +320,21 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     } else {
       env = validateGraph({ cwd: opts.cwd, env: opts.env, runId });
     }
+  } else if (cmd === 'memory' && args[1] === 'promote') {
+    const runId = args[2];
+    const entry = flag(argv, 'entry');
+    const section = flag(argv, 'section');
+    const refs = flag(argv, 'from')?.split(',').filter(Boolean);
+    if (!runId || !entry || !section || !refs || refs.length === 0) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun memory promote <RUN-ID> --entry="…" --section=Architecture|Interfaces|Constraints|Pitfalls --from=<MSG-ID|path,...> [--supersedes=MEM-xxxx] [--json]');
+    } else {
+      env = promoteMemory({ cwd: opts.cwd, env: opts.env, runId, entry, section, refs, supersedes: flag(argv, 'supersedes') });
+    }
+  } else if (cmd === 'memory' && args[1] === 'candidates') {
+    const runId = args[2];
+    env = !runId
+      ? failEnvelope('usage_error', 'Usage: sigmarun memory candidates <RUN-ID> [--json]')
+      : memoryCandidates({ cwd: opts.cwd, env: opts.env, runId });
   } else if (cmd === 'memory' && args[1] === 'update') {
     const runId = args[2];
     const file = flag(argv, 'file');

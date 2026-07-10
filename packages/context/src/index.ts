@@ -6,3 +6,5 @@ export type {
   GraphValidateOptions,
   MemoryUpdateOptions,
 } from './context-plane.js';
+export { promoteMemory, memoryCandidates, MEMORY_SECTIONS } from './memory-promote.js';
+export type { PromoteOptions, CandidatesOptions } from './memory-promote.js';

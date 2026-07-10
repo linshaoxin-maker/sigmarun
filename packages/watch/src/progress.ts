@@ -119,6 +119,21 @@ export function computeProgress(runDir: string): Record<string, unknown> {
     }
   }
 
+  // BDD-009-05: oversize project memory is a run risk (warn, never blocking).
+  const projectFile = join(runDir, '..', '..', 'project.json');
+  if (existsSync(projectFile)) {
+    const rel = ((readJsonState(projectFile).doc as { project_memory_path?: string }).project_memory_path) ?? 'docs/team/MEMORY.md';
+    const memPath = join(runDir, '..', '..', '..', rel);
+    if (existsSync(memPath)) {
+      const text = readFileSync(memPath, 'utf8');
+      const memLines = text.split('\n').length;
+      const kb = Buffer.byteLength(text, 'utf8') / 1024;
+      if (memLines > 200 || kb > 25) {
+        risks.push({ kind: 'memory_oversize', detail: `${rel}: ${memLines} lines / ${kb.toFixed(1)}KB (limits 200/25KB)` });
+      }
+    }
+  }
+
   return {
     schema_version: 'team.progress.v1',
     run_id: run.run_id,
