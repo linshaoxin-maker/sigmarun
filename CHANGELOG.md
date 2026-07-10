@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- FEAT-008 status/watch/audit/repair：新包 `@sigmarun/watch`（`status`——权重 progress/风险/M32 Needs-user 带命令、`run list`/`task show`/`evidence show`、`watch`——单实例锁/tick=sweep+快照/终态退出）与 `@sigmarun/audit`（`audit run`——14 条规则 + 26 条登记跳过、exit 0、findings=data、无锁快照；`repair`——账本前滚/执行前备份/state_repaired/幂等）。修复 FEAT-004 sweep 半提交隐患（sweepRun 提取 + 即时持久化）。登记实现债：写事务事件 rev_after（AUD-032）。测试 149/149，覆盖 90.8%/75.1%。（Refs: FEAT-008）
+
 - FEAT-007 evidence 门禁 submit：`sigmarun submit`（14 §2.3 九步事务：校验先行零残留、in_scope minimatch 重算（不信自报）、D8 输出截断+脱敏 `[REDACTED:kind]`、handoff 代写、revision/history 返工承载、D6 review_skipped）；storage 脱敏升级为替换管道。修复 FEAT-004 潜伏缺陷：run 级策略字段 `default_policy` 此前被错读为 `policy`（覆盖静默失效）。测试 131/131，覆盖 92.3%/78.0%。（Refs: FEAT-007）
 
 - FEAT-006 dispatch 端到端：`worktree register/adopt`（claimed→working、回收保留-认养链 16 §3.5、base_commit 机械采集）、`run show`（dispatch 第 1 步）、新包 `@sigmarun/adapters` + `adapter install --tool=claude-code|codex`（/team-plan、/team-dispatch、/team-publish 模板 + Codex skill + AGENTS.md 标记对幂等注入；RULES 十诫逐字、--as/--task/--role/--loop、D5 单任务停机）。测试 117/117，覆盖 92.7%/79.7%。（Refs: FEAT-006）

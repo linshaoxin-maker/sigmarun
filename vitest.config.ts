@@ -8,6 +8,8 @@ export default defineConfig({
       '@sigmarun/core': fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),
       '@sigmarun/dispatch': fileURLToPath(new URL('./packages/dispatch/src/index.ts', import.meta.url)),
       '@sigmarun/adapters': fileURLToPath(new URL('./packages/adapters/src/index.ts', import.meta.url)),
+      '@sigmarun/watch': fileURLToPath(new URL('./packages/watch/src/index.ts', import.meta.url)),
+      '@sigmarun/audit': fileURLToPath(new URL('./packages/audit/src/index.ts', import.meta.url)),
       '@sigmarun/context': fileURLToPath(new URL('./packages/context/src/index.ts', import.meta.url)),
     },
   },

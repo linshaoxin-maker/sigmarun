@@ -130,4 +130,30 @@ describe('cli front-end (contract: docs/17 §1/§2.2 — parse, delegate, map ex
     expect(install.exitCode).toBe(0);
     expect(existsSync(join(repo, '.claude', 'commands', 'team-dispatch.md'))).toBe(true);
   });
+
+  it('status + audit run + repair routes stay exit 0 with findings as data (FEAT-008)', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const { writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    writeFileSync(join(repo, 'payload.json'), JSON.stringify(validPayload()));
+    runCli(['run', 'import', join(repo, 'payload.json'), '--json'], { cwd: repo });
+    runCli(['task', 'publish', 'RUN-0001', '--json'], { cwd: repo });
+
+    const status = runCli(['status', 'RUN-0001', '--json'], { cwd: repo });
+    expect(status.exitCode).toBe(0);
+    expect(JSON.parse(status.stdout).data.counts.ready).toBe(2);
+
+    const audit = runCli(['audit', 'run', 'RUN-0001', '--json'], { cwd: repo });
+    expect(audit.exitCode).toBe(0);
+    expect(JSON.parse(audit.stdout).data.rules_run.length).toBeGreaterThan(10);
+
+    const repair = runCli(['repair', 'RUN-0001', '--json'], { cwd: repo });
+    expect(repair.exitCode).toBe(0);
+    expect(JSON.parse(repair.stdout).data.repaired).toEqual([]);
+
+    const watch = runCli(['watch', 'RUN-0001', '--once', '--json'], { cwd: repo });
+    expect(watch.exitCode).toBe(0);
+  });
 });

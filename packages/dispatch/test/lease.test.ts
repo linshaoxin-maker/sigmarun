@@ -139,6 +139,21 @@ describe('reclaim: manual and 3xTTL sweep (BDD-007-02/03; D9; AUD-003 blocked ex
     expect(readJson('claims/task-claims.json').claims[0].status).toBe('active');
   });
 
+  it('sweep persists its reclaim even when the claim attempt then fails a guard (FEAT-008 regression)', () => {
+    repo = mkClaimRepo([{ key: 'a' }]);
+    const a1 = registerDefault(repo, 'win-1');
+    claimNext({ cwd: repo, runId: 'RUN-0001', agentId: a1 });
+    expireLease(61);
+    const a2 = registerDefault(repo, 'win-2', 'codex');
+    // role mismatch: sweep frees TASK-0001, but the reviewer filter leaves nothing claimable
+    const env = claimNext({ cwd: repo, runId: 'RUN-0001', agentId: a2, role: 'reviewer' });
+    expect(env.ok).toBe(false);
+    expect(env.code).toBe('no_claimable_task');
+    expect(readJson('claims/task-claims.json').claims[0].status).toBe('reclaimed'); // not left dangling active
+    expect(readJson('tasks/TASK-0001/task.json').status).toBe('ready');
+    expect(readJson('team-task-list.json').tasks[0].status).toBe('ready');
+  });
+
   it('a blocked task is exempt from the sweep (AUD-003 / docs/15 §5.1)', () => {
     repo = mkClaimRepo([{ key: 'a' }]);
     const a1 = registerDefault(repo, 'win-1');

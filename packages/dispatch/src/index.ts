@@ -1,4 +1,6 @@
 export {
+  sweepRun,
+  openRun,
   registerAgent,
   claimNext,
   heartbeat,

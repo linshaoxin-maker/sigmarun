@@ -3,6 +3,8 @@ import { initProject, doctorProject, importRun, publishTasks, runShow, submitEvi
 import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, updateRunMemory } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
+import { statusRun, runList, taskShow, evidenceShow, watchOnce } from '@sigmarun/watch';
+import { auditRun, repairRun } from '@sigmarun/audit';
 
 const EXIT_BY_CODE: Record<string, number> = {
   OK: 0,
@@ -130,6 +132,50 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     } else {
       env = reclaimTask({ cwd: opts.cwd, env: opts.env, runId, taskId });
     }
+  } else if (cmd === 'status' || cmd === 'progress') {
+    const runId = args[1];
+    env = !runId
+      ? failEnvelope('usage_error', 'Usage: sigmarun status <RUN-ID> [--json]')
+      : statusRun({ cwd: opts.cwd, env: opts.env, runId });
+  } else if (cmd === 'run' && args[1] === 'list') {
+    env = runList({ cwd: opts.cwd, env: opts.env });
+  } else if (cmd === 'task' && args[1] === 'show') {
+    const runId = args[2];
+    const taskId = args[3];
+    env = !runId || !taskId
+      ? failEnvelope('usage_error', 'Usage: sigmarun task show <RUN-ID> <TASK-ID> [--json]')
+      : taskShow({ cwd: opts.cwd, env: opts.env, runId, taskId });
+  } else if (cmd === 'evidence' && args[1] === 'show') {
+    const runId = args[2];
+    const taskId = args[3];
+    env = !runId || !taskId
+      ? failEnvelope('usage_error', 'Usage: sigmarun evidence show <RUN-ID> <TASK-ID> [--json]')
+      : evidenceShow({ cwd: opts.cwd, env: opts.env, runId, taskId });
+  } else if (cmd === 'watch') {
+    const runId = args[1];
+    if (!runId) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun watch <RUN-ID> [--interval=30] [--once] [--force] [--json]');
+    } else if (argv.includes('--once')) {
+      env = watchOnce({ cwd: opts.cwd, env: opts.env, runId, force: argv.includes('--force') });
+    } else {
+      // looped mode: synchronous ticks until the run is terminal (D14 passive CLI — no daemon)
+      const intervalSec = Number(flag(argv, 'interval') ?? 30);
+      env = watchOnce({ cwd: opts.cwd, env: opts.env, runId, force: argv.includes('--force') });
+      while (env.ok && !(env.data as { terminal?: boolean }).terminal) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(5, intervalSec) * 1000);
+        env = watchOnce({ cwd: opts.cwd, env: opts.env, runId, force: true });
+      }
+    }
+  } else if (cmd === 'audit' && args[1] === 'run') {
+    const runId = args[2];
+    env = !runId
+      ? failEnvelope('usage_error', 'Usage: sigmarun audit run <RUN-ID> [--json]')
+      : auditRun({ cwd: opts.cwd, env: opts.env, runId });
+  } else if (cmd === 'repair') {
+    const runId = args[1];
+    env = !runId
+      ? failEnvelope('usage_error', 'Usage: sigmarun repair <RUN-ID> [--json]')
+      : repairRun({ cwd: opts.cwd, env: opts.env, runId });
   } else if (cmd === 'run' && args[1] === 'show') {
     const runId = args[2];
     if (!runId) {

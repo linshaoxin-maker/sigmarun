@@ -354,6 +354,48 @@ function applyReclaim(
   });
 }
 
+/** Save claim stores + task list after a sweep and keep the in-memory revs usable for later writes. */
+function persistSweep(
+  stores: ClaimStores,
+  listFile: string,
+  list: { doc: unknown; rev: number },
+): void {
+  saveState(stores.taskClaims.file, stores.taskClaims.doc, stores.taskClaims.rev);
+  stores.taskClaims.rev = (stores.taskClaims.rev ?? 0) + 1;
+  saveState(stores.pathClaims.file, stores.pathClaims.doc, stores.pathClaims.rev);
+  stores.pathClaims.rev = (stores.pathClaims.rev ?? 0) + 1;
+  writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
+  list.rev += 1;
+}
+
+/** Standalone sweep tick — the same code path claim-next uses (docs/17 §7 watch loop body). */
+export function sweepRun(opts: ResolveOptions & { runId: string; triggeredBy?: string }): Envelope {
+  const startedAt = Date.now();
+  return withRunLock(opts, startedAt, (runDir, runId) => {
+    const run = readJsonState(join(runDir, 'run.json'));
+    const rdoc = run.doc as { default_policy?: Partial<RunPolicy> };
+    const policy: RunPolicy = {
+      claim_ttl_minutes: 30,
+      max_parallel_tasks: 4,
+      path_conflict_policy: 'block',
+      max_active_claims_per_agent: 1,
+      reclaim_policy: { auto_after_ttl_multiple: 3 },
+      ...(rdoc.default_policy ?? {}),
+    };
+    const listFile = join(runDir, 'team-task-list.json');
+    const list = readJsonState(listFile);
+    const rows = (list.doc as { tasks: TaskRow[] }).tasks;
+    const stores = loadClaims(runDir, runId);
+    const swept = sweepExpired(runDir, runId, stores, rows, policy, opts.triggeredBy ?? 'watch');
+    if (swept.reclaimed.length > 0) persistSweep(stores, listFile, list);
+    return okEnvelope({
+      message: `Sweep on ${runId}: ${swept.reclaimed.length} claim(s) reclaimed.`,
+      data: { reclaimed: swept.reclaimed },
+      startedAt,
+    });
+  });
+}
+
 /** Dependency depth for ordering: longest depends_on ancestor chain (docs/10 §7). */
 function depthOf(taskId: string, rows: Map<string, TaskRow>, memo = new Map<string, number>()): number {
   if (memo.has(taskId)) return memo.get(taskId)!;
@@ -483,6 +525,9 @@ export function claimNext(opts: ClaimOptions): Envelope {
 
     // Lazy sweep before limits so a dead claim does not wedge the queue (D9).
     const swept = sweepExpired(runDir, runId, stores, rows, policy, opts.agentId);
+    // Persist sweep mutations immediately: a later guard failure must not leave
+    // task.json/events reclaimed while the claims/list files still say active.
+    if (swept.reclaimed.length > 0) persistSweep(stores, listFile, list);
 
     // Guard #3: per-agent cap (M36/D17).
     const mine = stores.taskClaims.doc.claims.filter((c) => c.agent_id === opts.agentId && ACTIVE(c));

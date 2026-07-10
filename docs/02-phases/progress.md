@@ -82,7 +82,13 @@
 - **缺陷修复**：`default_policy` 字段名错读（FEAT-004 起潜伏，run 级策略覆盖被静默忽略）——"兜底逻辑掩盖读错的键"入知识库。
 - 下一个：**FEAT-008 status/watch/audit/repair 与查询面**（复合 FEAT，子项 008.1–008.4 见 P4；锚 UC-007 + BDD-007 剩余场景 + 18 号 audit 目录）。
 
+## 2026-07-11（FEAT-008 交付）
+
+- **FEAT-008 status/watch/audit/repair**（复合四子项全验收）：watch+audit 两包；RED 17 → GREEN 149/149（覆盖 90.8%/75.1%）；真机六命令冒烟——audit 抓到 FEAT-007 冒烟留下的真实越界（AUD-014）。
+- 随做修复：FEAT-004 sweep 半提交隐患（多出口函数"稍后统一保存"教训）；**登记实现债：rev_after（AUD-032 依赖，18 §3 要求写事务事件必带）**。
+- 下一个：**FEAT-009 review gate**（review claim 合成 D15、INV-008 自批禁令、approve/request-changes 回环、changes_requested→working 复活续租，锚 BDD-006 全组）。
+
 ## 下一步队列
 
-1. **P5 开工（唯一剩余）**：`git commit` 设计基线（待用户发令）→ 仓库根建 TS monorepo（20 §3 九包）→ FEAT-001 起逐个走 `05-features/FEAT-XXX/`：mvp-scope → **失败测试先行**（BDD/合同用例）→ 最小实现 → verification/self-check/knowledge → 矩阵回填。
+1. FEAT-009 → FEAT-010 →（P1 首位）FEAT-011；随后收尾轮：rev_after 债（AUD-032）、npm audit 补跑（SCA BLOCKED）、CI 三平台矩阵 + NFR-001 压测、team-status 等其余模板补装、conformance suite。
 2. 沿途维护：ASM-004/005/006 按期限确认；backflow 事件显式标注。
