@@ -444,7 +444,7 @@ export function claimNext(opts: ClaimOptions): Envelope {
   try {
     // Guard #1: run state.
     const run = readJsonState(join(runDir, 'run.json'));
-    const rdoc = run.doc as { status: string; policy?: Partial<RunPolicy> };
+    const rdoc = run.doc as { status: string; default_policy?: Partial<RunPolicy> };
     if (rdoc.status === 'paused') {
       return failEnvelope('run_paused', `Run ${runId} is paused.`, { startedAt });
     }
@@ -461,7 +461,7 @@ export function claimNext(opts: ClaimOptions): Envelope {
       path_conflict_policy: 'block',
       max_active_claims_per_agent: 1,
       reclaim_policy: { auto_after_ttl_multiple: 3 },
-      ...(rdoc.policy ?? {}),
+      ...(rdoc.default_policy ?? {}),
     };
 
     // Guard #2: agent registered and active.
@@ -738,7 +738,7 @@ export function heartbeat(opts: HeartbeatOptions): Envelope {
     const found = findActiveClaim(stores, opts.taskId, opts.agentId);
     if (!('claim' in found)) return failEnvelope(found.code, found.message, { startedAt });
     const run = readJsonState(join(runDir, 'run.json'));
-    const ttl = ((run.doc as { policy?: { claim_ttl_minutes?: number } }).policy?.claim_ttl_minutes ?? 30) * 60_000;
+    const ttl = ((run.doc as { default_policy?: { claim_ttl_minutes?: number } }).default_policy?.claim_ttl_minutes ?? 30) * 60_000;
     const now = new Date();
     const lease = new Date(now.getTime() + ttl).toISOString();
     found.claim.lease_until = lease;

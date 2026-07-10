@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { initProject, doctorProject, importRun, publishTasks, runShow, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
+import { initProject, doctorProject, importRun, publishTasks, runShow, submitEvidence, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
 import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, updateRunMemory } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
@@ -9,6 +9,7 @@ const EXIT_BY_CODE: Record<string, number> = {
   usage_error: 2,
   lock_timeout: 3,
   schema_invalid: 4,
+  evidence_invalid: 4,
   rev_conflict: 6,
   duplicate_payload: 6,
   cross_run_conflict: 6,
@@ -150,6 +151,16 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
         : registerWorktree({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, path, branch });
     } else {
       env = adoptWorktree({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId });
+    }
+  } else if (cmd === 'submit') {
+    const runId = args[1];
+    const taskId = args[2];
+    const agentId = flag(argv, 'agent');
+    const evidence = flag(argv, 'evidence');
+    if (!runId || !taskId || !agentId || !evidence) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun submit <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --evidence=<draft.json> [--json]');
+    } else {
+      env = submitEvidence({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, evidencePath: evidence });
     }
   } else if (cmd === 'adapter' && args[1] === 'install') {
     const tool = flag(argv, 'tool');

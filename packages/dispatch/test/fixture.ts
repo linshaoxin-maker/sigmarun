@@ -8,6 +8,7 @@ export interface TaskSpec {
   paths?: Record<string, string[]>;
   priority?: number;
   role?: string;
+  checks?: string[];
 }
 
 export function payloadWith(tasks: TaskSpec[]): Record<string, unknown> {
@@ -26,6 +27,7 @@ export function payloadWith(tasks: TaskSpec[]): Record<string, unknown> {
       paths: t.paths ?? { allow: [`src/${t.key}/**`] },
       ...(t.priority !== undefined ? { priority: t.priority } : {}),
       ...(t.role ? { suggested_role: t.role } : {}),
+      ...(t.checks ? { required_checks: t.checks } : {}),
     })),
   };
 }
@@ -42,4 +44,18 @@ export function mkClaimRepo(tasks: TaskSpec[], opts: { publish?: boolean } = {})
 export function registerDefault(repo: string, label = 'win-a', tool = 'claude-code'): string {
   const env = registerAgent({ cwd: repo, runId: 'RUN-0001', tool, role: 'implementer', label });
   return (env.data as { agent_id: string }).agent_id;
+}
+
+/** claim TASK-0001 and drive it to working via a real git worktree; returns the worktree path. */
+export async function setupWorking(repo: string, agent: string, taskId = 'TASK-0001', slug = 'task-a'): Promise<string> {
+  const { execFileSync } = await import('node:child_process');
+  const { join } = await import('node:path');
+  const { claimNext, registerWorktree } = await import('@sigmarun/dispatch');
+  claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent, taskId });
+  execFileSync('git', ['-C', repo, 'commit', '--allow-empty', '-m', 'base', '--no-gpg-sign'], { stdio: 'ignore' });
+  const branch = `team/RUN-0001/${taskId}-${slug}`;
+  const path = join(repo, '..', `wt-${taskId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+  execFileSync('git', ['-C', repo, 'worktree', 'add', path, '-b', branch, 'HEAD'], { stdio: 'ignore' });
+  registerWorktree({ cwd: repo, runId: 'RUN-0001', taskId, agentId: agent, path, branch });
+  return path;
 }

@@ -7,7 +7,7 @@ export { GatewayError } from './errors.js';
 export type { ReasonCode } from './errors.js';
 export { acquireLock } from './lock.js';
 export type { LockOptions } from './lock.js';
-export { scanForSecrets, SECRET_PATTERNS } from './redaction.js';
+export { scanForSecrets, redactText, SECRET_PATTERNS } from './redaction.js';
 export type { SecretHit } from './redaction.js';
 import { GatewayError } from './errors.js';
 

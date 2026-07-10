@@ -76,6 +76,12 @@
 - 书面改派：`run show` 自 FEAT-008 提前（dispatch 第 1 步硬依赖）；base_branch 祖先校验随 FEAT-010；submit 步骤为模板前向引用。
 - 下一个：**FEAT-007 evidence 门禁 submit**（14 §2 evidence schema + submit 事务 + handoff 写半场 + context_ack + in_scope minimatch + 脱敏管道升级，锚 BDD-005 全组）。
 
+## 2026-07-11（FEAT-007 交付）
+
+- **FEAT-007 evidence 门禁 submit**：RED 14 → GREEN 131/131（覆盖 92.3%/78.0%）；真机冒烟（脱敏落盘 grep 验证、越界警告、exit 7 状态门）。F1 正面锚 + minimatch 挂账闭合 + 脱敏替换管道。
+- **缺陷修复**：`default_policy` 字段名错读（FEAT-004 起潜伏，run 级策略覆盖被静默忽略）——"兜底逻辑掩盖读错的键"入知识库。
+- 下一个：**FEAT-008 status/watch/audit/repair 与查询面**（复合 FEAT，子项 008.1–008.4 见 P4；锚 UC-007 + BDD-007 剩余场景 + 18 号 audit 目录）。
+
 ## 下一步队列
 
 1. **P5 开工（唯一剩余）**：`git commit` 设计基线（待用户发令）→ 仓库根建 TS monorepo（20 §3 九包）→ FEAT-001 起逐个走 `05-features/FEAT-XXX/`：mvp-scope → **失败测试先行**（BDD/合同用例）→ 最小实现 → verification/self-check/knowledge → 矩阵回填。

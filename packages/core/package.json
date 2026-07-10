@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@sigmarun/storage": "0.1.0",
+    "minimatch": "^10.2.5",
     "zod": "^3.23.0"
   }
 }

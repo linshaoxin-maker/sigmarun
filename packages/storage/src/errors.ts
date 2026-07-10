@@ -26,6 +26,7 @@ export type ReasonCode =
   | 'invalid_transition'
   | 'claim_not_found'
   | 'not_claim_owner'
+  | 'evidence_invalid'
   | 'io_error';
 
 /** Internal error carrying a contract reason code (docs/17 §3); converted to an envelope at the primitive layer (docs/20 §3 R2). */

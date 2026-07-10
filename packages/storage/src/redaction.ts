@@ -19,3 +19,17 @@ export function scanForSecrets(text: string): SecretHit[] {
   for (const p of SECRET_PATTERNS) if (p.re.test(text)) hits.push({ kind: p.kind });
   return hits;
 }
+
+/** Replacing pipeline (docs/24 §4 / docs/14 §2.2): every match becomes `[REDACTED:kind]`. */
+export function redactText(text: string): { text: string; hits: SecretHit[] } {
+  let out = text;
+  const hits: SecretHit[] = [];
+  for (const p of SECRET_PATTERNS) {
+    const re = new RegExp(p.re.source, p.re.flags.includes('g') ? p.re.flags : p.re.flags + 'g');
+    if (re.test(out)) {
+      hits.push({ kind: p.kind });
+      out = out.replace(re, `[REDACTED:${p.kind}]`);
+    }
+  }
+  return { text: out, hits };
+}
