@@ -35,3 +35,9 @@ Story/R：[P1-requirement.md](P1-requirement.md) §3 ｜ UC：P1 §4 ｜ BDD：`
 - Story→UC→NFR：无空白（UC-004/006/009 的 NFR 列为"—/继承 NFR-009"，理由：纯流程分支类需求，无独立量化属性；NFR-009 全 UC 生效）。
 - UC→BDD：55 场景全挂 UC，无孤儿；**多归属规则**（2026-07-10 外审 finding 5 修正）：BDD 场景按物理所在 feature 文件挂主 UC，被其他 UC 复用时在该行括注（如 BDD-003-04/05 主挂 UC-003、UC-004 复用）；BR-001 仅行 9（parallel_limit）无 BDD，书面豁免（P5 压测），行 8 已由 BDD-003-08/005-08/007-08 覆盖。
 - FEAT 列：FEAT-001（enabler）不直接挂 UC，经 NFR-006/横切表锚定——符合 G4-1 enabler 豁免。
+
+## P5 回填（逐 FEAT；backflow 按 `[needs backflow to P{N}]` 标注）
+
+| FEAT | Files | Tests | Result |
+|---|---|---|---|
+| FEAT-001（enabler，锚 NFR-006/009 + BDD-001 背景） | packages/storage/src/index.ts；packages/core/src/{envelope,schemas,lifecycle,index}.ts；packages/cli/src/{cli,bin}.ts | storage/test/{team-dir,atomic-write}.test.ts；core/test/{envelope,init,doctor}.test.ts；cli/test/cli.test.ts —— 25/25 绿，RED 先行在案 | ✅ 交付（覆盖 91%/73%；G5 全表见 [FEAT-001/verification.md](../05-features/FEAT-001/verification.md)；SCA BLOCKED 待补跑） |

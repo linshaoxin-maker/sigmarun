@@ -1,0 +1,38 @@
+import { describe, it, expect, afterEach } from 'vitest';
+import { runCli } from '../src/cli.js';
+import { mkTmpGitRepo, cleanup } from '../../storage/test/helpers.js';
+
+const dirs: string[] = [];
+afterEach(() => { while (dirs.length) cleanup(dirs.pop()!); });
+
+describe('cli front-end (contract: docs/17 §1/§2.2 — parse, delegate, map exit code)', () => {
+  it('init --json prints one parseable envelope and exits 0', () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    const r = runCli(['init', '--json'], { cwd: repo });
+    expect(r.exitCode).toBe(0);
+    const env = JSON.parse(r.stdout);
+    expect(env.ok).toBe(true);
+    expect(env.meta.envelope_version).toBe('team.envelope.v1');
+  });
+
+  it('doctor --json parses and exits 0 on an initialized repo', () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const r = runCli(['doctor', '--json'], { cwd: repo });
+    expect(r.exitCode).toBe(0);
+    expect(JSON.parse(r.stdout).ok).toBe(true);
+  });
+
+  it('unknown command maps to usage_error with exit 2', () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    const r = runCli(['bogus', '--json'], { cwd: repo });
+    expect(r.exitCode).toBe(2);
+    expect(JSON.parse(r.stdout).code).toBe('usage_error');
+  });
+
+  it('environment failure maps to exit 8 (17 §2.2)', () => {
+    const r = runCli(['doctor', '--json'], { cwd: '/tmp' });
+    expect(r.exitCode).toBe(8);
+    expect(JSON.parse(r.stdout).code).toBe('not_a_git_repo');
+  });
+});

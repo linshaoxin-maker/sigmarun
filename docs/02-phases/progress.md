@@ -37,6 +37,13 @@
 - F5 矩阵 BDD-003-04/05 错挂（属实，修法微调）：确立**多归属规则**（主挂物理所在 UC、复用行括注），UC-003/004 行修正。
 - BDD 51→55；相关计数全集同步（P2/矩阵/README/current-state）。
 
+## 2026-07-10（P5 开工 · FEAT-001 交付）
+
+- **Feature DAG 定稿**（05-features/README.md，mermaid，无环，执行纪律：按序单开、gate FAIL 不进下一个）。
+- **TS monorepo 建立**：npm workspaces + tsc -b 项目引用 + vitest（src-alias 测试）；三包落地 storage/core/cli（20 §3 九包的首批）。
+- **FEAT-001 交付**（完整两阶段）：测试先行（RED 6/6 → GREEN 25/25，覆盖 91%/73%）→ init/doctor + envelope + team-root + 原子写/rev → 真机冒烟 → verification（G5 全表：13 PASS、3 N/A、SCA BLOCKED 留痕）→ 知识沉淀与矩阵回填 → commit（Refs: FEAT-001）。
+- 残余：CI 工具化（P1）、npm audit 补跑、worktree 警告分支随 FEAT-004。
+
 ## 下一步队列
 
 1. **P5 开工（唯一剩余）**：`git commit` 设计基线（待用户发令）→ 仓库根建 TS monorepo（20 §3 九包）→ FEAT-001 起逐个走 `05-features/FEAT-XXX/`：mvp-scope → **失败测试先行**（BDD/合同用例）→ 最小实现 → verification/self-check/knowledge → 矩阵回填。
