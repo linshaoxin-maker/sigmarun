@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { minimatch } from 'minimatch';
 import {
   GatewayError,
+  resolveRepoRelativeInside,
   tryAcquireLock,
   runLockPath,
   readJsonState,
@@ -78,8 +79,11 @@ export function truncateOutput(raw: string): { text: string; truncated: boolean 
 export function submitEvidence(opts: SubmitOptions): Envelope {
   const startedAt = Date.now();
   let teamRoot: string;
+  let repoRoot: string;
   try {
-    teamRoot = resolveTeamRoot(opts).teamRoot;
+    const resolved = resolveTeamRoot(opts);
+    teamRoot = resolved.teamRoot;
+    repoRoot = resolved.repoRoot;
   } catch (err) {
     const ge = err as GatewayError;
     return failEnvelope(ge.code, ge.message, { startedAt });
@@ -204,11 +208,14 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
           .claims.filter((c) => c.task_id === opts.taskId && c.status === 'active')
           .flatMap((c) => c.paths.allow ?? []))
       : (tdoc.paths?.allow ?? []);
-    const changedFiles = changed.map((f) => ({
-      path: f.path,
-      change_type: f.change_type ?? 'modified',
-      in_scope: fileInScope(f.path, allowGlobs),
-    }));
+    const changedFiles = changed.map((f) => {
+      const { rel } = resolveRepoRelativeInside(repoRoot, f.path, 'changed_files.path');
+      return {
+        path: rel,
+        change_type: f.change_type ?? 'modified',
+        in_scope: fileInScope(rel, allowGlobs),
+      };
+    });
     const outOfScope = changedFiles.filter((f) => !f.in_scope);
     if (outOfScope.length > 0) {
       warnings.push({

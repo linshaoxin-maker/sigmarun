@@ -30,6 +30,7 @@ export type ReasonCode =
   | 'self_approval_forbidden'
   | 'export_target_invalid'
   | 'export_redaction_hit'
+  | 'path_escape_detected'
   | 'memory_entry_invalid'
   | 'io_error';
 

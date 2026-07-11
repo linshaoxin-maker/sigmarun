@@ -48,6 +48,24 @@ describe('submit — mechanical validation failures (docs/14 §2.1 field rules; 
     expectInvalid(env as never, 'changed_files');
   });
 
+  it('rejects changed_files that escape the repository path contract', () => {
+    const parent = submitEvidence({
+      cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent,
+      evidencePath: validDraft(repo, { changed_files: [{ path: '../outside.ts', change_type: 'modified' }] }),
+    });
+    expect(parent.ok).toBe(false);
+    expect(parent.code).toBe('path_escape_detected');
+    expect(taskStatus()).toBe('working');
+
+    const absolute = submitEvidence({
+      cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent,
+      evidencePath: validDraft(repo, { changed_files: [{ path: join(repo, 'src/a/index.ts'), change_type: 'modified' }] }),
+    });
+    expect(absolute.ok).toBe(false);
+    expect(absolute.code).toBe('path_escape_detected');
+    expect(taskStatus()).toBe('working');
+  });
+
   it('rejects acceptance that does not match the task item-by-item', () => {
     const env = submitEvidence({
       cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent,

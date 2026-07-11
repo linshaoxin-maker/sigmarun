@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export interface EventActor {
@@ -15,6 +15,34 @@ export interface EventInput {
   payload?: Record<string, unknown>;
 }
 
+export type RevAfter = Record<string, number>;
+
+/** Snapshot mutable JSON state revs under one run after the caller has persisted state. */
+export function collectStateRevs(runDir: string): RevAfter {
+  const out: RevAfter = {};
+  const walk = (dir: string, prefix = ''): void => {
+    if (!existsSync(dir)) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === 'locks') continue;
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(abs, rel);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      try {
+        const doc = JSON.parse(readFileSync(abs, 'utf8')) as { rev?: unknown };
+        if (typeof doc.rev === 'number') out[rel] = doc.rev;
+      } catch {
+        // Corrupt JSON is reported by audit rules that read the specific state plane.
+      }
+    }
+  };
+  walk(runDir);
+  return out;
+}
+
 /**
  * Append one audit event; the jsonl append is the transaction commit point.
  * @contract docs/18 §3 team.event.v1 · docs/17 §5.2 seq from events.meta.json (caller holds the lock) · §5.3 events-last write order
@@ -25,6 +53,10 @@ export function appendEvent(runDir: string, evt: EventInput): number {
     ? (JSON.parse(readFileSync(metaFile, 'utf8')) as { next_seq: number })
     : { next_seq: 1 };
   const seq = meta.next_seq;
+  const payload = evt.payload ?? {};
+  const manualRevAfter = typeof payload.rev_after === 'object' && payload.rev_after !== null
+    ? (payload.rev_after as Record<string, unknown>)
+    : {};
   const line = {
     schema_version: 'team.event.v1',
     ts: new Date().toISOString(),
@@ -34,7 +66,7 @@ export function appendEvent(runDir: string, evt: EventInput): number {
     run_id: evt.run_id,
     ...(evt.task_id ? { task_id: evt.task_id } : {}),
     ...(evt.claim_id ? { claim_id: evt.claim_id } : {}),
-    payload: evt.payload ?? {},
+    payload: { ...payload, rev_after: { ...manualRevAfter, ...collectStateRevs(runDir) } },
   };
   appendFileSync(join(runDir, 'events.jsonl'), JSON.stringify(line) + '\n');
   writeFileSync(metaFile, JSON.stringify({ next_seq: seq + 1 }));

@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { GatewayError, readJsonState, resolveTeamRoot, type ResolveOptions } from '@sigmarun/storage';
-import { failEnvelope, fileInScope, okEnvelope, pathsOverlapConservative, readEventsSafe, type Envelope } from '@sigmarun/core';
+import { GatewayError, readJsonState, resolveTeamRoot, scanForSecrets, type ResolveOptions } from '@sigmarun/storage';
+import { collectStateRevs, failEnvelope, fileInScope, okEnvelope, pathsOverlapConservative, readEventsSafe, type Envelope } from '@sigmarun/core';
 
 export interface AuditOptions extends ResolveOptions {
   runId: string;
@@ -24,29 +24,24 @@ interface Ctx {
   rows: Array<{ task_id: string; status: string; weight: number }>;
   taskClaims: Array<{ claim_id: string; task_id: string; agent_id: string; status: string; lease_until: string }>;
   pathClaims: Array<{ claim_id: string; task_id: string; agent_id: string; status: string; paths: { allow?: string[] } }>;
+  reviewClaims: Array<{ claim_id: string; task_id: string; reviewer_agent_id: string; status: string }>;
   approvals: Array<{ task_id: string; paths: string[]; status: string }>;
-  events: Array<{ seq: number; event: string; task_id?: string }>;
+  events: Array<{ seq: number; event: string; task_id?: string; payload?: Record<string, unknown> }>;
   taskDetail: (taskId: string) => Record<string, unknown> | null;
   evidence: (taskId: string) => Record<string, unknown> | null;
+  reviews: (taskId: string) => Array<Record<string, unknown>>;
+  verifications: Array<Record<string, unknown>>;
 }
 
 const ACTIVE = (c: { status: string }) => c.status === 'active';
+const TASK_CLAIM_TERMINAL = new Set(['released', 'reclaimed', 'cancelled']);
 
 /** docs/18 §4 — rules whose data planes exist today. The rest are registered skips (docs/18 §7 honesty over coverage). */
 const SKIPPED: Array<{ rule_id: string; reason: string }> = [
-  ...['AUD-005', 'AUD-006', 'AUD-007', 'AUD-008', 'AUD-009', 'AUD-010', 'AUD-012'].map((r) => ({
-    rule_id: r,
-    reason: 'review/verify record planes land with FEAT-009/010',
-  })),
-  ...['AUD-015', 'AUD-016', 'AUD-017', 'AUD-018', 'AUD-019', 'AUD-020'].map((r) => ({
-    rule_id: r,
-    reason: 'review/verify record planes land with FEAT-009/010',
-  })),
   ...['AUD-023', 'AUD-024', 'AUD-025', 'AUD-026', 'AUD-027', 'AUD-028'].map((r) => ({
     rule_id: r,
     reason: 'context/report reconciliation batch lands after the submit/review loop closes (FEAT-009/010)',
   })),
-  { rule_id: 'AUD-032', reason: 'rev_after is not yet emitted by write transactions (implementation debt, backlog)' },
   { rule_id: 'AUD-034', reason: 'event replay engine is a P1 item' },
 ];
 
@@ -59,6 +54,25 @@ const finding = (rule_id: string, severity: 'error' | 'warn', message: string, n
   next_action,
   refs,
 });
+
+function taskStatus(ctx: Ctx, taskId: string, fallback: string): string {
+  return String(ctx.taskDetail(taskId)?.status ?? fallback);
+}
+
+function activePathClaims(ctx: Ctx, taskId: string): Ctx['pathClaims'] {
+  return ctx.pathClaims.filter((c) => c.task_id === taskId && ACTIVE(c));
+}
+
+function walkFiles(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkFiles(path));
+    else if (entry.isFile()) out.push(path);
+  }
+  return out;
+}
 
 const RULES: Rule[] = [
   {
@@ -136,6 +150,104 @@ const RULES: Rule[] = [
     },
   },
   {
+    id: 'AUD-005',
+    check: (ctx) => {
+      const out: Finding[] = [];
+      for (const row of ctx.rows) {
+        const status = taskStatus(ctx, row.task_id, row.status);
+        if (!['draft', 'ready'].includes(status)) continue;
+        const held = ctx.taskClaims.filter((c) => c.task_id === row.task_id && !TASK_CLAIM_TERMINAL.has(c.status));
+        for (const c of held) {
+          out.push(finding('AUD-005', 'error', `${row.task_id} is ${status} but still has unterminated claim ${c.claim_id}.`,
+            `Reclaim or release ${c.claim_id}; then restore ${row.task_id} to a consistent state.`, [c.claim_id]));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: 'AUD-006',
+    check: (ctx) => {
+      const out: Finding[] = [];
+      for (const row of ctx.rows) {
+        const status = taskStatus(ctx, row.task_id, row.status);
+        if (!['claimed', 'working', 'blocked'].includes(status)) continue;
+        const activeClaims = ctx.taskClaims.filter((c) => c.task_id === row.task_id && ACTIVE(c));
+        const allow = ((ctx.taskDetail(row.task_id)?.paths as { allow?: string[] } | undefined)?.allow) ?? [];
+        const activePaths = activePathClaims(ctx, row.task_id);
+        if (activeClaims.length !== 1 || (allow.length > 0 && activePaths.length === 0)) {
+          out.push(finding('AUD-006', 'error',
+            `${row.task_id} is ${status} but active task/path claim counts are ${activeClaims.length}/${activePaths.length}.`,
+            'Use the event ledger to identify the real owner, then reclaim or re-claim the task.', [row.task_id]));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: 'AUD-007',
+    check: (ctx) => {
+      const out: Finding[] = [];
+      const holdPaths = ((ctx.run.default_policy as { path_release_on_submit?: string } | undefined)?.path_release_on_submit ?? 'hold') === 'hold';
+      for (const row of ctx.rows) {
+        const status = taskStatus(ctx, row.task_id, row.status);
+        if (!['submitted', 'reviewing', 'approved'].includes(status)) continue;
+        const submittedClaims = ctx.taskClaims.filter((c) => c.task_id === row.task_id && c.status === 'submitted');
+        const allow = ((ctx.taskDetail(row.task_id)?.paths as { allow?: string[] } | undefined)?.allow) ?? [];
+        const activePaths = activePathClaims(ctx, row.task_id);
+        if (submittedClaims.length !== 1 || (holdPaths && allow.length > 0 && activePaths.length === 0)) {
+          out.push(finding('AUD-007', 'error',
+            `${row.task_id} is ${status} but submitted claim/path hold state is inconsistent.`,
+            'Inspect the submit transaction; restore the submitted claim and held path claim or roll the task back.', [row.task_id]));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: 'AUD-008',
+    check: (ctx) =>
+      ctx.rows
+        .filter((r) => taskStatus(ctx, r.task_id, r.status) === 'changes_requested')
+        .filter((r) => !ctx.taskClaims.some((c) => c.task_id === r.task_id && ['submitted', 'active'].includes(c.status)))
+        .map((r) =>
+          finding('AUD-008', 'error', `${r.task_id} is changes_requested but no submitted/active owner claim can resume it.`,
+            'Revive the submitted owner claim or reclaim and assign the rework explicitly.', [r.task_id]),
+        ),
+  },
+  {
+    id: 'AUD-009',
+    check: (ctx) => {
+      const terminal = new Set(['verified', 'integrated', 'done']);
+      const out: Finding[] = [];
+      for (const row of ctx.rows) {
+        const status = taskStatus(ctx, row.task_id, row.status);
+        if (!terminal.has(status)) continue;
+        const held = ctx.taskClaims.filter((c) => c.task_id === row.task_id && ['active', 'submitted'].includes(c.status));
+        for (const c of held) {
+          out.push(finding('AUD-009', 'error', `${row.task_id} is ${status} but claim ${c.claim_id} is still ${c.status}.`,
+            'Release terminal task claims after verifying the integration/release events.', [c.claim_id]));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: 'AUD-010',
+    check: (ctx) => {
+      const out: Finding[] = [];
+      for (const row of ctx.rows) {
+        if (taskStatus(ctx, row.task_id, row.status) !== 'cancelled') continue;
+        const bad = ctx.taskClaims.filter((c) => c.task_id === row.task_id && !['cancelled', 'released', 'reclaimed'].includes(c.status));
+        for (const c of bad) {
+          out.push(finding('AUD-010', 'error', `${row.task_id} is cancelled but claim ${c.claim_id} is still ${c.status}.`,
+            'Cascade-cancel or release the claim before considering the task closed.', [c.claim_id]));
+        }
+      }
+      return out;
+    },
+  },
+  {
     id: 'AUD-011',
     check: (ctx) => {
       const gated = new Set(['submitted', 'reviewing', 'approved', 'verified', 'integrated', 'done']);
@@ -151,6 +263,46 @@ const RULES: Rule[] = [
         if (!handoffRef || !existsSync(join(ctx.runDir, handoffRef))) {
           out.push(finding('AUD-011', 'error', `${row.task_id} evidence handoff_ref is missing on disk (INV-010).`,
             'Re-submit with handoff content.', [row.task_id]));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: 'AUD-012',
+    check: (ctx) => {
+      const out: Finding[] = [];
+      for (const row of ctx.rows) {
+        const ev = ctx.evidence(row.task_id);
+        if (!ev) continue;
+        const commands = (ev.commands as Array<{ cmd_id?: string; exit_code?: number; output_ref?: string | null }> | undefined) ?? [];
+        const byCmd = new Map(commands.map((c) => [c.cmd_id, c]));
+        const results = (ev.required_checks_results as Array<{ check?: string; cmd_ref?: string; status?: string; note?: string }> | undefined) ?? [];
+        for (const required of ((ctx.taskDetail(row.task_id)?.required_checks as string[] | undefined) ?? [])) {
+          if (!results.some((r) => r.check === required)) {
+            out.push(finding('AUD-012', 'error', `${row.task_id} required check "${required}" has no result.`,
+              'Owner must re-run the missing check and submit new evidence.', [row.task_id]));
+          }
+        }
+        for (const r of results) {
+          if (!r.check || !['pass', 'fail', 'skipped'].includes(r.status ?? '')) {
+            out.push(finding('AUD-012', 'error', `${row.task_id} has malformed check result "${r.check ?? '(missing)'}".`,
+              'Re-submit evidence with a valid check status.', [row.task_id]));
+            continue;
+          }
+          if (r.status === 'skipped') {
+            if (!r.note) {
+              out.push(finding('AUD-012', 'error', `${row.task_id} skipped check "${r.check}" has no note.`,
+                'Explain the skip or run the check before submitting.', [row.task_id]));
+            }
+            continue;
+          }
+          const cmd = r.cmd_ref ? byCmd.get(r.cmd_ref) : undefined;
+          const outputRef = cmd?.output_ref ?? null;
+          if (!cmd || (r.status === 'pass' && cmd.exit_code !== 0) || !outputRef || !existsSync(join(ctx.runDir, 'evidence', row.task_id, outputRef))) {
+            out.push(finding('AUD-012', 'error', `${row.task_id} check "${r.check}" is untrusted (cmd=${r.cmd_ref ?? '(missing)'}).`,
+              'Re-run the command, preserve its output_ref, and re-submit evidence.', [row.task_id]));
+          }
         }
       }
       return out;
@@ -196,6 +348,106 @@ const RULES: Rule[] = [
         }
       }
       return out;
+    },
+  },
+  {
+    id: 'AUD-015',
+    check: (ctx) => {
+      const out: Finding[] = [];
+      for (const row of ctx.rows) {
+        const owners = new Set(ctx.taskClaims.filter((c) => c.task_id === row.task_id).map((c) => c.agent_id));
+        const attempts = (ctx.taskDetail(row.task_id)?.previous_attempts as Array<{ agent_id?: string }> | undefined) ?? [];
+        for (const a of attempts) if (a.agent_id) owners.add(a.agent_id);
+        if (owners.size === 0) continue;
+        for (const review of ctx.reviews(row.task_id)) {
+          const reviewer = review.reviewer_agent_id as string | null | undefined;
+          if (!reviewer || !owners.has(reviewer)) continue;
+          out.push(
+            finding('AUD-015', 'error',
+              `${review.review_id as string} reviewer ${reviewer} is a historical owner of ${row.task_id} (INV-008).`,
+              `Void ${review.review_id as string}; another reviewer must claim and decide again.`, [String(review.review_id ?? row.task_id)]),
+          );
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: 'AUD-016',
+    check: (ctx) => {
+      const gated = new Set(['approved', 'verified', 'integrated', 'done']);
+      return ctx.rows
+        .filter((r) => gated.has(r.status))
+        .filter((r) => ctx.reviews(r.task_id).length === 0)
+        .map((r) =>
+          finding('AUD-016', 'error', `${r.task_id} is ${r.status} but has no review record (including skipped_by_policy).`,
+            'Restore a valid review record or roll the task status back before continuing.', [r.task_id]),
+        );
+    },
+  },
+  {
+    id: 'AUD-017',
+    check: (ctx) => {
+      const gated = new Set(['verified', 'integrated', 'done']);
+      return ctx.rows
+        .filter((r) => gated.has(r.status))
+        .filter((r) =>
+          !ctx.verifications.some((v) => {
+            const target = v.target as { kind?: string; task_id?: string } | undefined;
+            return target?.kind === 'task' && target.task_id === r.task_id && v.verdict === 'pass';
+          }),
+        )
+        .map((r) =>
+          finding('AUD-017', 'error', `${r.task_id} is ${r.status} but has no passing task verification record.`,
+            `Run sigmarun verify submit ${ctx.runId} --agent=<verifier> --verify=<file>, or roll the task status back.`, [r.task_id]),
+        );
+    },
+  },
+  {
+    id: 'AUD-018',
+    check: (ctx) => {
+      const out: Finding[] = [];
+      for (const root of [join(ctx.runDir, 'evidence'), join(ctx.runDir, 'verification', 'outputs')]) {
+        for (const file of walkFiles(root)) {
+          if (!/\.(log|txt|out|md)$/i.test(file)) continue;
+          const hits = scanForSecrets(readFileSync(file, 'utf8'));
+          if (hits.length > 0) {
+            const rel = file.slice(ctx.runDir.length + 1);
+            out.push(finding('AUD-018', 'error', `${rel} contains unredacted secret-like text (${hits.map((h) => h.kind).join(', ')}).`,
+              'Remove the raw secret, fix the redaction pipeline if needed, then re-submit or re-verify.', [rel]));
+          }
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: 'AUD-019',
+    check: (ctx) =>
+      ctx.events
+        .filter((e) => e.event === 'review_skipped' && e.task_id)
+        .map((e) => {
+          const review = (ctx.taskDetail(e.task_id!)?.review as { required?: boolean } | undefined) ?? {};
+          const required = review.required !== false;
+          return finding('AUD-019', required ? 'error' : 'warn',
+            `${e.task_id} review was skipped while task.review.required=${String(review.required ?? true)}.`,
+            required ? 'Restore the task to submitted and run an independent review.' : 'Keep the skip as audit history; no action if policy was intentional.',
+            [`seq:${e.seq}`]);
+        }),
+  },
+  {
+    id: 'AUD-020',
+    check: (ctx) => {
+      const byTask = new Map<string, string[]>();
+      for (const c of ctx.reviewClaims.filter(ACTIVE)) {
+        byTask.set(c.task_id, [...(byTask.get(c.task_id) ?? []), c.claim_id]);
+      }
+      return [...byTask.entries()]
+        .filter(([, ids]) => ids.length > 1)
+        .map(([task, ids]) =>
+          finding('AUD-020', 'error', `${task} has ${ids.length} active review claims: ${ids.join(', ')}.`,
+            'Keep the first valid reviewer claim and release the duplicates after checking events order.', ids),
+        );
     },
   },
   {
@@ -310,6 +562,38 @@ const RULES: Rule[] = [
         }
       }
       return out;
+    },
+  },
+  {
+    id: 'AUD-032',
+    check: (ctx) => {
+      const latest = ctx.events[ctx.events.length - 1];
+      if (!latest) return [];
+      const revAfter = latest.payload?.rev_after;
+      if (typeof revAfter !== 'object' || revAfter === null) {
+        return [
+          finding('AUD-032', 'error',
+            `latest event seq ${latest.seq} has no rev_after snapshot; direct_state_edit_suspected cannot be evaluated.`,
+            'Run sigmarun repair after inspecting the latest transaction; then re-run audit.', [`seq:${latest.seq}`]),
+        ];
+      }
+      const snapshot = revAfter as Record<string, unknown>;
+      const current = collectStateRevs(ctx.runDir);
+      const mismatches: string[] = [];
+      for (const [rel, rev] of Object.entries(current)) {
+        if (snapshot[rel] !== rev) mismatches.push(`${rel}: event=${String(snapshot[rel] ?? '(missing)')} current=${rev}`);
+      }
+      for (const [rel, rev] of Object.entries(snapshot)) {
+        if (!rel.endsWith('.json') || typeof rev !== 'number') continue;
+        if (!(rel in current)) mismatches.push(`${rel}: event=${rev} current=(missing)`);
+      }
+      return mismatches.length > 0
+        ? [
+            finding('AUD-032', 'error',
+              `direct_state_edit_suspected after latest event seq ${latest.seq}: ${mismatches.slice(0, 6).join('; ')}.`,
+              'Treat current state as untrusted: inspect the listed files, then repair or replay from the event ledger.', [`seq:${latest.seq}`]),
+          ]
+        : [];
     },
   },
   {
@@ -469,10 +753,11 @@ export function auditRun(opts: AuditOptions): Envelope {
   };
   const readEvents = () => readEventsSafe(runDir);
   const safe = readEvents();
-  const events = safe.events as Array<{ seq: number; event: string }>;
+  const events = safe.events as Ctx['events'];
   const snapshotSeq = events.length > 0 ? events[events.length - 1]!.seq : 0;
 
   const detailCache = new Map<string, Record<string, unknown> | null>();
+  const reviewCache = new Map<string, Array<Record<string, unknown>>>();
   const ctx: Ctx = {
     repoRoot,
     runDir,
@@ -481,6 +766,7 @@ export function auditRun(opts: AuditOptions): Envelope {
     rows: (readJsonState(join(runDir, 'team-task-list.json')).doc as { tasks: Ctx['rows'] }).tasks,
     taskClaims: readClaims('claims/task-claims.json'),
     pathClaims: readClaims('claims/path-claims.json'),
+    reviewClaims: readClaims('claims/review-claims.json'),
     approvals: (() => {
       const f = join(runDir, 'claims', 'path-approvals.json');
       return existsSync(f) ? ((readJsonState(f).doc as { approvals: Ctx['approvals'] }).approvals ?? []) : [];
@@ -497,6 +783,28 @@ export function auditRun(opts: AuditOptions): Envelope {
       const f = join(runDir, 'evidence', taskId, 'evidence.json');
       return existsSync(f) ? (readJsonState(f).doc as Record<string, unknown>) : null;
     },
+    reviews: (taskId) => {
+      if (!reviewCache.has(taskId)) {
+        const dir = join(runDir, 'reviews', taskId);
+        const records = existsSync(dir)
+          ? readdirSync(dir)
+              .filter((f) => f.endsWith('.json'))
+              .sort()
+              .map((f) => readJsonState(join(dir, f)).doc as Record<string, unknown>)
+          : [];
+        reviewCache.set(taskId, records);
+      }
+      return reviewCache.get(taskId)!;
+    },
+    verifications: (() => {
+      const dir = join(runDir, 'verification');
+      return existsSync(dir)
+        ? readdirSync(dir)
+            .filter((f) => f.endsWith('.json'))
+            .sort()
+            .map((f) => readJsonState(join(dir, f)).doc as Record<string, unknown>)
+        : [];
+    })(),
   };
 
   const findings: Finding[] = [];

@@ -91,10 +91,13 @@ export async function driveToVerified(
 async function setupWorkingClaimed(repo: string, agent: string, taskId: string, slug: string): Promise<string> {
   const { execFileSync } = await import('node:child_process');
   const { join } = await import('node:path');
+  const { mkdirSync } = await import('node:fs');
   const { registerWorktree } = await import('@sigmarun/dispatch');
   execFileSync('git', ['-C', repo, 'commit', '--allow-empty', '-m', 'base', '--no-gpg-sign'], { stdio: 'ignore' });
   const branch = `team/RUN-0001/${taskId}-${slug}`;
-  const path = join(repo, '..', `wt-${taskId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+  const root = join(repo, '..', '.team-worktrees', 'RUN-0001');
+  mkdirSync(root, { recursive: true });
+  const path = join(root, `wt-${taskId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
   execFileSync('git', ['-C', repo, 'worktree', 'add', path, '-b', branch, 'HEAD'], { stdio: 'ignore' });
   registerWorktree({ cwd: repo, runId: 'RUN-0001', taskId, agentId: agent, path, branch });
   return path;
@@ -104,11 +107,14 @@ async function setupWorkingClaimed(repo: string, agent: string, taskId: string, 
 export async function setupWorking(repo: string, agent: string, taskId = 'TASK-0001', slug = 'task-a'): Promise<string> {
   const { execFileSync } = await import('node:child_process');
   const { join } = await import('node:path');
+  const { mkdirSync } = await import('node:fs');
   const { claimNext, registerWorktree } = await import('@sigmarun/dispatch');
   claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent, taskId });
   execFileSync('git', ['-C', repo, 'commit', '--allow-empty', '-m', 'base', '--no-gpg-sign'], { stdio: 'ignore' });
   const branch = `team/RUN-0001/${taskId}-${slug}`;
-  const path = join(repo, '..', `wt-${taskId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+  const root = join(repo, '..', '.team-worktrees', 'RUN-0001');
+  mkdirSync(root, { recursive: true });
+  const path = join(root, `wt-${taskId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
   execFileSync('git', ['-C', repo, 'worktree', 'add', path, '-b', branch, 'HEAD'], { stdio: 'ignore' });
   registerWorktree({ cwd: repo, runId: 'RUN-0001', taskId, agentId: agent, path, branch });
   return path;

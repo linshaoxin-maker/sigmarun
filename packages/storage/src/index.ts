@@ -1,7 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path';
 
 export { GatewayError } from './errors.js';
 export type { ReasonCode } from './errors.js';
@@ -60,6 +59,56 @@ export function resolveTeamRoot(opts: ResolveOptions = {}): TeamRootResolution {
 export interface JsonState {
   doc: Record<string, unknown> & { rev?: number };
   rev: number;
+}
+
+function insideRoot(rootReal: string, targetReal: string): boolean {
+  return targetReal === rootReal || targetReal.startsWith(rootReal.endsWith(sep) ? rootReal : rootReal + sep);
+}
+
+function nearestExistingPath(path: string): string {
+  let cur = path;
+  while (!existsSync(cur)) {
+    const next = dirname(cur);
+    if (next === cur) break;
+    cur = next;
+  }
+  return cur;
+}
+
+/** Validate docs/24 §6 repo-relative POSIX paths: no absolute paths, no backslashes, no `..` escape. */
+export function normalizeRepoRelativePath(input: string, label = 'path'): string {
+  if (!input || isAbsolute(input) || input.includes('\\')) {
+    throw new GatewayError('path_escape_detected', `${label} must be a repo-relative POSIX path.`);
+  }
+  const normalized = posix.normalize(input);
+  if (normalized === '.' || normalized === '..' || normalized.startsWith('../') || posix.isAbsolute(normalized)) {
+    throw new GatewayError('path_escape_detected', `${label} escapes the repository: ${input}`);
+  }
+  return normalized;
+}
+
+/**
+ * Resolve a repo-relative path and verify the nearest existing realpath stays under repoRoot.
+ * This catches symlink escapes while still allowing not-yet-created leaf files/directories.
+ */
+export function resolveRepoRelativeInside(repoRoot: string, rel: string, label = 'path'): { rel: string; abs: string } {
+  const normalized = normalizeRepoRelativePath(rel, label);
+  const abs = resolve(repoRoot, normalized);
+  assertRealPathInside(repoRoot, abs, label);
+  return { rel: normalized, abs };
+}
+
+/** Validate an existing or soon-to-exist absolute path by realpathing its nearest existing parent. */
+export function assertRealPathInside(root: string, target: string, label = 'path'): void {
+  if (!existsSync(root)) {
+    throw new GatewayError('path_escape_detected', `${label} root does not exist: ${root}`);
+  }
+  const rootReal = realpathSync(root);
+  const existing = nearestExistingPath(target);
+  const targetReal = realpathSync(existing);
+  if (!insideRoot(rootReal, targetReal)) {
+    throw new GatewayError('path_escape_detected', `${label} realpath escapes root: ${target}`);
+  }
 }
 
 /** Read a mutable JSON state file preserving every field verbatim (docs/21 §4.2 unknown-field round trip). */

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
-import { GatewayError, resolveTeamRoot, scanForSecrets, type ResolveOptions } from '@sigmarun/storage';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
+import { GatewayError, resolveRepoRelativeInside, resolveTeamRoot, scanForSecrets, type ResolveOptions } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope } from './envelope.js';
 
 export interface ExportOptions extends ResolveOptions {
@@ -14,6 +14,16 @@ export interface ExportOptions extends ResolveOptions {
 interface OutFile {
   rel: string;
   content: string | Buffer;
+}
+
+function nearestExistingPath(path: string): string {
+  let cur = path;
+  while (!existsSync(cur)) {
+    const next = dirname(cur);
+    if (next === cur) break;
+    cur = next;
+  }
+  return cur;
 }
 
 function collectFiles(runDir: string, full: boolean): OutFile[] {
@@ -104,11 +114,19 @@ export function exportRun(opts: ExportOptions): Envelope {
   }
 
   const targetRel = opts.to ?? `docs/team-runs/${opts.runId}`;
-  const target = resolve(repoRoot, targetRel);
-  if (!target.startsWith(repoRoot + '/') && target !== repoRoot) {
-    return failEnvelope('export_target_invalid', `Target must live inside the repository: ${targetRel}.`, { startedAt });
+  let normalizedTargetRel: string;
+  let target: string;
+  try {
+    const resolved = resolveRepoRelativeInside(repoRoot, targetRel, 'export target');
+    normalizedTargetRel = resolved.rel;
+    target = resolved.abs;
+  } catch (err) {
+    if (err instanceof GatewayError) return failEnvelope(err.code, err.message, { startedAt });
+    throw err;
   }
-  if (target.startsWith(teamRoot)) {
+  const targetRealBase = realpathSync(nearestExistingPath(target));
+  const teamReal = realpathSync(teamRoot);
+  if (target === teamRoot || target.startsWith(teamRoot + '/') || targetRealBase === teamReal || targetRealBase.startsWith(teamReal + '/')) {
     return failEnvelope('export_target_invalid', 'Target must not be inside .team/ (the export exists to leave it).', { startedAt });
   }
   const ignored = (() => {
@@ -120,12 +138,12 @@ export function exportRun(opts: ExportOptions): Envelope {
     }
   })();
   if (ignored) {
-    return failEnvelope('export_target_invalid', `Target ${targetRel} is covered by .gitignore; the archive must be committable.`, {
+    return failEnvelope('export_target_invalid', `Target ${normalizedTargetRel} is covered by .gitignore; the archive must be committable.`, {
       startedAt,
     });
   }
   if (existsSync(target) && !opts.force) {
-    return failEnvelope('export_target_invalid', `Target ${targetRel} already exists; pass --force to overwrite.`, { startedAt });
+    return failEnvelope('export_target_invalid', `Target ${normalizedTargetRel} already exists; pass --force to overwrite.`, { startedAt });
   }
 
   const files = collectFiles(runDir, opts.full ?? false);
@@ -156,9 +174,9 @@ export function exportRun(opts: ExportOptions): Envelope {
     totalBytes += Buffer.byteLength(typeof f.content === 'string' ? f.content : f.content);
   }
   return okEnvelope({
-    message: `Exported ${files.length} file(s) (${totalBytes} bytes) to ${targetRel}. Review, then commit yourself.`,
-    data: { target: targetRel, files: files.map((f) => f.rel), total_bytes: totalBytes },
-    nextActions: [`Review the archive, then: git add ${targetRel} && git commit`],
+    message: `Exported ${files.length} file(s) (${totalBytes} bytes) to ${normalizedTargetRel}. Review, then commit yourself.`,
+    data: { target: normalizedTargetRel, files: files.map((f) => f.rel), total_bytes: totalBytes },
+    nextActions: [`Review the archive, then: git add ${normalizedTargetRel} && git commit`],
     startedAt,
   });
 }

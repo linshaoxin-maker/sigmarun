@@ -6,8 +6,8 @@ export { ProjectSchema, CountersSchema, parseSchemaId, SUPPORTED_MAJOR } from '.
 export { initProject, doctorProject } from './lifecycle.js';
 export type { DoctorCheck } from './lifecycle.js';
 export { acquireLock, scanForSecrets } from '@sigmarun/storage';
-export { appendEvent, readEventsSafe } from './events.js';
-export type { EventActor, EventInput, LedgerEvent, SafeEvents } from './events.js';
+export { appendEvent, collectStateRevs, readEventsSafe } from './events.js';
+export type { EventActor, EventInput, LedgerEvent, RevAfter, SafeEvents } from './events.js';
 export { validatePayload, payloadHash, PayloadSchema, TASK_TYPES } from './payload.js';
 export type { PlanPayload, ValidationIssue, ValidationWarning } from './payload.js';
 export { importRun } from './run-import.js';

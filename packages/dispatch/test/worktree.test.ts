@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJsonState, writeJsonStateAtomic } from '@sigmarun/storage';
 import { claimNext, reclaimTask, registerWorktree, adoptWorktree } from '@sigmarun/dispatch';
@@ -21,10 +21,12 @@ const readJson = (rel: string) => JSON.parse(readFileSync(join(runDir(), rel), '
 const events = () => readFileSync(join(runDir(), 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
 
 const BRANCH = 'team/RUN-0001/TASK-0001-task-a';
-function mkWorktree(name = 'wt1', branch = BRANCH): string {
+function mkWorktree(name = 'wt1', branch = BRANCH, underRoot = true): string {
   // the tmp fixture repo starts with an unborn HEAD; git worktree add needs a commit
   execFileSync('git', ['-C', repo, 'commit', '--allow-empty', '-m', 'base', '--no-gpg-sign'], { stdio: 'ignore' });
-  const path = join(repo, '..', `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+  const base = underRoot ? join(repo, '..', '.team-worktrees', 'RUN-0001') : join(repo, '..');
+  mkdirSync(base, { recursive: true });
+  const path = join(base, `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
   execFileSync('git', ['-C', repo, 'worktree', 'add', path, '-b', branch, 'HEAD'], { stdio: 'ignore' });
   return path;
 }
@@ -64,6 +66,14 @@ describe('worktree register (docs/16 §3.1–3.3; claimed→working; events #42/
     expect(badBranch.code).toBe('schema_invalid');
     const noPath = registerWorktree({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, path: join(repo, '..', 'nope-x'), branch: BRANCH });
     expect(noPath.code).toBe('io_error');
+    expect(readJson('tasks/TASK-0001/task.json').status).toBe('claimed');
+  });
+
+  it('rejects a worktree path outside run.worktree_root', () => {
+    const path = mkWorktree('outside', BRANCH, false);
+    const env = registerWorktree({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, path, branch: BRANCH });
+    expect(env.ok).toBe(false);
+    expect(env.code).toBe('path_escape_detected');
     expect(readJson('tasks/TASK-0001/task.json').status).toBe('claimed');
   });
 

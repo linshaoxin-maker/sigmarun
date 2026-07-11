@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { exportRun, submitEvidence } from '@sigmarun/core';
 import { cleanup } from '../../storage/test/helpers.js';
@@ -45,6 +45,22 @@ describe('export (16 §7; BDD-008-04/05; NFR-004 blocking rescan)', () => {
     expect(ignored.code).toBe('export_target_invalid');
     const inTeam = exportRun({ cwd: repo, runId: 'RUN-0001', to: '.team/export' });
     expect(inTeam.code).toBe('export_target_invalid');
+  });
+
+  it('refuses an export target whose realpath escapes the repository', () => {
+    const outside = join(repo, '..', `outside-export-${Date.now()}`);
+    const link = join(repo, 'docs', 'team-runs', 'RUN-LINK');
+    try {
+      mkdirSync(outside, { recursive: true });
+      mkdirSync(join(repo, 'docs', 'team-runs'), { recursive: true });
+      symlinkSync(outside, link, 'dir');
+      const env = exportRun({ cwd: repo, runId: 'RUN-0001', to: 'docs/team-runs/RUN-LINK', force: true });
+      expect(env.ok).toBe(false);
+      expect(env.code).toBe('path_escape_detected');
+      expect(existsSync(join(outside, 'plan.md'))).toBe(false);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it('existing target needs --force', () => {

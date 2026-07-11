@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { readJsonState, writeJsonStateAtomic, type ResolveOptions } from '@sigmarun/storage';
+import { existsSync, realpathSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { GatewayError, assertRealPathInside, readJsonState, writeJsonStateAtomic, type ResolveOptions } from '@sigmarun/storage';
 import { appendEvent, failEnvelope, okEnvelope, type Envelope } from '@sigmarun/core';
 import { findActiveClaim, loadClaims, readOrDefault, saveState, withRunLock, type TaskRow } from './claim-engine.js';
 
@@ -84,6 +84,16 @@ export function registerWorktree(opts: WorktreeRegisterOptions): Envelope {
         startedAt,
       });
     }
+    const run = readJsonState(join(runDir, 'run.json')).doc as { base_branch?: string; worktree_root?: string };
+    const repoRoot = dirname(dirname(dirname(runDir)));
+    const worktreeRoot = resolve(repoRoot, run.worktree_root ?? `../.team-worktrees/${runId}`);
+    try {
+      assertRealPathInside(worktreeRoot, opts.path, 'worktree path');
+    } catch (err) {
+      if (err instanceof GatewayError) return failEnvelope(err.code, err.message, { startedAt });
+      throw err;
+    }
+    const worktreePath = realpathSync(opts.path);
     const baseCommit = (() => {
       try {
         return execFileSync('git', ['-C', opts.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -91,7 +101,6 @@ export function registerWorktree(opts: WorktreeRegisterOptions): Envelope {
         return 'unknown';
       }
     })();
-    const run = readJsonState(join(runDir, 'run.json')).doc as { base_branch?: string };
 
     const wt = loadWorktrees(runDir, runId);
     const now = new Date().toISOString();
@@ -99,7 +108,7 @@ export function registerWorktree(opts: WorktreeRegisterOptions): Envelope {
     wt.doc.entries.push({
       worktree_id: worktreeId,
       task_id: opts.taskId,
-      path: opts.path,
+      path: worktreePath,
       branch: opts.branch,
       base_branch: run.base_branch ?? 'main',
       base_commit: baseCommit,
@@ -186,4 +195,3 @@ export function adoptWorktree(opts: WorktreeAdoptOptions): Envelope {
     });
   });
 }
-

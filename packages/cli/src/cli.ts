@@ -14,6 +14,7 @@ const EXIT_BY_CODE: Record<string, number> = {
   evidence_invalid: 4,
   export_redaction_hit: 4,
   export_target_invalid: 4,
+  path_escape_detected: 4,
   memory_entry_invalid: 4,
   rev_conflict: 6,
   duplicate_payload: 6,
