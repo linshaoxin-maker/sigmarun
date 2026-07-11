@@ -144,3 +144,10 @@
 - **单包装配落地**（22 §4.1 裁决执行）：`scripts/build-release.mjs`——esbuild bundle `packages/cli/dist/bin.js`（8 内部包并入，zod/minimatch 外置为真实依赖，adapter 模板本为内联字符串随 bundle 走），产出 `release/`（package.json name=`sigmarun` bin=`sigmarun` files=dist+README+CHANGELOG，engines node>=20）+ npm 面 README（双语开头，10 分钟上手）。
 - **tarball 冒烟**：全新 git repo `npm i sigmarun-0.1.0.tgz` → init、doctor 10/10、run import→task publish→agent register→claim-next→status（§9 分数口径 claimed=5% 正确）→audit 40 规则 0 findings→adapter install 13 模板。踩坑一枚：esbuild banner 与源 shebang 叠加成双 shebang（ESM 解析错误）——去 banner，入注释。
 - **发布门（用户侧）**：`npm whoami` ENEEDAUTH（未登录）；`sigmarun` 名字复核仍 E404 空闲（D12 占名窗口仍在）；license 未裁决（package.json 暂缺该字段）。发布命令与两项待裁决见会话报告。
+
+## 2026-07-11（发包前全面功能测试轮）
+
+- **10 批次真机场景战役**（被测物=打包 tarball 经 `npm i -g --prefix`，即用户拿到的形态）：①错误面+退出码全类；②BR-001 守卫矩阵（dry-run 零变更/优先级序/agent 上限/deps/path/approval/并行上限双模式/no_claimable）；③租约机器（心跳续租、风险分层、3×TTL sweep+previous_attempts、手动 reclaim、认养链）；④返工环（rev2+history、must_fix 镜像、INV-008 双侧）；⑤integrate 失败回退+report 验收+F4 取证；⑥生命周期（pause 拦 claim/cancel 级联/task add-cancel/图篡改检出；cancelled 终态不可 archive=契约正确）；⑦context+L4（问答闭环、hydrate 锚、秘钥拒收、supersede 移动、幽灵目标拒收、超限风险）；⑧watch NaN/终态退出 + export 脱敏零写入中止；⑨审计-篡改-repair（verified 中途干净、撕裂尾容错、AUD-034、repair 复原+幂等）；⑩codex adapter 幂等。
+- **修复 5 项（全部带回归锁，217/217）**：守卫码退出类回填（17 §3 行 150 合同破坏）；版本握手落地（此前仅类型定义）；verify pass 收编 claim（AUD-009 健康中途误报，审计真机首跑即中）+ 复活集扩 completed；import typo 盾（首个受益者=本测试自己的 default_policy 误置）；usage 清理。
+- **方法论战果**：契约是唯一裁判——我方 6 处预期错误全被"契约+实现"联合裁定为实现正确；真 bug 只出现在契约与实现的缝里（握手未实现、AUD-009 与 verify 不咬合）。
+- **悬置产品裁决**：F4——deps_satisfied_when 默认 `['done']` + done 仅在 report 产生 ⇒ run 内依赖任务默认永不可领（证据：verified 拒、integrated 拒、report 后下游永久 ready，进度 67%）。

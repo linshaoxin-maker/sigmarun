@@ -120,7 +120,28 @@ export function readJsonState(file: string): JsonState {
     throw new GatewayError('io_error', `Cannot read state file: ${file}`, { cause: String(e) });
   }
   const doc = JSON.parse(raw) as JsonState['doc'];
+  assertSupportedSchema(doc, file);
   return { doc, rev: typeof doc.rev === 'number' ? doc.rev : 0 };
+}
+
+/** All shipped schemas are major 1; every subsequent major must land with a migration chain (docs/21 §6.1). */
+const SUPPORTED_SCHEMA_MAJOR = 1;
+
+/**
+ * Version handshake on every state read (docs/17 §11, docs/21 §7 pre-flight defence):
+ * an unknown schema major means a newer gateway wrote this file — refuse instead of misreading it.
+ */
+function assertSupportedSchema(doc: Record<string, unknown>, file: string): void {
+  const sv = doc.schema_version;
+  if (typeof sv !== 'string') return; // derived/older files without the field stay readable
+  const m = /^team\.[a-z_]+\.v(\d+)$/.exec(sv);
+  if (!m) return; // foreign naming is not ours to police
+  if (Number(m[1]) > SUPPORTED_SCHEMA_MAJOR) {
+    throw new GatewayError(
+      'unsupported_schema_version',
+      `${file} carries ${sv}, newer than this gateway understands (v${SUPPORTED_SCHEMA_MAJOR}). Upgrade sigmarun or run its migrate.`,
+    );
+  }
 }
 
 /**

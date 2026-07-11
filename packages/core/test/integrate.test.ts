@@ -35,6 +35,14 @@ const readJson = (rel: string) => JSON.parse(readFileSync(join(runDir(), rel), '
 const events = () => readFileSync(join(runDir(), 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
 
 describe('integrate + report (16 §4; BDD-008-01/02/03)', () => {
+  it('verified tasks carry no live task claim (AUD-009 row 5 — verify completes the claim)', () => {
+    const claims = readJson('claims/task-claims.json').claims as Array<{ task_id: string; status: string }>;
+    for (const id of ['TASK-0001', 'TASK-0002', 'TASK-0003']) {
+      const live = claims.filter((c) => c.task_id === id && ['active', 'submitted'].includes(c.status));
+      expect(live).toEqual([]);
+    }
+  });
+
   it('start: deterministic topo order (deps before priority), run integrating', () => {
     const env = integrateStart({ cwd: repo, runId: 'RUN-0001' });
     expect(env.ok).toBe(true);

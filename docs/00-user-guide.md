@@ -1,50 +1,115 @@
 # 00. 用户使用手册（User Guide）
 
-> 日期：2026-07-10
-> 状态：v0.1（随实现迭代；本文是未来实现仓库 README 的底稿）
-> 读者：**使用者**，不是协议设计者。设计细节一概不讲，只讲怎么用。
-> 命名：本文用真名 `sigmarun`（设计文档 01–24 中的 `team <cmd>` 记号 ≡ `sigmarun <cmd>`，D12）。
+> 日期：2026-07-11
+> 状态：v0.2（随实现迭代；本文是未来实现仓库 README 的底稿）
+> 读者：**使用者**，不是协议设计者。只讲如何使用，以及人、coding agent、gateway 各自负责什么。
+> 命名：本文使用 `sigmarun`（旧设计文档中的 `team <cmd>` 等同于 `sigmarun <cmd>`，D12）。
 
 ---
 
 ## 1. 这是什么
 
-**sigmarun 让你同时开好几个 AI 编程窗口（Claude Code、Codex）像一个小团队一样干同一个项目，而不互相踩脚。**
+**sigmarun 让你在同一个项目中同时使用多个 Claude Code、Codex 窗口，像一个有任务队列、工作隔离和质量门禁的小型软件团队一样协作。**
 
-它由三部分组成，都装在你自己的机器上：
+它由四个层次组成：
 
-| 部分 | 是什么 | 你怎么感知它 |
+| 层次 | 负责什么 | 用户如何感知 |
 |---|---|---|
-| `sigmarun` CLI | 一个命令行工具（npm 安装） | 偶尔在终端敲，多数时候是 AI 在替你敲 |
-| `/team-*` 斜杠命令 | 装进 Claude Code / Codex 的一组命令 | 你在对话框里敲的就是它们 |
-| `.team/` 目录 | 项目里的协作账本（不进 git） | 基本不用碰，出问题时它是唯一事实 |
+| Claude Code / Codex | 理解项目、拆任务、写代码、审查、运行测试 | 你与之对话的 AI 编程工具 |
+| `/team-*` 命令或 Skill | 固定 AI 的协作步骤，要求它调用 gateway | 你在 AI 对话框中输入的主要操作面 |
+| `sigmarun` gateway CLI | 分配 ID、导入任务、原子认领、冲突检查、证据门禁、状态推进和审计 | 多数时候由 AI 调用；排障时你也可以直接调用 |
+| `.team/` | 当前项目的本地协作事实源 | 通常不直接编辑；状态、证据和事件都可回查 |
 
-**它不是**：不是新的 AI（拆任务、写代码、审代码全是 Claude/Codex 自己的本事）；不是网站或 App（没有界面要学）；不是云服务（全部本地，代码不出机器）。
+sigmarun **不是新的 AI**，不会自己理解需求或写代码；这些工作仍由 Claude Code、Codex 等 coding agent 完成。它也**不依赖中心化网站或云服务**。后续可选 dashboard 只是 `.team/` 的只读观察面，不负责拆任务、认领或修改状态。
+
+一句话边界：
+
+> Coding agent 出智能，Skill 固定流程，gateway 出秩序，`.team/` 保存事实。
 
 ---
 
-## 2. 安装（一次）
+## 2. 安装与项目接入
+
+### 2.1 安装 CLI
+
+要求 Node.js 20+ 和 Git。npm 正式发布后：
 
 ```bash
-npm i -g sigmarun      # 装 CLI
-cd 你的项目
-sigmarun init          # 生成 .team/、装好 /team-* 命令、往 AGENTS.md 加一段协议说明
-sigmarun doctor        # 自检：git、锁、命令都就绪了吗
+npm install -g sigmarun
 ```
 
-装完打开 Claude Code 或 Codex，输入 `/team-` 能看到补全，就绪。
+从源码仓库试用当前版本：
+
+```bash
+npm install
+npm run release
+npm install -g ./release
+```
+
+### 2.2 初始化项目
+
+进入要协作的 Git 项目：
+
+```bash
+cd 你的项目
+sigmarun init
+```
+
+`init` 只负责创建 `.team/`、写入项目级配置并检查 `.gitignore`。它不安装 Claude Code 或 Codex 的命令模板。
+
+### 2.3 安装工具适配器
+
+只安装你实际使用的工具：
+
+```bash
+sigmarun adapter install --tool=claude-code
+sigmarun adapter install --tool=codex
+```
+
+adapter 会在当前项目中安装 `/team-*` command 或 Skill，并在 `AGENTS.md` 中加入受管理的协议说明。adapter 文件属于项目协作配置，可以审阅后提交到 Git；`.team/` 本身不提交。
+
+最后运行：
+
+```bash
+sigmarun doctor
+```
+
+打开 Claude Code 或 Codex，输入 `/team-` 能看到对应命令，即完成项目接入。
 
 ---
 
-## 3. 第一次使用：一个 feature 的完整走法
+## 3. 先记住三个对象
 
-### ① 拆任务（1 个窗口）
+```text
+Project
+  RUN-0001       一次项目目标，例如“实现 auth phase 1”
+    TASK-0001    可独立领取、验证和审查的工程任务
+    TASK-0002
+    TASK-0003
+```
+
+- `RUN-ID` 是跨工具、跨窗口协作的入口。
+- `TASK-ID` 是单个 agent 的工作单元。
+- `CLAIM-ID`、`AGENT-ID`、锁和租约主要用于 gateway 审计；普通用户通常不需要手工管理。
+
+---
+
+## 4. 一个 feature 的完整旅途
+
+### 4.1 规划：让 coding agent 拆任务
+
+在任意一个已安装 adapter 的 AI 窗口输入：
 
 ```text
 /team-plan "实现 auth phase 1"
 ```
 
-Claude 读你的代码库，拆出一张任务表（每个任务带目标、验收标准、允许改动的文件范围、依赖关系），返回：
+这个过程分两层：
+
+1. Claude Code 或 Codex 阅读项目、历史记忆和测试约定，拆出任务 DAG。
+2. sigmarun 校验 agent 生成的 payload，分配 `RUN-ID`、`TASK-ID`，记录为 draft。
+
+示例输出：
 
 ```text
 Created RUN-0001 (draft): Implement auth phase 1
@@ -54,146 +119,240 @@ TASK-0003 Add auth API tests       (depends on TASK-0001)
 Next: /team-publish RUN-0001
 ```
 
-### ② 你放行
+sigmarun 不负责判断应该拆成哪些任务；它只负责验证格式、登记任务图并返回稳定 ID。
 
-看一眼拆得对不对。不满意就直接跟它说哪里要改，改完再：
+### 4.2 放行：发布任务队列
+
+先检查目标、依赖、验收标准和允许修改的路径。确认后：
 
 ```text
 /team-publish RUN-0001
 ```
 
-### ③ 开几个窗口一起干（产品的核心时刻）
+发布是显式的人类控制点。未发布的 draft task 不能被其他窗口领取。
 
-给每个窗口**起个名字**，让它们去领活：
+如果任务图只需局部调整，可通过 `sigmarun task add`、`sigmarun task cancel` 做受控变更；如果目标或拆解方式需要整体重做，则取消或保留当前 draft RUN，再执行一次 `/team-plan` 创建新 RUN。当前版本没有静默覆盖既有 RUN 的 `run amend`。不要直接编辑 `.team/`。
+
+### 4.3 分发：让多个实现窗口领取任务
+
+分别在 Claude Code、Codex 窗口中输入：
 
 ```text
-# Codex 窗口 1
+# Codex 窗口
 /team-dispatch RUN-0001 --as 左窗
 
-# Claude Code 窗口 2
+# Claude Code 窗口
 /team-dispatch RUN-0001 --as 右窗
-
-# 窗口 3 当专职审查员
-/team-dispatch RUN-0001 --as 审查员 --role reviewer
 ```
 
-每个窗口自己去队列里领任务、开自己的隔离工作区（git worktree）、写代码、跑测试、交证据。**默认干完一个任务就停下来向你汇报**，你点头才继续（想让它连续干：加 `--loop`）。
+每个窗口会依次：
 
-**想指定谁干什么？** 窗口有名字就能点名：
+1. 注册自己的 agent 身份。
+2. 通过 gateway 原子认领一个可执行的 `TASK-ID`。
+3. 读取该任务的依赖、消息、上游 handoff 和项目记忆。
+4. 按 gateway 建议执行 `git worktree add`，再让 gateway 校验并登记 worktree。
+5. 在隔离 worktree 中写代码、跑测试、提交小步 commit。
+6. 向 gateway 提交 evidence，然后停止并向你汇报。
+
+这里的责任边界是：**worktree 由 coding agent 创建，sigmarun gateway 只建议、校验和登记，不执行 `git worktree add`。**
+
+默认一个窗口完成一个任务就停下来。允许它连续领取任务时使用：
+
+```text
+/team-dispatch RUN-0001 --as 左窗 --loop
+```
+
+想指定任务：
 
 ```text
 /team-dispatch RUN-0001 --as 左窗 --task TASK-0003
 ```
 
-左窗就去领 TASK-0003；如果这个任务已被别人领了/依赖没好/文件范围冲突，它会告诉你确切原因，**不会**自作主张换一个干。
+如果任务依赖未完成、已被领取或路径冲突，窗口会返回 gateway 的结构化原因并停止，不会擅自换任务。
 
-### ④ 你当监工
+### 4.4 观察：随时查看项目进展
 
 ```text
 /team-status RUN-0001
 ```
 
-能看到：进度百分比、每个窗口在干哪个任务、风险（谁掉线了、哪两个任务抢文件）、**"等你处理"清单**——要你批准的敏感路径、agent 提的问题、停下来等确认的窗口，每项都带一条可以直接复制的命令。
+你会看到：
 
-懒得反复敲？终端挂一个巡检器：
+- 总体进度与各状态任务数量；
+- 每个 agent 正在处理的 `TASK-ID`；
+- stale lease、路径冲突、阻塞和开放问题；
+- Ready for review / Ready for verify；
+- Needs user，以及每项建议的下一步命令。
+
+需要持续观察时：
 
 ```bash
-sigmarun watch RUN-0001    # 每 30 秒刷一次，顺带自动回收挂掉的任务
+sigmarun watch RUN-0001
 ```
 
-### ⑤ 审查与收尾
+`watch` 每轮读取同一份 `.team/` 状态、执行租约回收检查并刷新进度。未来 dashboard 读取相同事实源，只提供更直观的 RUN、任务 DAG、agent、改动文件、风险和事件视图，不增加写入路径。
 
-实现窗口交活后，审查员窗口会自动领到 review 工作（或者你手动 `/team-review RUN-0001 TASK-0003`）。**任何窗口都不能审批自己写的代码**，这是死规矩。全部通过后：
+### 4.5 提交：实现完成不等于任务完成
+
+实现 agent 必须提交 evidence，其中至少包含：
+
+- 实际修改的文件和 commit；
+- 执行过的命令、退出码和输出引用；
+- 每条 acceptance criterion 的对应结果；
+- 已读取的上下文、遗留风险和给下游的 handoff。
+
+提交成功后任务进入 `submitted`，等待独立审查。agent 不能只在聊天里说“完成了”，也不能自行把任务标记为 done。
+
+### 4.6 审查：独立 reviewer 检查实现
+
+当 `/team-status` 显示 Ready for review 后，在一个没有实现过该任务的窗口中运行：
 
 ```text
-/team-integrate RUN-0001   # 按依赖顺序合成一个 integration 分支 + 集成报告
+/team-review RUN-0001 TASK-0003 --as 审查员
 ```
 
-**合进 main 永远是你自己发 PR**，工具不代劳。要留档：`sigmarun export --run RUN-0001`，出一份脱敏报告放进 `docs/` 提交。
+reviewer 会检查 diff、evidence、验收标准、错误路径、测试和越界改动，然后选择：
+
+- `approve`：进入独立验证；
+- `request changes`：记录 finding，任务返回修改流程。
+
+任何 agent 都不能审查或批准自己曾经拥有的任务。MVP 默认不要求 reviewer 窗口从 RUN 开始一直等待；需要审查时再启动即可。
+
+### 4.7 验证：独立 verifier 重新运行检查
+
+review 通过不等于验证通过。使用另一个未拥有该任务的窗口：
+
+```text
+/team-verify RUN-0001 TASK-0003 --as 验证员
+```
+
+verifier 必须亲自运行 build、focused tests、regression tests 和 scope check，并向 gateway 提交验证记录。通过后任务进入 `verified`；失败则回到修改流程，并保留失败证据。
+
+### 4.8 集成：agent 执行 Git，gateway 记录结果
+
+所有准备集成的任务 verified 后：
+
+```text
+/team-integrate RUN-0001
+```
+
+integrator agent 会：
+
+1. 从 gateway 获取确定性的集成顺序和 integration branch 建议。
+2. 自己执行 `git checkout`、`git merge --no-ff` 和必要的冲突处理。
+3. 每次 merge 后运行检查，并把 merge commit 或失败原因登记到 gateway。
+4. 运行 run 级全量验证，生成 `integration.md` 和 `report.md`。
+
+sigmarun gateway 不替 agent 执行 Git merge，也永远不自动合入 main。最终由你审阅 integration branch 和报告，然后发 PR 或手工合并。
+
+需要留档时：
+
+```bash
+sigmarun export RUN-0001
+```
+
+导出物经过脱敏检查后写入 `docs/team-runs/`，由你审阅并决定是否提交。
 
 ---
 
-## 4. 多窗口、多计划的规矩
+## 5. 谁在什么时候行动
 
-| 你想做的事 | 怎么做 | 背后的规矩 |
+| 阶段 | 主要行动者 | 用户是否需要介入 |
 |---|---|---|
-| 再来一个新目标 | 直接再 `/team-plan "新目标"` | **每次 plan = 一个新 RUN**，两个 RUN 并行没问题 |
-| 手滑把同一个计划跑两次 | 不用担心 | gateway 对计划算指纹，重复导入会被拦下并告诉你已有的 RUN 编号 |
-| 两个 RUN 要改同一片文件 | 默认：发布第二个时**警告**你 | 想要硬保险：把 `cross_run_path_policy` 设为 `block`，直接拦住 |
-| 中途改需求 | 目前：砍掉不要的任务（`/team-tasks` 里找到后 cancel）或开新 RUN | 增量改计划（run amend）在路线图上 |
-| 同一个窗口重复敲 dispatch | 没事 | 窗口按名字认身份，同名 = 同一个身份，一个身份同时只能持有一个任务 |
-| 让某窗口专职审查 | `--role reviewer` | 它只领 review 工作，不写代码 |
+| Plan | planning agent 拆任务，gateway 导入 | 检查任务图 |
+| Publish | gateway 发布 ready queue | 必须明确放行 |
+| Dispatch / Execute | implementer agent | 启动需要的窗口；处理提问和敏感路径批准 |
+| Submit | implementer agent + gateway evidence gate | 通常只看汇报 |
+| Review | 独立 reviewer agent | 在 Ready for review 时启动 reviewer |
+| Verify | 独立 verifier agent | 在 Ready for verify 时启动 verifier |
+| Integrate | integrator agent + gateway 记录 | 审阅报告，决定是否发 PR |
+| Observe | status / watch / 可选 dashboard | 任意时候查看，不改变状态 |
+
+MVP 是“多窗口 gateway”形态：用户负责打开 coding-agent 窗口，sigmarun 不负责启动或托管 Claude Code、Codex 进程。自动拉起和调度进程属于后续 local orchestrator 能力。
 
 ---
 
-### 跨 run 的决策去哪了？——项目记忆
+## 6. 多 RUN、变更与项目记忆
 
-每个 run 收尾时，值得留下的决策（"session 用 7 天滑动过期""auth 不许直接 import users"）可以**晋升**进 `docs/team/MEMORY.md`——它**进 git、跟着 clone 走**，之后每个新 run 的规划、每个任务的上下文都会自动带上它：换工具、换机器、隔一个月接手，决策都不丢。晋升要经你确认（出现在 Needs user 清单），每条都带出处（哪个 RUN、什么证据）可回查；过时了用新条替换旧条，历史仍可追溯。MVP 期间没有晋升命令也不要紧——直接手写这个文件，读取链路即刻生效。
-
-## 5. 为什么不会乱（锁的大白话）
-
-你最该担心的三件事——**抢同一个任务、改同一批文件、重复跑**——分别被这几层挡住：
-
-| 层 | 挡什么 | 机制 |
+| 你想做的事 | 推荐动作 | 规则 |
 |---|---|---|
-| 任务租约 | 两个窗口领到同一个任务 | 领任务是**原子操作**（文件锁保护），领到就有 30 分钟租约，干活自动续 |
-| 路径占用 | 两个任务同时改同一片文件 | 每个任务声明文件范围，范围重叠的任务**领不出来**，直到先占者交活 |
-| 身份上限 | 一个窗口囤积任务 | 一个窗口（按名字认）同时最多 1 个任务 |
-| 计划指纹 | 同一份计划跑两遍 | 重复导入直接拦下 |
-| 防篡改对账 | 有人绕过工具直接改账本 | 每个状态文件带版本号、事件流带连续序号，改了就会被审计抓到 |
+| 再做一个独立目标 | `/team-plan "新目标"` | 每个目标一个 RUN，可并行存在 |
+| 避免重复计划 | 正常重新导入即可 | gateway 用计划指纹阻止重复导入 |
+| 两个 RUN 修改相同路径 | 查看 publish 警告；必要时启用 block policy | 默认警告，可配置为禁止跨 RUN 路径重叠 |
+| 暂停整个 RUN | `sigmarun run pause RUN-0001` | 已有事实保留，停止新的正常推进 |
+| 恢复 RUN | `sigmarun run resume RUN-0001` | 从现有队列继续 |
+| 添加或取消任务 | `sigmarun task add` / `sigmarun task cancel` | 通过 gateway 记录变更，不直接改账本 |
+| 目标发生根本变化 | 创建新 RUN | 不把另一项工作悄悄塞进原 RUN |
 
-**窗口挂了怎么办**：任务不会死锁——租约过期 90 分钟后自动回收、放回队列，而且**带着"干到哪了"的快照**（改了哪些文件、最后的进度），下一个领到的窗口可以选择接着干或重来。
-
-**"做完了"怎么算数**：窗口嘴上说完成不算——必须交上证据（测试命令的真实输出、验收标准逐条对照），过不了机器校验就交不上去；交上去还要过另一个窗口的 review。所以你看到 status 里的"done"，是可以信的。
-
----
-
-## 6. 需要你出手的时刻
-
-这些事工具故意留给人，都会出现在 `/team-status` 的 **Needs user** 清单里，带着可复制的命令：
-
-| 时刻 | 你做什么 |
-|---|---|
-| 计划拆完 | 看一眼，`/team-publish` 放行 |
-| 窗口干完一个任务停下 | 说"继续"，或让它换角色 |
-| agent 要改敏感路径（如共享模块） | `sigmarun approve-paths ...` 批准或拒绝 |
-| agent 提了问题 / 卡住了 | 在那个窗口里直接回答它 |
-| 集成完成 | 自己发 PR 合 main |
+每个 RUN 的问题、决定和 handoff 进入 message pool 与 run memory。值得长期保留的结论可以通过 `sigmarun memory promote` 晋升到 `docs/team/MEMORY.md`。该文件进入 Git，后续 planning 和 dispatch 会读取它；`.team/` 的运行时事实仍保持本机本地。
 
 ---
 
-## 7. 出问题速查
+## 7. 为什么不会互相踩脚
 
-| 症状 | 一句话原因 | 动作 |
+| 防线 | 防止什么 | 机制 |
 |---|---|---|
-| 某窗口领不到任务 | 队列空 / 依赖没好 / 文件范围被占 | 看它报的原因；`/team-status` 看全局 |
-| 任务一直显示有人占着但没动静 | 那个窗口挂了 | 等自动回收，或 `sigmarun reclaim RUN TASK` 立即回收 |
-| 想知道某任务到底发生过什么 | — | `/team-task RUN TASK`：全部事实（证据、review、事件时间线） |
-| 怀疑账本被谁乱改过 | — | `sigmarun audit RUN`：全链体检，能测也能修（`sigmarun repair`） |
-| 误删了 `.team/` | 它不进 git，删了就没了 | 平时 `sigmarun backup --to <repo 外目录>` 留快照 |
-| 换了台机器 | `.team/` 是本机状态，不随 git 走 | 跨机协作是后续版本能力；报告可以 export 进 git |
+| 原子认领 | 两个窗口领取同一个任务 | `claim-next` 在 run lock 内完成选择和写入 |
+| 任务租约 | 挂掉的窗口永久占住任务 | heartbeat 续租，过期后可惰性回收或显式 reclaim |
+| 路径占用 | 两个任务并行修改同一范围 | claim 时检查 `paths.allow` 与现有 path claims |
+| 身份上限 | 一个窗口囤积多个实现任务 | 一个 agent 默认同时只能持有一个实现任务 |
+| Evidence gate | agent 口头宣布完成 | 必须提交可校验的 evidence |
+| 独立 review / verify | 自审、自证和错误传递 | owner 不能审批或独立验证自己的任务 |
+| 事件与审计 | 状态文件被绕过或半写入 | 事件序列、版本号、audit 和 repair 对账 |
 
 ---
 
-## 8. 命令速查（用户级）
+## 8. 出问题时怎么恢复
+
+| 症状 | 常见原因 | 动作 |
+|---|---|---|
+| 领不到任务 | 队列为空、依赖未完成、路径冲突、RUN paused | 查看返回的 `code` / `next_actions`，再看 `/team-status` |
+| 任务长期显示被某窗口占用 | agent 退出或租约过期 | 等 watch/下一次 claim 惰性回收，或 `sigmarun reclaim RUN TASK` |
+| 上一个 agent 留下未完成 worktree | 任务被回收 | 新 agent 选择 `worktree adopt` 继续，或创建新 attempt |
+| review 要求修改 | finding 已写入 message pool | 原实现者或新 implementer 重新 dispatch/resume，修改后再次 submit |
+| 想追踪某个任务 | 需要完整事实 | `/team-task RUN TASK`、`/team-evidence RUN TASK` |
+| 怀疑账本不一致 | 非正常退出或手工改动 | `sigmarun audit run RUN`；确认后执行 `sigmarun repair RUN` |
+| 误删 `.team/` | 本地事实源被删除 | 当前版本不能从 Git 自动恢复；保留的 export 只能用于审计留档，不能完整恢复运行态 |
+| 换机器或 fresh clone | `.team/` 不进 Git | 当前版本需创建新运行态；跨机器同步属于后续能力 |
+
+---
+
+## 9. 命令速查
+
+普通用户主要使用 slash commands：
 
 ```text
 规划     /team-plan "<目标>" [--mode feature|debug|review]
 放行     /team-publish <RUN>
-干活     /team-dispatch <RUN> [--as <窗口名>] [--task <TASK>] [--role reviewer|verifier] [--loop]
-看全局   /team-runs · /team-status <RUN> · /team-tasks <RUN>
-看细节   /team-task <RUN> <TASK> · /team-evidence <RUN> <TASK>
-收尾     /team-review <RUN> <TASK> · /team-verify <RUN> · /team-integrate <RUN>
-终端侧   sigmarun init|doctor|watch|audit|repair|reclaim|export|backup
+干活     /team-dispatch <RUN> [--as <窗口名>] [--task <TASK>] [--loop]
+观察     /team-runs · /team-status <RUN> · /team-tasks <RUN>
+细节     /team-task <RUN> <TASK> · /team-evidence <RUN> <TASK>
+门禁     /team-review <RUN> [TASK] · /team-verify <RUN> [TASK]
+收尾     /team-integrate <RUN>
 ```
+
+项目维护和排障使用 CLI：
+
+```text
+项目     sigmarun init · adapter install · doctor
+运行     sigmarun run show|list|pause|resume|cancel|archive
+任务     sigmarun task show|add|cancel|publish
+观察     sigmarun status|watch · worktree list · graph show
+恢复     sigmarun reclaim|resume|unblock · audit run · repair
+留档     sigmarun report|export · memory candidates|promote
+```
+
+`claim-next`、`heartbeat`、`worktree register`、`submit`、`review claim`、`verify submit`、`integrate record` 是 adapter 调用的 gateway 原语。普通用户通常不需要手工组合它们。
 
 完整命令契约见 [04 §1.1](04-command-workflows.md)（slash 面）与 [17 §1](17-cli-mcp-contract-and-error-model.md)（CLI 面）。
 
 ---
 
-## 9. 当前边界（诚实声明）
+## 10. 当前边界
 
-- **单机**：`.team/` 是本机协作账本，跨机器/远端同步是后续版本。
-- **首发支持 Claude Code + Codex**：Cursor 等属 Phase 2，协议已预留。
-- **不自动合 main**：集成产物是分支 + 报告，合入永远由你决定。
-- **信任模型是"合作式 + 事后审计"**：它防的是 AI 的失误、遗忘和越界，不防蓄意作恶的本机进程——账本就在你的文件系统上，最终权限属于你。
+- **单机事实源**：`.team/` 是本机协作账本，跨机器/远端同步属于后续版本。
+- **首发支持 Claude Code + Codex**：Cursor 等工具后续接入同一 gateway 协议。
+- **不托管 agent 进程**：MVP 不自动打开 Claude Code、Codex 或 Cursor；用户自己启动窗口。
+- **不自动合 main**：integrator agent 只生成 integration branch 和报告，最终合入由用户决定。
+- **dashboard 只读**：可选 dashboard 只展示 RUN、DAG、agent、文件、风险、消息和事件，不写 `.team/`。
+- **合作式信任 + 事后审计**：目标是约束 AI 的失误、遗忘和越界，不防御拥有本机文件权限的蓄意恶意进程。

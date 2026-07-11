@@ -76,7 +76,7 @@ describe('cli front-end (contract: docs/17 §1/§2.2 — parse, delegate, map ex
     expect(JSON.parse(claim.stdout).data.task_id).toBe('TASK-0001');
 
     const again = runCli(['claim-next', 'RUN-0001', `--agent=${agentId}`, '--json'], { cwd: repo });
-    expect(again.exitCode).toBe(1); // agent_claim_limit: fallback class per 17 §2.2
+    expect(again.exitCode).toBe(6); // agent_claim_limit joins the BR-001 conflict class (17 S2.2 row 6)
     expect(JSON.parse(again.stdout).code).toBe('agent_claim_limit');
 
     const rel = runCli(['release', 'RUN-0001', 'TASK-0001', `--agent=${agentId}`, '--json'], { cwd: repo });

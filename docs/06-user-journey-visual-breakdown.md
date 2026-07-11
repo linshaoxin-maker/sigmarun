@@ -4,21 +4,24 @@
 
 ---
 
-## 1. 总览：从计划到交付
+## 1. 总览：从项目接入到交付
 
 ```mermaid
 flowchart LR
-  U["User"] --> P["/team-plan goal<br/>in Claude Code"]
+  U["User"] --> I["init + adapter install<br/>+ doctor"]
+  I --> P["/team-plan goal<br/>in Claude Code / Codex"]
   P --> A1["Planning agent<br/>reads repo and breaks down work"]
   A1 --> G1[".team gateway<br/>imports run/task payload"]
   G1 --> R["RUN-ID"]
   R --> D["/team-dispatch RUN-ID<br/>in Codex / Claude / Cursor"]
   D --> G2[".team gateway<br/>claim-next with lock"]
-  G2 --> T["TASK-ID + CLAIM-ID + WORKTREE"]
-  T --> E["Agent executes task<br/>in isolated worktree"]
+  G2 --> T["TASK-ID + CLAIM-ID<br/>+ worktree suggestion"]
+  T --> E["Agent creates/registers worktree<br/>and executes task"]
   E --> S["submit evidence"]
-  S --> RV["review / verify / integrate"]
-  RV --> REP["run report + progress + audit trail"]
+  S --> RV["independent review"]
+  RV --> V["independent verification"]
+  V --> IN["integrator agent merges<br/>gateway records"]
+  IN --> REP["run report + progress + audit trail"]
 ```
 
 最关键的产品动作：
@@ -26,6 +29,8 @@ flowchart LR
 - `/team-plan` 输出 `RUN-ID`，它是跨工具协作入口。
 - `/team-dispatch RUN-ID` 输出 `TASK-ID`，它是当前 agent 的工作入口。
 - `.team gateway` 不拆任务，只负责导入、记录、发布、认领、锁、审计和进度。
+- worktree 与 Git merge 由 coding agent 执行；gateway 只建议、校验和登记。
+- dashboard 是可选只读观察面，不是任务分发或状态写入入口。
 
 ---
 
@@ -37,7 +42,9 @@ sequenceDiagram
   participant PlanningAgent as Claude/Codex/Cursor Planning Agent
   participant Gateway as .team Gateway
   participant DispatchAgent as Codex/Claude/Cursor Dispatch Agent
-  participant Reviewer as Reviewer/Integrator
+  participant Reviewer as Independent Reviewer
+  participant Verifier as Independent Verifier
+  participant Integrator as Integrator Agent
 
   User->>PlanningAgent: /team-plan "实现 auth phase 1"
   PlanningAgent->>PlanningAgent: 读项目、拆任务、生成 plan/task payload
@@ -46,6 +53,10 @@ sequenceDiagram
   Gateway->>Gateway: 写 run.json、team-task-list.json、tasks/*
   Gateway-->>PlanningAgent: RUN-0001
   PlanningAgent-->>User: 返回 RUN-0001
+
+  User->>PlanningAgent: /team-publish RUN-0001
+  PlanningAgent->>Gateway: task publish(RUN-0001)
+  Gateway->>Gateway: draft tasks -> ready queue
 
   User->>DispatchAgent: /team-dispatch RUN-0001
   DispatchAgent->>Gateway: register agent
@@ -57,15 +68,27 @@ sequenceDiagram
   Gateway-->>DispatchAgent: TASK-0003 + CLAIM-ID + worktree suggestion
   DispatchAgent->>Gateway: context hydrate
   Gateway-->>DispatchAgent: context pack（must-read refs）
-  DispatchAgent->>DispatchAgent: 创建 worktree、执行任务、heartbeat
+  DispatchAgent->>DispatchAgent: 执行 git worktree add、开发、测试
+  DispatchAgent->>Gateway: register worktree / heartbeat
   DispatchAgent->>Gateway: submit evidence(TASK-0003)
   Gateway->>Gateway: 更新 task status、progress、events
 
+  User->>Reviewer: /team-review RUN-0001 TASK-0003
   Reviewer->>Gateway: claim review(TASK-0003)
   Note over Reviewer,Gateway: review claim 也可经 claim-next --role reviewer 合成的虚拟工作项自主领取（D15）
   Reviewer->>Reviewer: 审查 diff/evidence/checks
   Reviewer->>Gateway: approve / request changes
-  Reviewer->>Gateway: verify / integrate
+
+  User->>Verifier: /team-verify RUN-0001 TASK-0003
+  Verifier->>Gateway: claim verify(TASK-0003)
+  Verifier->>Verifier: 独立重跑 build/tests/scope check
+  Verifier->>Gateway: submit verification
+
+  User->>Integrator: /team-integrate RUN-0001
+  Integrator->>Gateway: integrate start(RUN-0001)
+  Gateway-->>Integrator: integration branch + deterministic order
+  Integrator->>Integrator: 执行 git merge、冲突处理、全量验证
+  Integrator->>Gateway: integrate record + report
   Gateway-->>User: /team-status RUN-0001 可见进度与审计
 ```
 
@@ -75,15 +98,16 @@ sequenceDiagram
 
 | 阶段 | 用户动作 | Coding Agent 做什么 | `.team gateway` 做什么 | 主要记录 | 输出 |
 |---|---|---|---|---|---|
-| 1. Plan | 在 Claude Code 输入 `/team-plan "目标"` | 读项目、拆任务、生成 plan/task payload | 导入 payload，分配/校验 ID，写 run/task list | `run.json`, `plan.md`, `team-task-list.json`, `tasks/*`, `events.jsonl` | `RUN-ID` |
-| 2. Confirm / Publish | 用户确认任务图可以执行，`/team-publish RUN-ID` | 可根据反馈调整任务 payload | 将任务状态从 `draft/planned` 发布为 `ready` | `team-task-list.json`, `events.jsonl` | ready task queue |
-| 3. Dispatch | 在 Codex 输入 `/team-dispatch RUN-ID` | 注册当前 agent，请求领取任务 | 加锁，执行 `claim-next`，写 task/path claim | `agents/*`, `task-claims.json`, `path-claims.json`, `events.jsonl` | `TASK-ID`, `CLAIM-ID` |
-| 4. Execute | 用户等待或继续启动更多 agent | 创建 worktree，修改代码，heartbeat | 记录心跳和状态变化 | `agents/*`, `worktrees.json`, `events.jsonl` | working task |
-| 5. Submit | agent 完成任务 | 收集 diff、测试、验收结果 | 接收 evidence，推进状态到 `submitted` | `evidence/TASK-ID/`（evidence.json + evidence.md + outputs/）, `team-task-list.json`, `events.jsonl` | submitted task |
-| 6. Review | 用户或 reviewer agent 启动 review | 审查 diff/evidence/risk | 记录 review claim 和结果 | `reviews/TASK-ID/`（REVIEW-*.json + md，多轮）, `events.jsonl` | approved / changes requested |
-| 7. Verify | 用户或 integrator 启动验证 | 跑 focused/full checks | 记录 gate 结果，映射失败到 TASK-ID | `verification/`（VERIFY-*.json + md）, `events.jsonl` | verified / failed |
-| 8. Integrate | 用户触发集成 | 合并 worktree，处理冲突 | 记录 integration 状态和报告 | `integration.md`, `report.md`, `events.jsonl` | run report |
-| 9. Status | 任意时候 `/team-status RUN-ID` | 不需要智能推理也可展示 | 从事实重算 progress | `progress.json` 可重建 | progress/risk/next actions |
+| 0. Setup | `init`、安装所需 adapter、`doctor` | 无 | 初始化 `.team/`；adapter 安装 command/Skill | `.team/project.json`, `.team/counters.json`, adapter files, `AGENTS.md` | 可使用 `/team-*` 的项目 |
+| 1. Plan | 在 Claude Code/Codex 输入 `/team-plan "目标"` | 读项目与 memory，拆任务，生成 payload | 校验并导入 payload，分配 ID | `run.json`, `plan.md`, `team-task-list.json`, `tasks/*`, `events.jsonl` | `RUN-ID` |
+| 2. Confirm / Publish | 用户确认任务图，`/team-publish RUN-ID` | 展示并解释任务图 | 将 draft task 发布为 `ready` | `team-task-list.json`, `events.jsonl` | ready task queue |
+| 3. Dispatch | 在多个窗口输入 `/team-dispatch RUN-ID` | 注册身份，请求领取任务 | 加锁执行 `claim-next`，写 task/path claim | `agents/*`, `task-claims.json`, `path-claims.json`, `events.jsonl` | `TASK-ID`, `CLAIM-ID`, worktree suggestion |
+| 4. Execute | 用户等待或继续启动 agent | 创建 worktree、登记、修改代码、测试、heartbeat、消息交接 | 校验 worktree，记录心跳、消息和状态变化 | `agents/*`, `worktrees.json`, `messages.jsonl`, `events.jsonl` | working task |
+| 5. Submit | agent 完成实现 | 收集 diff、测试、验收和 handoff | 校验 evidence，推进到 `submitted` | `evidence/TASK-ID/`, `team-task-list.json`, `events.jsonl` | submitted task |
+| 6. Review | Ready for review 后启动独立 reviewer | 审查 diff/evidence/risk | 记录 review claim 和决定，禁止自审 | `reviews/TASK-ID/`, `events.jsonl` | approved / changes requested |
+| 7. Verify | Ready for verify 后启动独立 verifier | 亲自重跑 focused/full checks | 记录 gate 结果，禁止自证 | `verification/`, `events.jsonl` | verified / failed |
+| 8. Integrate | 用户触发 `/team-integrate` | 按 gateway 顺序执行 Git merge、冲突处理和全量验证 | 返回集成计划，逐项登记 merge/failure，生成报告 | `integration.md`, `report.md`, `events.jsonl` | integration branch + run report |
+| 9. Observe | 任意时候 `/team-status RUN-ID`、watch 或 dashboard | slash command 可解释状态 | 从事实重算 progress；dashboard 只读 | `progress.json` 可重建 | progress/risk/next actions |
 
 ---
 
@@ -110,10 +134,10 @@ flowchart TD
   O --> P["evidence/TASK-ID/<br/>evidence.json + evidence.md + outputs/"]
   O --> Q["events.jsonl<br/>heartbeat/evidence_submitted"]
 
-  R["review / verify"] --> S["reviews/TASK-ID/<br/>REVIEW-*.json + md"]
-  R --> T["verification/<br/>VERIFY-*.json + md"]
-  R --> U["integration.md"]
-  R --> V["report.md"]
+  R["independent review"] --> S["reviews/TASK-ID/<br/>REVIEW-*.json + md"]
+  VV["independent verify"] --> T["verification/<br/>VERIFY-*.json + md"]
+  IN["integrator agent + gateway record"] --> U["integration.md"]
+  IN --> V["report.md"]
 
   C --> W["progress.json<br/>derived"]
   D --> W
@@ -128,7 +152,7 @@ flowchart TD
 
 ## 5. 任务队列在哪里
 
-任务队列不是聊天上下文，也不是 dashboard 里的临时列表。它在：
+任务队列不是聊天上下文，也不是 dashboard 里的临时列表。dashboard、status 和 adapter 都读取同一个事实源：
 
 ```text
 .team/runs/RUN-0001/team-task-list.json

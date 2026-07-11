@@ -148,6 +148,25 @@ export function validatePayload(raw: unknown): { errors: ValidationIssue[]; warn
     warnings.push({ code: 'secret_in_payload', message: `payload text matches secret patterns (${hits.map((h) => h.kind).join(', ')}); consider rewording and re-importing (docs/24 §4.1, warn-only).` });
   }
 
+  // Typo shield (functional-test round F5', 2026-07-11): unknown keys still ride through
+  // (round-trip philosophy), but a silently dead policy knob is how limits fail to apply — warn at the door.
+  const KNOWN_RUN_KEYS = new Set(['title', 'mode', 'goal', 'base_branch', 'worktree_root', 'policy']);
+  const KNOWN_POLICY_KEYS = new Set([
+    'claim_ttl_minutes', 'max_parallel_tasks', 'require_review', 'require_verification',
+    'path_conflict_policy', 'reclaim_policy', 'path_release_on_submit',
+    'max_active_claims_per_agent', 'cross_run_path_policy', 'deps_satisfied_when',
+    'review_ttl_minutes', 'context',
+  ]);
+  const runObj = p.run as unknown as Record<string, unknown>;
+  const strayRun = Object.keys(runObj).filter((k) => !KNOWN_RUN_KEYS.has(k));
+  if (strayRun.length > 0) {
+    warnings.push({ code: 'unknown_run_field', message: `run carries unrecognized field(s): ${strayRun.join(', ')} — preserved but ignored by the gateway (did you mean policy.*?).` });
+  }
+  const strayPolicy = Object.keys((runObj.policy as Record<string, unknown> | undefined) ?? {}).filter((k) => !KNOWN_POLICY_KEYS.has(k));
+  if (strayPolicy.length > 0) {
+    warnings.push({ code: 'unknown_policy_key', message: `run.policy carries unrecognized knob(s): ${strayPolicy.join(', ')} — no policy behavior is attached to them.` });
+  }
+
   return { errors, warnings, payload: errors.length === 0 ? p : undefined };
 }
 

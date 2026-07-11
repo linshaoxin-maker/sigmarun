@@ -200,7 +200,7 @@ export function integrateRecord(opts: IntegrateRecordOptions): Envelope {
       if (existsSync(claimsFile)) {
         const claims = readJsonState(claimsFile);
         const owner = (claims.doc as { claims: Array<{ task_id: string; status: string; lease_until: string }> }).claims.find(
-          (c) => c.task_id === opts.taskId && c.status === 'submitted',
+          (c) => c.task_id === opts.taskId && ['submitted', 'completed'].includes(c.status),
         );
         if (owner) {
           const runPolicy = readJsonState(join(runDir, 'run.json')).doc as { default_policy?: { claim_ttl_minutes?: number } };

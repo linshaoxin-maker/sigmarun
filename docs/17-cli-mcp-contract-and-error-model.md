@@ -110,7 +110,7 @@
 | 3 | 锁超时 | lock_timeout |
 | 4 | 校验失败 | schema_invalid / evidence_invalid / payload_* |
 | 5 | 目标不存在 | *_not_found |
-| 6 | 冲突 | task_already_claimed / path_conflict / rev_conflict / requires_approval |
+| 6 | 冲突 | task_already_claimed / path_conflict / rev_conflict / requires_approval / no_claimable_task / deps_blocked / capability_mismatch / parallel_limit_reached / agent_claim_limit（BR-001 守卫族统一 6，2026-07-11 功能测试轮回填） |
 | 7 | 状态机拒绝 | invalid_transition / run_paused / run_not_active |
 | 8 | 存储/环境错误 | io_error / not_a_git_repo / team_root_not_found / unsupported_schema_version |
 | 1 | 其他失败 | 兜底 |

@@ -40,7 +40,9 @@ export function mapTaskToRework(runDir: string, runId: string, taskId: string, s
   const row = (list.doc as { tasks: TaskRow[] }).tasks.find((r) => r.task_id === taskId);
   if (row) row.status = 'changes_requested';
   writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
-  const owner = stores.taskClaims.doc.claims.find((c) => c.task_id === taskId && c.status === 'submitted');
+  // submitted = pre-verified rework (review fail); completed = post-verified rework (run-level /
+  // integration fail — verify closed the claim at verified per AUD-009, so the failure re-opens it).
+  const owner = stores.taskClaims.doc.claims.find((c) => c.task_id === taskId && ['submitted', 'completed'].includes(c.status));
   if (owner) {
     const run = readJsonState(join(runDir, 'run.json')).doc as { default_policy?: { claim_ttl_minutes?: number } };
     owner.status = 'active';
@@ -187,6 +189,20 @@ export function verifySubmit(opts: VerifyOptions): Envelope {
         const row = (list.doc as { tasks: TaskRow[] }).tasks.find((r) => r.task_id === taskId);
         if (row) row.status = 'verified';
         writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
+        // AUD-009 (18 matrix row 5): verified is claim-terminal — the owner's engagement ends here.
+        // Rework after a later run-level failure revives via the owner re-claim path, so completing is safe.
+        const claimsFile = join(runDir, 'claims', 'task-claims.json');
+        if (existsSync(claimsFile)) {
+          const tc = readJsonState(claimsFile);
+          let touched = false;
+          for (const c of (tc.doc as { claims: Array<{ task_id: string; status: string }> }).claims) {
+            if (c.task_id === taskId && ['active', 'submitted'].includes(c.status)) {
+              c.status = 'completed';
+              touched = true;
+            }
+          }
+          if (touched) writeJsonStateAtomic(claimsFile, tc.doc as Record<string, unknown>, { expectedRev: tc.rev });
+        }
       }
       appendEvent(runDir, {
         event: 'verification_passed',

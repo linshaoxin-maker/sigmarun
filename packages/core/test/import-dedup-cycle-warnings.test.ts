@@ -65,3 +65,25 @@ describe('import warnings (BDD-001-05; docs/09 §8.2, 24 §4.1 warn-only)', () =
     expect(env.warnings.some((w) => w.code === 'publication_downgraded')).toBe(true);
   });
 });
+
+describe('unknown-field typo shield (functional-test round F5\')', () => {
+  it('warns when run or run.policy carries unrecognized keys', async () => {
+    const { importRun, initProject } = await import('@sigmarun/core');
+    const { mkTmpGitRepo, cleanup } = await import('../../storage/test/helpers.js');
+    const { validPayload } = await import('./payload-fixture.js');
+    const repo = mkTmpGitRepo();
+    try {
+      initProject({ cwd: repo });
+      const payload = validPayload() as { run: Record<string, unknown> };
+      payload.run.default_policy = { max_parallel_tasks: 2 }; // classic misplacement
+      payload.run.policy = { claim_ttl_minutess: 5 }; // typo'd knob
+      const env = importRun({ cwd: repo, payload: payload as Record<string, unknown> });
+      expect(env.ok).toBe(true);
+      const codes = env.warnings.map((w) => w.code);
+      expect(codes).toContain('unknown_run_field');
+      expect(codes).toContain('unknown_policy_key');
+    } finally {
+      cleanup(repo);
+    }
+  });
+});

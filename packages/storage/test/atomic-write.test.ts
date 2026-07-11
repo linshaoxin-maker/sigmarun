@@ -59,3 +59,23 @@ describe('atomic write with rev optimistic lock (contract: docs/17 §5, docs/21 
     expect(leftovers).toEqual([]);
   });
 });
+
+describe('schema version handshake (17 S11 / 21 S7 pre-flight defence)', () => {
+  it('refuses a state file whose schema major is newer than this gateway', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'sr-hs-'));
+    const file = join(dir, 'run.json');
+    writeFileSync(file, JSON.stringify({ schema_version: 'team.run.v2', rev: 1 }));
+    expect(() => readJsonState(file)).toThrowError(/unsupported_schema_version|newer than this gateway/);
+    try { readJsonState(file); } catch (e) { expect((e as { code: string }).code).toBe('unsupported_schema_version'); }
+
+    writeFileSync(file, JSON.stringify({ schema_version: 'team.run.v1', rev: 1 }));
+    expect(readJsonState(file).rev).toBe(1);
+    writeFileSync(file, JSON.stringify({ rev: 2 }));
+    expect(readJsonState(file).rev).toBe(2); // field-less derived files stay readable
+    writeFileSync(file, JSON.stringify({ schema_version: 'someone.elses.v9', rev: 3 }));
+    expect(readJsonState(file).rev).toBe(3); // foreign naming is not ours to police
+  });
+});
