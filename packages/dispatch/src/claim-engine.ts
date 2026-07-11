@@ -418,6 +418,10 @@ function depthOf(taskId: string, rows: Map<string, TaskRow>, memo = new Map<stri
 type GuardFailure = { code: ReasonCode; message: string; data?: Record<string, unknown> };
 
 /** Per-candidate BR-001 guards #5..#8; returns null when claimable. */
+/** D20 (2026-07-11): done is only minted at report, so the in-run default gate is verified —
+ * upstream past independent verification unblocks downstream (docs/10 §6; stricter via policy). */
+const DEPS_SATISFIED_DEFAULT = ['verified', 'integrated', 'done'];
+
 function candidateGuard(
   row: TaskRow,
   rowsById: Map<string, TaskRow>,
@@ -579,7 +583,7 @@ export function claimNext(opts: ClaimOptions): Envelope {
         }
         return failEnvelope('no_claimable_task', `Task ${row.task_id} is ${row.status}, not ready.`, { startedAt });
       }
-      const failure = candidateGuard(row, rowsById, role, stores, approvals, policy.deps_satisfied_when ?? ['done']);
+      const failure = candidateGuard(row, rowsById, role, stores, approvals, policy.deps_satisfied_when ?? DEPS_SATISFIED_DEFAULT);
       if (failure) {
         return failEnvelope(failure.code, failure.message, {
           data: { candidate_task_id: row.task_id, ...(failure.data ?? {}) },
@@ -602,7 +606,7 @@ export function claimNext(opts: ClaimOptions): Envelope {
     const excluded: Array<{ task_id: string; reason: string }> = [];
     const claimable: TaskRow[] = [];
     for (const row of rows.filter((r) => r.status === 'ready' && typeFilter(r))) {
-      const failure = candidateGuard(row, rowsById, role, stores, approvals, policy.deps_satisfied_when ?? ['done']);
+      const failure = candidateGuard(row, rowsById, role, stores, approvals, policy.deps_satisfied_when ?? DEPS_SATISFIED_DEFAULT);
       if (failure) excluded.push({ task_id: row.task_id, reason: failure.code });
       else claimable.push(row);
     }

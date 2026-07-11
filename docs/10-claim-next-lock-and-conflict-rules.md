@@ -221,19 +221,19 @@ flowchart TD
 | Agent 上限 | 未超 `max_active_claims_per_agent`（默认 1） | `agent_claim_limit` |
 | Role | `--role reviewer/verifier` 时不查 ready 队列，改从 submitted/approved 队列合成虚拟 review/verify 工作项（D15，[15](15-run-task-state-machine-and-lifecycle.md) §7） | 无候选时 `no_claimable_task` |
 
-依赖满足的 MVP 规则：
+依赖满足的默认规则（**D20 裁决，2026-07-11**——`done` 仅在 report 验收时产生，`["done"]` 默认档使 run 内依赖链不可行进，真机取证后改判）：
 
 ```text
-depends_on task status in [done]
+depends_on task status in [verified, integrated, done]
 ```
 
-后续可以按 run policy 放宽为：
+更严格（等 run 收官验收）或更宽松（评审通过即可）按 run policy 调整：
 
 ```text
-approved / verified / integrated / done
+done-only（最严） / approved+（最宽）
 ```
 
-放宽档的策略字段（FEAT-010 实现期定名回填）：`policy.deps_satisfied_when: string[]`，默认 `["done"]`；BDD-008 的"链上任务先后 verified"旅程即以 `["approved","verified","integrated","done"]` 档达成。
+策略字段（FEAT-010 实现期定名回填）：`policy.deps_satisfied_when: string[]`，默认 `["verified","integrated","done"]`；下游 worktree 缺上游未集成产出时用 [16](16-git-worktree-and-team-root.md) §3.6 的上游支合并模式。
 
 ---
 

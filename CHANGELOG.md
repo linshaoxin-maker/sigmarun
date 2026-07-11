@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **D20**：`deps_satisfied_when` 默认档改为 `["verified","integrated","done"]`（产品负责人裁决，2026-07-11）——原 `["done"]` 与"done 仅在 report 验收产生"（15 §3.3）组合使 run 内依赖链默认不可行进（功能测试轮 F4 真机取证）；上游过独立验证即解锁下游，配合 16 §3.6 上游支合并模式；要更严由 planner 显式收紧。docs/10 §6 + docs/13 D20 + 回归锁；tarball 真机复验通过。测试 218/218。
+
 - 全面功能测试轮（发包前，10 批次真机场景，被测物=打包 tarball 经 `npm i -g`）：错误面/BR-001 守卫矩阵/租约-回收-认养链/返工环+INV-008/integrate 失败回退/生命周期级联/context+L4 记忆/watch+export 脱敏中止/审计-篡改-repair 闭环/adapter 幂等全部真机通过。**修复 5 项**：①claim 守卫码 5 枚落兜底 exit 1 → 统一入冲突类 exit 6（17 §2.2 行 6 回填，合同破坏修复）；②**版本握手实现**（17 §11/21 §7）——readJsonState 单点拒读未知 schema major（exit 8）；③verify pass 收编 task claim（AUD-009 行 5：verified 即 claim 终态，健康 run 中途审计不再误报）+ 返工复活集双点扩 completed；④import 未知字段警告（unknown_run_field/unknown_policy_key）；⑤usage 清理。测试 217/217。悬置产品裁决：deps_satisfied_when 默认 `['done']` 使 run 内依赖链不可行进。
 
 - 发布装配（形态 B 前置，22 §4.1 单包裁决落地）：`npm run release` = 构建 + esbuild 把 8 个 workspace 包 bundle 成单包 `sigmarun`（单 bin，zod/minimatch 保持外部依赖，模板内联随包）；npm 面 README；tarball 冒烟通过（全新 repo 安装 → init/doctor 10 项 → import→publish→claim→status(§9 5%)→audit 40 规则→adapter install 13 模板）。实际 `npm publish` 待账号登录与 license 裁决。

@@ -151,3 +151,7 @@
 - **修复 5 项（全部带回归锁，217/217）**：守卫码退出类回填（17 §3 行 150 合同破坏）；版本握手落地（此前仅类型定义）；verify pass 收编 claim（AUD-009 健康中途误报，审计真机首跑即中）+ 复活集扩 completed；import typo 盾（首个受益者=本测试自己的 default_policy 误置）；usage 清理。
 - **方法论战果**：契约是唯一裁判——我方 6 处预期错误全被"契约+实现"联合裁定为实现正确；真 bug 只出现在契约与实现的缝里（握手未实现、AUD-009 与 verify 不咬合）。
 - **悬置产品裁决**：F4——deps_satisfied_when 默认 `['done']` + done 仅在 report 产生 ⇒ run 内依赖任务默认永不可领（证据：verified 拒、integrated 拒、report 后下游永久 ready，进度 67%）。
+
+## 2026-07-11（D20 裁决落地）
+
+- F4 以选择题（4 档带推荐）呈报，产品负责人选定推荐档：**默认 `["verified","integrated","done"]`**。落地：claim-engine 双站点统一 `DEPS_SATISFIED_DEFAULT` 常量、docs/10 §6 默认规则改写（保留 done-only 为最严档语义）、docs/13 决策账本 D20、回归锁（verified 上游默认解锁下游）+ 现有 deps 测试复核（上游 claimed/ready 场景不受影响）。tarball 重装真机复验：hand-set verified 上游后定向领取下游成功。218/218。

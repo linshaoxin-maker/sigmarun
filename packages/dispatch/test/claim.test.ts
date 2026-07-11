@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { approvePaths, claimNext } from '@sigmarun/dispatch';
+import { readJsonState, writeJsonStateAtomic } from '@sigmarun/storage';
 import { cleanup } from '../../storage/test/helpers.js';
 import { mkClaimRepo, registerDefault } from './fixture.js';
 
@@ -125,6 +126,18 @@ describe('claim-next guards (BR-001)', () => {
     expect(env.ok).toBe(false);
     expect(env.code).toBe('task_already_claimed');
     expect(readJson('claims/task-claims.json').claims.length).toBe(1);
+  });
+
+  it('D20 default gate: a verified upstream unblocks its downstream without any policy knob', () => {
+    repo = mkClaimRepo([{ key: 'a' }, { key: 'b', deps: ['a'] }]);
+    const agent = registerDefault(repo);
+    // hoist TASK-0001 to verified by hand — the gate reads row status, not the journey
+    const list = readJsonState(join(repo, '.team', 'runs', 'RUN-0001', 'team-task-list.json'));
+    (list.doc as { tasks: Array<{ task_id: string; status: string }> }).tasks[0]!.status = 'verified';
+    writeJsonStateAtomic(join(repo, '.team', 'runs', 'RUN-0001', 'team-task-list.json'), list.doc as Record<string, unknown>, { expectedRev: list.rev });
+    const env = claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent, taskId: 'TASK-0002' });
+    expect(env.ok).toBe(true);
+    expect((env.data as { task_id: string }).task_id).toBe('TASK-0002');
   });
 
   it('directed claim on a dependency-blocked task is deps_blocked (BDD-004-03, row 5)', () => {
