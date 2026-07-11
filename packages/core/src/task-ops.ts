@@ -1,0 +1,240 @@
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  GatewayError,
+  tryAcquireLock,
+  runLockPath,
+  readJsonState,
+  resolveTeamRoot,
+  writeJsonStateAtomic,
+  writeJsonStateNew,
+  type ResolveOptions,
+} from '@sigmarun/storage';
+import { failEnvelope, okEnvelope, type Envelope, type EnvelopeWarning } from './envelope.js';
+import { appendEvent } from './events.js';
+import { TASK_TYPES } from './payload.js';
+
+export interface TaskAddOptions extends ResolveOptions {
+  runId: string;
+  task: {
+    title?: string;
+    type?: string;
+    objective?: string;
+    acceptance?: string[];
+    depends_on?: string[]; // existing TASK-IDs
+    paths?: { allow?: string[]; avoid?: string[]; requires_approval?: string[] };
+    required_checks?: string[];
+    suggested_role?: string;
+    priority?: number;
+    weight?: number;
+    review?: { required?: boolean; focus?: string[] };
+  };
+}
+
+export interface TaskCancelOptions extends ResolveOptions {
+  runId: string;
+  taskId: string;
+}
+
+const id4 = (prefix: string, n: number) => `${prefix}-${String(n).padStart(4, '0')}`;
+
+/** Task states a user may still cancel; integrated/done results are frozen (docs/15 §3.3). */
+const CANCELLABLE = new Set(['draft', 'ready', 'claimed', 'working', 'blocked', 'submitted', 'reviewing', 'changes_requested', 'approved', 'verified']);
+
+function openRunTx(opts: ResolveOptions & { runId: string }, startedAt: number, body: (runDir: string) => Envelope): Envelope {
+  let teamRoot: string;
+  try {
+    teamRoot = resolveTeamRoot(opts).teamRoot;
+  } catch (err) {
+    const ge = err as GatewayError;
+    return failEnvelope(ge.code, ge.message, { startedAt });
+  }
+  const runDir = join(teamRoot, 'runs', opts.runId);
+  if (!existsSync(join(runDir, 'run.json'))) {
+    return failEnvelope('run_not_found', `Run ${opts.runId} does not exist under .team/runs/.`, { startedAt });
+  }
+  const release = tryAcquireLock(runLockPath(runDir));
+  if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
+  try {
+    return body(runDir);
+  } catch (err) {
+    if (err instanceof GatewayError) return failEnvelope(err.code, err.message, { startedAt });
+    throw err;
+  } finally {
+    release();
+  }
+}
+
+/**
+ * Add one task to an existing run (docs/04 primitives; same shape as an import task,
+ * with depends_on referencing existing TASK-IDs). Lands as draft — publish stays explicit.
+ */
+export function taskAdd(opts: TaskAddOptions): Envelope {
+  const startedAt = Date.now();
+  return openRunTx(opts, startedAt, (runDir) => {
+    const run = readJsonState(join(runDir, 'run.json')).doc as { status: string };
+    if (!['planned', 'active'].includes(run.status)) {
+      return failEnvelope('invalid_transition', `Run ${opts.runId} is ${run.status}; task add needs planned or active.`, { startedAt });
+    }
+
+    const t = opts.task ?? {};
+    const errors: string[] = [];
+    if (!t.title || t.title.trim() === '') errors.push('title must not be empty');
+    if (!t.objective || t.objective.trim() === '') errors.push('objective must not be empty');
+    if (!t.acceptance || t.acceptance.length === 0) errors.push('acceptance needs at least one testable item');
+    const type = t.type ?? 'implementation';
+    if (!(TASK_TYPES as readonly string[]).includes(type)) errors.push(`type must be one of ${TASK_TYPES.join('/')}`);
+    for (const g of [...(t.paths?.allow ?? []), ...(t.paths?.avoid ?? []), ...(t.paths?.requires_approval ?? [])]) {
+      if (g.startsWith('/') || g.includes('..')) errors.push(`path glob must be repo-relative without ..: ${g}`);
+    }
+    const listFile = join(runDir, 'team-task-list.json');
+    const list = readJsonState(listFile);
+    const rows = (list.doc as { tasks: Array<Record<string, unknown> & { task_id: string }> }).tasks;
+    const known = new Set(rows.map((r) => r.task_id));
+    for (const dep of t.depends_on ?? []) {
+      if (!known.has(dep)) errors.push(`depends_on references unknown task ${dep}`);
+    }
+    if (errors.length > 0) {
+      return failEnvelope('schema_invalid', `Task draft failed ${errors.length} check(s).`, { data: { errors }, startedAt });
+    }
+
+    const countersFile = join(runDir, 'counters.json');
+    const counters = readJsonState(countersFile);
+    const cdoc = counters.doc as Record<string, unknown>;
+    const taskNo = Number(cdoc.next_task ?? rows.length + 1);
+    const taskId = id4('TASK', taskNo);
+    const now = new Date().toISOString();
+
+    const warnings: EnvelopeWarning[] = [];
+    if ((t.paths?.allow ?? []).length === 0) warnings.push({ code: 'task_without_paths', message: `${taskId} has no paths.allow; path conflicts cannot protect it.` });
+    if ((t.required_checks ?? []).length === 0) warnings.push({ code: 'task_without_checks', message: `${taskId} has no required_checks; its evidence gate will be weaker.` });
+
+    const dir = join(runDir, 'tasks', taskId);
+    mkdirSync(dir, { recursive: true });
+    writeJsonStateNew(join(dir, 'task.json'), {
+      schema_version: 'team.task.v1',
+      run_id: opts.runId,
+      task_id: taskId,
+      client_task_key: null,
+      title: t.title,
+      type,
+      status: 'draft',
+      objective: t.objective,
+      context: [],
+      acceptance: t.acceptance,
+      depends_on: t.depends_on ?? [],
+      suggested_role: t.suggested_role ?? 'implementer',
+      priority: t.priority ?? 50,
+      weight: t.weight ?? 1,
+      paths: t.paths ?? {},
+      required_checks: t.required_checks ?? [],
+      review: t.review ?? {},
+      metadata: { created_by: 'user', created_at: now },
+    });
+    writeFileSync(join(dir, 'task.md'), `# ${taskId} ${t.title}\n\n## Objective\n\n${t.objective}\n\n## Acceptance\n\n${t.acceptance!.map((a) => `- ${a}`).join('\n')}\n`);
+
+    rows.push({
+      task_id: taskId,
+      title: t.title,
+      type,
+      status: 'draft',
+      priority: t.priority ?? 50,
+      weight: t.weight ?? 1,
+      role: t.suggested_role ?? 'implementer',
+      depends_on: t.depends_on ?? [],
+      owner_agent_id: null,
+      claim_id: null,
+      paths: t.paths ?? {},
+      required_checks: t.required_checks ?? [],
+      progress: 0,
+      task_ref: `tasks/${taskId}/task.json`,
+    });
+    writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
+
+    const graphFile = join(runDir, 'task-graph.json');
+    const graph = readJsonState(graphFile);
+    const gdoc = graph.doc as { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
+    gdoc.nodes.push({ task_id: taskId, title: t.title, type });
+    let edgeNo = Number(cdoc.next_edge ?? gdoc.edges.length + 1);
+    for (const dep of t.depends_on ?? []) {
+      gdoc.edges.push({ edge_id: id4('EDGE', edgeNo++), from: dep, to: taskId, kind: 'blocks', required: true });
+    }
+    writeJsonStateAtomic(graphFile, graph.doc as Record<string, unknown>, { expectedRev: graph.rev });
+    writeJsonStateAtomic(countersFile, { ...cdoc, next_task: taskNo + 1, next_edge: edgeNo }, { expectedRev: counters.rev });
+
+    appendEvent(runDir, {
+      event: 'task_created',
+      actor: { type: 'user', id: 'user' },
+      run_id: opts.runId,
+      task_id: taskId,
+      payload: { via: 'task_add' },
+    });
+    return okEnvelope({
+      message: `${taskId} added as draft ("${t.title}").`,
+      data: { task_id: taskId, status: 'draft' },
+      warnings,
+      nextActions: [`Publish it when ready: sigmarun task publish ${opts.runId} --tasks=${taskId}`],
+      startedAt,
+    });
+  });
+}
+
+/** Cancel one task (docs/15 §3.3): live claims cascade to cancelled; integrated/done stay frozen. */
+export function taskCancel(opts: TaskCancelOptions): Envelope {
+  const startedAt = Date.now();
+  return openRunTx(opts, startedAt, (runDir) => {
+    const taskFile = join(runDir, 'tasks', opts.taskId, 'task.json');
+    if (!existsSync(taskFile)) {
+      return failEnvelope('task_not_found', `Task ${opts.taskId} does not exist on ${opts.runId}.`, { startedAt });
+    }
+    const task = readJsonState(taskFile);
+    const status = (task.doc as { status: string }).status;
+    if (!CANCELLABLE.has(status)) {
+      return failEnvelope('invalid_transition', `Task ${opts.taskId} is ${status}; cancel applies before integration.`, { startedAt });
+    }
+
+    (task.doc as { status: string }).status = 'cancelled';
+    writeJsonStateAtomic(taskFile, task.doc as Record<string, unknown>, { expectedRev: task.rev });
+    const listFile = join(runDir, 'team-task-list.json');
+    const list = readJsonState(listFile);
+    const row = (list.doc as { tasks: Array<{ task_id: string; status: string; owner_agent_id: string | null; claim_id: string | null }> }).tasks.find(
+      (r) => r.task_id === opts.taskId,
+    );
+    if (row) {
+      row.status = 'cancelled';
+      row.owner_agent_id = null;
+      row.claim_id = null;
+    }
+    writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
+
+    const released: string[] = [];
+    const LIVE = new Set(['active', 'submitted']);
+    for (const rel of ['claims/task-claims.json', 'claims/path-claims.json', 'claims/review-claims.json']) {
+      const file = join(runDir, rel);
+      if (!existsSync(file)) continue;
+      const state = readJsonState(file);
+      let dirty = false;
+      for (const c of ((state.doc as { claims?: Array<{ claim_id: string; task_id: string; status: string }> }).claims ?? [])) {
+        if (c.task_id === opts.taskId && LIVE.has(c.status)) {
+          c.status = 'cancelled';
+          released.push(c.claim_id);
+          dirty = true;
+        }
+      }
+      if (dirty) writeJsonStateAtomic(file, state.doc as Record<string, unknown>, { expectedRev: state.rev });
+    }
+
+    appendEvent(runDir, {
+      event: 'task_cancelled',
+      actor: { type: 'user', id: 'user' },
+      run_id: opts.runId,
+      task_id: opts.taskId,
+      payload: { released_claim_ids: released },
+    });
+    return okEnvelope({
+      message: `${opts.taskId} cancelled (was ${status}); ${released.length} claim(s) cascaded.`,
+      data: { task_id: opts.taskId, released_claim_ids: released },
+      startedAt,
+    });
+  });
+}

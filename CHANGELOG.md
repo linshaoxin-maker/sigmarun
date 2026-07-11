@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- P1 面收官：`run pause/resume/cancel/archive`（15 §2.3 全转换，cancel 级联 claim/task + BDD-007-09，reported 只可 archive）、`task add`（草稿落位 + 图节点/blocks 边 + 依赖校验）与 `task cancel`（级联三类 claim）、`worktree list`、`graph show`（节点带派生状态）；**审计目录 40/40 全在线**——AUD-023…028（上下文/handoff 对账批）+ AUD-034（账本重放引擎，与 repair 共用 foldLedger 单一事实源，补齐 review_blocked/task_cancelled 映射）；review block 决定同步镜像 blocker 消息（AUD-024 一致性）；AUD-026 收敛为仅对含条目的记忆文件要求出处（import 骨架不再误报）。测试 213/213。
+
 - 收尾轮批 2：SCA 归零（根因=镜像源缺 audit 端点，官方源补跑并修 glob 传递依赖）；review `block` 决定 + `unblock` 原语（15 §3.3 blocked 双边，事件 #34/#15）；task 级 `review.required` 覆盖 run 级 false（15 §9 更严格者胜，import 保留字段缺省语义）；integrate 终结 task claim（AUD-009 真机命中即修）；AUD-032 对升级前遗留账本降 warn；adapter 补齐至 12 命令模板 + 4 Codex skills；conformance suite（25 命令面单信封断言，M38）+ NFR-001 真进程并发压测（8 路 claim 唯一分派 + seq 无缝）；CI 三平台×双 Node 矩阵工作流；reviewDecide/grantReviewClaim 写序对齐 17 §5.3；audit evidence 缓存与 synthesizeReview 单遍预建；docs/04 §1.1 命令面实现对齐注记回填。测试 205/205。
 
 - 审查修复轮：全量 8 角度审查（43 候选 → 16 验证 → 14 成立）后修复 14 项——publish 锁路径统一（互斥恢复）、repair 重放表补 verified/integrated（修复工具不再损坏健康 run）、review sweep 半提交、verify 独立性守卫（作者不可自验）、applyReclaim 提交点次序、failures_mapped 守卫、定向领取并行上限、memory promote 双锁与路径逃逸、events.jsonl 容错读取（readEventsSafe）、watch NaN 挂起、run show 策略字段、integrate 租约策略化、verify 输出截断；storage 新增 tryAcquireLock/runLockPath 收敛 11 处锁样板。测试 192/192（+12 回归锁）。详见 docs/02-phases/code-review-2026-07-11.md。

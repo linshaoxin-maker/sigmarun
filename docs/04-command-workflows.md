@@ -85,7 +85,7 @@ team export
 完整命令总表（读/写、锁、MVP 归属）以 [17](17-cli-mcp-contract-and-error-model.md) §1 为准。
 
 **实现对齐注记（P5 收尾轮回填，2026-07-11——规则 3 显式执行）**：实现 CLI 依 D12 名 `sigmarun`，以下原语名在实现期定名或补全，本表按此对齐：
-`team message post` → `sigmarun msg post` / `msg list [--open]`；`team progress` → `sigmarun status`（别名 `progress`）；`team verify` → `sigmarun verify submit`（task/run 双目标）；`team integrate start` 之外补 `integrate record [--failed]` 与 `report`（16 §4.1 记账/收尾半场）；`team block / unblock` 的 block 半场由 `review block`（14 §3.2 decision=block）触达，`unblock` 独立原语已落；新增 `resume`（15 §3.3 changes_requested→working 边）、`run show`（19 §3.2 dispatch 第 1 步）、`memory candidates`（25 §4 候选发现）、`memory promote`（25 §4）、`adapter install`（22 §安装）。`task add` / `run pause / resume / cancel / archive` / `worktree list` / `graph show` 尚未实现（P1）。
+`team message post` → `sigmarun msg post` / `msg list [--open]`；`team progress` → `sigmarun status`（别名 `progress`）；`team verify` → `sigmarun verify submit`（task/run 双目标）；`team integrate start` 之外补 `integrate record [--failed]` 与 `report`（16 §4.1 记账/收尾半场）；`team block / unblock` 的 block 半场由 `review block`（14 §3.2 decision=block）触达，`unblock` 独立原语已落；新增 `resume`（15 §3.3 changes_requested→working 边）、`run show`（19 §3.2 dispatch 第 1 步）、`memory candidates`（25 §4 候选发现）、`memory promote`（25 §4）、`adapter install`（22 §安装）。`task add` / `task cancel` / `run pause / resume / cancel / archive` / `worktree list` / `graph show` / `unblock` 已随 P1 收尾轮落地（2026-07-11）——命令面与本表全量对齐。
 
 关键边界：
 

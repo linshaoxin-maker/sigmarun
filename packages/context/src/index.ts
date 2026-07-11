@@ -1,4 +1,4 @@
-export { postMessage, listMessages, hydrateContext, validateGraph, updateRunMemory, MESSAGE_TYPES } from './context-plane.js';
+export { postMessage, listMessages, hydrateContext, validateGraph, showGraph, updateRunMemory, MESSAGE_TYPES } from './context-plane.js';
 export type {
   PostMessageOptions,
   ListMessagesOptions,

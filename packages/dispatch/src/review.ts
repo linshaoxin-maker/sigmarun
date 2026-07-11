@@ -285,7 +285,35 @@ export function reviewDecide(opts: ReviewDecideOptions): Envelope {
     }
 
     // Mirror must_fix findings into the message pool first so records can back-link message_ref (docs/12 §6).
+    // A block decision mirrors a blocker message too — AUD-024 requires every blocked task to carry one.
     const mirroredIds: string[] = [];
+    if (opts.decision === 'block') {
+      const countersFile = join(runDir, 'counters.json');
+      const counters = readJsonState(countersFile);
+      const cdoc = counters.doc as Record<string, unknown>;
+      const n = Number(cdoc.next_msg ?? 1);
+      const messageId = `MSG-${String(n).padStart(4, '0')}`;
+      mkdirSync(join(runDir, 'context'), { recursive: true });
+      appendFileSync(
+        join(runDir, 'context', 'messages.jsonl'),
+        JSON.stringify({
+          message_id: messageId,
+          run_id: runId,
+          task_id: opts.taskId,
+          from_agent_id: opts.agentId,
+          to: 'run',
+          type: 'blocker',
+          visibility: 'run',
+          body: String(findings[0]?.message ?? 'Review blocked: a human decision is needed before work continues.'),
+          created_at: new Date().toISOString(),
+          status: 'open',
+          refs: [`reviews/${opts.taskId}`],
+        }) + '\n',
+        'utf8',
+      );
+      writeJsonStateAtomic(countersFile, { ...cdoc, next_msg: n + 1 }, { expectedRev: counters.rev });
+      mirroredIds.push(messageId);
+    }
     if (mustFix.length > 0) {
       const countersFile = join(runDir, 'counters.json');
       const counters = readJsonState(countersFile);

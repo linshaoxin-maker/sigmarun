@@ -391,3 +391,22 @@ export function updateRunMemory(opts: MemoryUpdateOptions): Envelope {
     startedAt,
   });
 }
+
+/** Read-only DAG view: nodes with derived status + edges (status stays derived, 13 §5.5). */
+export function showGraph(opts: GraphValidateOptions): Envelope {
+  const startedAt = Date.now();
+  const ctx = openRun(opts);
+  if (ctx instanceof GatewayError) return failEnvelope(ctx.code, ctx.message, { startedAt });
+  const graph = readJsonState(join(ctx.runDir, 'task-graph.json')).doc as {
+    nodes?: Array<{ task_id: string; title: string; type: string }>;
+    edges?: Array<{ edge_id?: string; from: string; to: string; kind: string; required?: boolean }>;
+  };
+  const rows = (readJsonState(join(ctx.runDir, 'team-task-list.json')).doc as { tasks: Array<{ task_id: string; status: string }> }).tasks;
+  const statusOf = new Map(rows.map((r) => [r.task_id, r.status]));
+  const nodes = (graph.nodes ?? []).map((n) => ({ ...n, status: statusOf.get(n.task_id) ?? 'unknown' }));
+  return okEnvelope({
+    message: `Graph on ${ctx.runId}: ${nodes.length} node(s), ${(graph.edges ?? []).length} edge(s).`,
+    data: { nodes, edges: graph.edges ?? [] },
+    startedAt,
+  });
+}

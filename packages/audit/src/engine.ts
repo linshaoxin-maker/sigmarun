@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { GatewayError, readJsonState, resolveTeamRoot, scanForSecrets, type ResolveOptions } from '@sigmarun/storage';
 import { collectStateRevs, failEnvelope, fileInScope, okEnvelope, pathsOverlapConservative, readEventsSafe, type Envelope } from '@sigmarun/core';
+import { foldLedger } from './replay.js';
 
 export interface AuditOptions extends ResolveOptions {
   runId: string;
@@ -27,6 +28,8 @@ interface Ctx {
   reviewClaims: Array<{ claim_id: string; task_id: string; reviewer_agent_id: string; status: string }>;
   approvals: Array<{ task_id: string; paths: string[]; status: string }>;
   events: Array<{ seq: number; event: string; task_id?: string; payload?: Record<string, unknown> }>;
+  messages: Array<{ message_id: string; type: string; task_id: string | null; created_at: string; refs?: string[]; in_reply_to?: string }>;
+  answered: Set<string>;
   taskDetail: (taskId: string) => Record<string, unknown> | null;
   evidence: (taskId: string) => Record<string, unknown> | null;
   reviews: (taskId: string) => Array<Record<string, unknown>>;
@@ -37,13 +40,7 @@ const ACTIVE = (c: { status: string }) => c.status === 'active';
 const TASK_CLAIM_TERMINAL = new Set(['released', 'reclaimed', 'cancelled']);
 
 /** docs/18 §4 — rules whose data planes exist today. The rest are registered skips (docs/18 §7 honesty over coverage). */
-const SKIPPED: Array<{ rule_id: string; reason: string }> = [
-  ...['AUD-023', 'AUD-024', 'AUD-025', 'AUD-026', 'AUD-027', 'AUD-028'].map((r) => ({
-    rule_id: r,
-    reason: 'context/report reconciliation batch lands after the submit/review loop closes (FEAT-009/010)',
-  })),
-  { rule_id: 'AUD-034', reason: 'event replay engine is a P1 item' },
-];
+const SKIPPED: Array<{ rule_id: string; reason: string }> = []; // all 40 catalog rules are live (docs/18 §4)
 
 type Rule = { id: string; check: (ctx: Ctx) => Finding[] };
 
@@ -737,6 +734,160 @@ const MEMORY_RULES: Rule[] = [
 ];
 RULES.push(...MEMORY_RULES);
 
+/** Messages, handoffs, and replay reconciliation (AUD-023..028, 034) — the last catalog batch. */
+const CONTEXT_RULES: Rule[] = [
+  {
+    id: 'AUD-023',
+    check: (ctx) => {
+      const graph = readJsonState(join(ctx.runDir, 'task-graph.json')).doc as {
+        edges?: Array<{ edge_id?: string; from: string; to: string; kind: string; required?: boolean; context_refs?: string[] }>;
+      };
+      const DOWN = new Set(['ready', 'claimed', 'working']);
+      const UP = new Set(['submitted', 'reviewing', 'approved', 'verified', 'integrated', 'done']);
+      const out: Finding[] = [];
+      for (const e of (graph.edges ?? []).filter((e) => e.required && ['blocks', 'produces_context_for'].includes(e.kind))) {
+        const refs = e.context_refs ?? [];
+        if (refs.length === 0) continue;
+        if (!UP.has(taskStatus(ctx, e.from, ''))) continue;
+        if (!DOWN.has(taskStatus(ctx, e.to, ''))) continue;
+        const missing = refs.filter((r) => !existsSync(join(ctx.runDir, r.split('#')[0]!)));
+        if (missing.length > 0) {
+          out.push(finding('AUD-023', 'warn', `${e.to} required context refs are missing: ${missing.join(', ')}.`,
+            'Upstream owner restores the handoff files or fixes the refs.', [e.edge_id ?? e.to]));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: 'AUD-024',
+    check: (ctx) => {
+      const out: Finding[] = [];
+      const openBlockers = ctx.messages.filter((m) => (m.type === 'blocker' || m.type === 'question') && !ctx.answered.has(m.message_id));
+      const DONEISH = new Set(['submitted', 'reviewing', 'approved', 'verified', 'integrated', 'done']);
+      for (const row of ctx.rows) {
+        const status = taskStatus(ctx, row.task_id, row.status);
+        const taskBlockers = openBlockers.filter((m) => m.task_id === row.task_id && m.type === 'blocker');
+        if (status === 'blocked' && taskBlockers.length === 0 && !openBlockers.some((m) => m.task_id === row.task_id)) {
+          out.push(finding('AUD-024', 'error', `${row.task_id} is blocked but carries no open blocker/question message.`,
+            `Post the blocker (sigmarun msg post --type=blocker) or unblock: sigmarun unblock ${ctx.runId} ${row.task_id}.`, [row.task_id]));
+        }
+        if (DONEISH.has(status) && taskBlockers.length > 0) {
+          out.push(finding('AUD-024', 'warn', `${row.task_id} is ${status} but still has ${taskBlockers.length} open blocker message(s).`,
+            'Answer or resolve the blocker messages so status stops lying.', taskBlockers.map((m) => m.message_id)));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: 'AUD-025',
+    check: (ctx) => {
+      const ttlHours = Number(((ctx.run.default_policy as { context?: { question_ttl_hours?: number } } | undefined)?.context?.question_ttl_hours) ?? 24);
+      const now = Date.now();
+      return ctx.messages
+        .filter((m) => (m.type === 'question' || m.type === 'blocker') && !ctx.answered.has(m.message_id))
+        .filter((m) => now - Date.parse(m.created_at) > ttlHours * 3_600_000)
+        .map((m) =>
+          finding('AUD-025', 'warn',
+            `${m.message_id}${m.task_id ? ` (${m.task_id})` : ''} has waited ${Math.round((now - Date.parse(m.created_at)) / 3_600_000)}h without an answer (TTL ${ttlHours}h).`,
+            'Assign an answerer or escalate to the user.', [m.message_id]),
+        );
+    },
+  },
+  {
+    id: 'AUD-026',
+    check: (ctx) => {
+      const out: Finding[] = [];
+      const candidates: string[] = ['context/run-memory.md'];
+      const handoffDir = join(ctx.runDir, 'context', 'tasks');
+      if (existsSync(handoffDir)) for (const f of readdirSync(handoffDir)) candidates.push(`context/tasks/${f}`);
+      for (const rel of candidates) {
+        const abs = join(ctx.runDir, rel);
+        if (!existsSync(abs)) continue;
+        const text = readFileSync(abs, 'utf8');
+        // Only agent-written content needs provenance: the import skeleton has headers and
+        // "(none yet)" placeholders but no bullet entries — those are fine.
+        const hasEntries = text.split('\n').some((l) => l.trimStart().startsWith('- '));
+        if (!hasEntries) continue;
+        if (!/Source[s]?:|refs:/i.test(text)) {
+          out.push(finding('AUD-026', 'warn', `${rel} carries content without source refs (INV-012).`,
+            'Rewrite it via sigmarun memory update with Source: lines.', [rel]));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: 'AUD-027',
+    check: (ctx) => {
+      const ids = new Set(ctx.messages.map((m) => m.message_id));
+      const out: Finding[] = [];
+      for (const m of ctx.messages) {
+        for (const ref of m.refs ?? []) {
+          const ok = /^MSG-\d{4}$/.test(ref)
+            ? ids.has(ref)
+            : existsSync(join(ctx.runDir, ref.split('#')[0]!)) || existsSync(join(ctx.repoRoot, ref.split('#')[0]!));
+          if (!ok) {
+            out.push(finding('AUD-027', 'warn', `${m.message_id} references a missing ${ref}.`,
+              'Sender fixes the ref; downstream must not rely on it.', [m.message_id]));
+          }
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: 'AUD-028',
+    check: (ctx) => {
+      const graph = readJsonState(join(ctx.runDir, 'task-graph.json')).doc as {
+        edges?: Array<{ from: string; to: string; kind: string; required?: boolean }>;
+      };
+      const withUpstream = new Set(
+        (graph.edges ?? []).filter((e) => e.required !== false && ['blocks', 'produces_context_for'].includes(e.kind)).map((e) => e.to),
+      );
+      const out: Finding[] = [];
+      for (const row of ctx.rows.filter((r) => withUpstream.has(r.task_id))) {
+        const ev = ctx.evidence(row.task_id);
+        if (!ev) continue; // pre-submit tasks are AUD-023 territory
+        const hydrate = [...ctx.events].reverse().find((e) => e.event === 'context_hydrated' && e.task_id === row.task_id) as
+          | { payload?: { must_read?: string[] } }
+          | undefined;
+        if (!hydrate) {
+          out.push(finding('AUD-028', 'warn', `${row.task_id} has required upstream context but no context_hydrated event (M22).`,
+            'Owner re-reads the upstream handoff and acks it on the next submit.', [row.task_id]));
+          continue;
+        }
+        const acked = new Set((ev.context_ack as string[] | undefined) ?? []);
+        const missing = (hydrate.payload?.must_read ?? []).filter((m) => !acked.has(m));
+        if (missing.length > 0) {
+          out.push(finding('AUD-028', 'warn', `${row.task_id} did not acknowledge upstream handoff item(s): ${missing.join(', ')}.`,
+            'Owner re-reads and acks on the next submit; reviewer scrutinises.', [row.task_id]));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: 'AUD-034',
+    check: (ctx) => {
+      const expectations = foldLedger(ctx.events as never);
+      const out: Finding[] = [];
+      for (const [taskId, expect] of expectations) {
+        const actual = taskStatus(ctx, taskId, '(missing)');
+        if (actual !== expect.status) {
+          out.push(finding('AUD-034', 'error',
+            `${taskId} is ${actual} but the event chain replays to ${expect.status} — a transition happened without its event.`,
+            `Inspect events for ${taskId}; the ledger is authoritative — run sigmarun repair ${ctx.runId} to roll state to it.`, [taskId]));
+        }
+      }
+      return out;
+    },
+  },
+];
+RULES.push(...CONTEXT_RULES);
+
+
 /** Read-only batch audit — findings are data, exit stays 0 (docs/18 §7). */
 export function auditRun(opts: AuditOptions): Envelope {
   const startedAt = Date.now();
@@ -781,6 +932,14 @@ export function auditRun(opts: AuditOptions): Envelope {
       return existsSync(f) ? ((readJsonState(f).doc as { approvals: Ctx['approvals'] }).approvals ?? []) : [];
     })(),
     events,
+    messages: (() => {
+      const f = join(runDir, 'context', 'messages.jsonl');
+      if (!existsSync(f)) return [];
+      return readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => {
+        try { return JSON.parse(l); } catch { return null; }
+      }).filter(Boolean) as Ctx['messages'];
+    })(),
+    answered: new Set<string>(),
     taskDetail: (taskId) => {
       if (!detailCache.has(taskId)) {
         const f = join(runDir, 'tasks', taskId, 'task.json');
@@ -818,6 +977,10 @@ export function auditRun(opts: AuditOptions): Envelope {
         : [];
     })(),
   };
+
+  for (const m of ctx.messages) {
+    if (m.type === 'answer' && m.in_reply_to) ctx.answered.add(m.in_reply_to);
+  }
 
   const findings: Finding[] = [];
   if (safe.corrupt_lines.length > 0) {

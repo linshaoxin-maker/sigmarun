@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { initProject, doctorProject, importRun, publishTasks, runShow, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
-import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, verifySubmit } from '@sigmarun/dispatch';
-import { postMessage, listMessages, hydrateContext, validateGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
+import { initProject, doctorProject, importRun, publishTasks, runShow, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, taskAdd, taskCancel, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
+import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, verifySubmit, listWorktrees } from '@sigmarun/dispatch';
+import { postMessage, listMessages, hydrateContext, validateGraph, showGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
 import { statusRun, runList, taskShow, evidenceShow, watchOnce } from '@sigmarun/watch';
 import { auditRun, repairRun } from '@sigmarun/audit';
@@ -186,6 +186,42 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     env = !runId
       ? failEnvelope('usage_error', 'Usage: sigmarun repair <RUN-ID> [--json]')
       : repairRun({ cwd: opts.cwd, env: opts.env, runId });
+  } else if (cmd === 'run' && ['pause', 'resume', 'cancel', 'archive'].includes(args[1] ?? '')) {
+    const runId = args[2];
+    if (!runId) {
+      env = failEnvelope('usage_error', `Usage: sigmarun run ${args[1]} <RUN-ID> [--json]`);
+    } else {
+      const op = { pause: runPause, resume: runResume, cancel: runCancel, archive: runArchive }[args[1] as 'pause' | 'resume' | 'cancel' | 'archive'];
+      env = op({ cwd: opts.cwd, env: opts.env, runId });
+    }
+  } else if (cmd === 'task' && args[1] === 'add') {
+    const runId = args[2];
+    const file = flag(argv, 'file');
+    if (!runId || !file) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun task add <RUN-ID> --file=<task.json> [--json]');
+    } else {
+      try {
+        env = taskAdd({ cwd: opts.cwd, env: opts.env, runId, task: JSON.parse(readFileSync(file, 'utf8')) });
+      } catch (e) {
+        env = failEnvelope('schema_invalid', `Task file is not valid JSON: ${String(e)}`);
+      }
+    }
+  } else if (cmd === 'task' && args[1] === 'cancel') {
+    const runId = args[2];
+    const taskId = args[3];
+    env = !runId || !taskId
+      ? failEnvelope('usage_error', 'Usage: sigmarun task cancel <RUN-ID> <TASK-ID> [--json]')
+      : taskCancel({ cwd: opts.cwd, env: opts.env, runId, taskId });
+  } else if (cmd === 'worktree' && args[1] === 'list') {
+    const runId = args[2];
+    env = !runId
+      ? failEnvelope('usage_error', 'Usage: sigmarun worktree list <RUN-ID> [--json]')
+      : listWorktrees({ cwd: opts.cwd, env: opts.env, runId });
+  } else if (cmd === 'graph' && args[1] === 'show') {
+    const runId = args[2];
+    env = !runId
+      ? failEnvelope('usage_error', 'Usage: sigmarun graph show <RUN-ID> [--json]')
+      : showGraph({ cwd: opts.cwd, env: opts.env, runId });
   } else if (cmd === 'run' && args[1] === 'show') {
     const runId = args[2];
     if (!runId) {

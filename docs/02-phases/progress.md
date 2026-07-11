@@ -120,7 +120,14 @@
 - 计数：**205/205 用例**、36 测试文件、33 条审计规则在线。收尾轮 ①–⑦ 全部销账。
 - **剩余 P1 面**（非阻塞）：run pause/resume/cancel/archive、task add/cancel、worktree list、graph show、AUD-023–028 对账批、AUD-034 重放、CLAUDE.md @import 接线、npm 打包发布（22 §Phase 1）。
 
+## 2026-07-11（P1 面收官）
+
+- **命令面补全**：run pause/resume/cancel/archive（15 §2.3，cancel 级联 + reported→archive 裁决锚定）、task add/cancel、worktree list、graph show、（前轮已落）unblock——04 §1.1 canonical 表全量对齐，注记更新。
+- **审计 40/40 全在线**：AUD-023…028 上下文对账批 + AUD-034 重放引擎（audit 与 repair 共用 `foldLedger`，顺带补 review_blocked/task_cancelled 状态映射）；review block 镜像 blocker 消息保 AUD-024 一致性；AUD-026 骨架误报收敛。rules_skipped = []。
+- 真机冒烟：add→graph→pause→claim 拒→resume→task cancel→run cancel 级联→二次 cancel 拒，audit 0 findings。测试 213/213。
+- **剩余（有意不做/待用户决策）**：npm 发布（需 npm scope 归属决策——@sigmarun 组织或个人 scope，用户定夺后 `npm publish` 即可，包结构已就绪）；CLAUDE.md `@import` 接线（用户个人文件，00 号手册已记做法）；跨 repo/remote sync（Phase 3 域）。
+
 ## 下一步队列
 
-1. 收尾轮（原 ①–⑦ + 上表卫生项，按序）；完成后 22 号 §MVP 打包面（npm 发布物）评估。
+1. npm 发布评估（等 scope 决策）；推 GitHub 跑三平台 CI 矩阵；真机双窗口实战一轮 run。
 2. 沿途维护：ASM-004/005/006 按期限确认；backflow 事件显式标注。

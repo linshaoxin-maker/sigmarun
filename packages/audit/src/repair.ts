@@ -10,6 +10,7 @@ import {
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { appendEvent, failEnvelope, okEnvelope, readEventsSafe, type Envelope } from '@sigmarun/core';
+import { foldLedger } from './replay.js';
 
 export interface RepairOptions extends ResolveOptions {
   runId: string;
@@ -22,25 +23,6 @@ interface RepairAction {
   to: unknown;
 }
 
-/** Ledger replay: the last state-bearing event per task wins (docs/17 §5.3 — events are the commit point). */
-const EVENT_STATUS: Record<string, string> = {
-  task_created: 'draft',
-  task_published: 'ready',
-  task_claimed: 'claimed',
-  task_started: 'working',
-  task_released: 'ready',
-  task_reclaimed: 'ready',
-  evidence_submitted: 'submitted',
-  review_skipped: 'approved',
-  review_claimed: 'reviewing',
-  review_released: 'submitted',
-  review_approved: 'approved',
-  changes_requested: 'changes_requested',
-  verification_passed: 'verified',
-  task_integrated: 'integrated',
-  task_blocked: 'blocked',
-  task_unblocked: 'working',
-};
 
 /**
  * Mechanical crash-residue repair (docs/17 §5.3): meta counter forward-roll, task/list status
@@ -65,7 +47,7 @@ export function repairRun(opts: RepairOptions): Envelope {
 
   try {
     const safe = readEventsSafe(runDir);
-    const events = safe.events as Array<{ seq: number; event: string; task_id?: string; actor?: { id: string }; claim_id?: string; payload?: Record<string, unknown> }>;
+    const events = safe.events;
 
     // ----- plan (dry) -----
     const plan: RepairAction[] = [];
@@ -81,29 +63,7 @@ export function repairRun(opts: RepairOptions): Envelope {
       plan.push({ target: 'events.meta.json', field: 'next_seq', from: meta.next_seq, to: maxSeq + 1 });
     }
 
-    const ledger = new Map<string, { status: string; owner: string | null; claim: string | null }>();
-    for (const e of events) {
-      // Run-level verification failures name their tasks in payload.failures_mapped, not task_id.
-      if (e.event === 'verification_failed') {
-        const mappedIds = (e.payload?.failures_mapped as string[] | undefined) ?? (e.task_id ? [e.task_id] : []);
-        for (const id of mappedIds) {
-          const prev = ledger.get(id);
-          ledger.set(id, { status: 'changes_requested', owner: prev?.owner ?? null, claim: prev?.claim ?? null });
-        }
-        continue;
-      }
-      const status = EVENT_STATUS[e.event];
-      if (!status || !e.task_id) continue;
-      const owner = ['task_claimed', 'task_started'].includes(e.event) ? (e.actor?.id ?? null) : null;
-      const claim = ['task_claimed', 'task_started'].includes(e.event) ? (e.claim_id ?? null) : null;
-      const keepOwner = ['evidence_submitted', 'review_skipped', 'review_claimed', 'review_released', 'review_approved', 'verification_passed', 'task_integrated', 'task_blocked', 'task_unblocked'].includes(e.event);
-      const prev = ledger.get(e.task_id);
-      ledger.set(e.task_id, {
-        status,
-        owner: keepOwner ? (prev?.owner ?? null) : owner,
-        claim: keepOwner ? (prev?.claim ?? null) : claim,
-      });
-    }
+    const ledger = foldLedger(events);
 
     const listFile = join(runDir, 'team-task-list.json');
     const list = readJsonState(listFile);

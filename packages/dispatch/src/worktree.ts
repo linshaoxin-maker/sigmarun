@@ -3,7 +3,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { GatewayError, assertRealPathInside, readJsonState, writeJsonStateAtomic, type ResolveOptions } from '@sigmarun/storage';
 import { appendEvent, failEnvelope, okEnvelope, type Envelope } from '@sigmarun/core';
-import { findActiveClaim, loadClaims, readOrDefault, saveState, withRunLock, type TaskRow } from './claim-engine.js';
+import { findActiveClaim, loadClaims, openRun, readOrDefault, saveState, withRunLock, type TaskRow } from './claim-engine.js';
 
 export interface WorktreeRegisterOptions extends ResolveOptions {
   runId: string;
@@ -193,5 +193,31 @@ export function adoptWorktree(opts: WorktreeAdoptOptions): Envelope {
       nextActions: ['Read previous_attempts in the task brief before continuing.'],
       startedAt,
     });
+  });
+}
+
+export interface WorktreeListOptions extends ResolveOptions {
+  runId: string;
+}
+
+/** Read-only worktree inventory (docs/04 primitives; feeds AUD-029 triage). */
+export function listWorktrees(opts: WorktreeListOptions): Envelope {
+  const startedAt = Date.now();
+  const ctx = openRun(opts);
+  if (ctx instanceof GatewayError) return failEnvelope(ctx.code, ctx.message, { startedAt });
+  const wt = loadWorktrees(ctx.runDir, ctx.runId);
+  const entries = wt.doc.entries.map((e) => ({
+    worktree_id: e.worktree_id,
+    task_id: e.task_id,
+    path: e.path,
+    branch: e.branch,
+    status: e.status,
+    owner_agent_id: e.owner_agent_id,
+    exists: existsSync(e.path),
+  }));
+  return okEnvelope({
+    message: `${entries.length} worktree entr${entries.length === 1 ? 'y' : 'ies'} on ${ctx.runId} (${entries.filter((e) => e.status === 'active').length} active).`,
+    data: { entries },
+    startedAt,
   });
 }
