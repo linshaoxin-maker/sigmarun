@@ -571,10 +571,18 @@ const RULES: Rule[] = [
       if (!latest) return [];
       const revAfter = latest.payload?.rev_after;
       if (typeof revAfter !== 'object' || revAfter === null) {
+        // A ledger where NO event carries rev_after predates the feature — that is
+        // migration territory (docs/21), not tamper evidence. Mixed ledgers stay errors.
+        const anyStamped = ctx.events.some((e) => typeof e.payload?.rev_after === 'object' && e.payload?.rev_after !== null);
         return [
-          finding('AUD-032', 'error',
-            `latest event seq ${latest.seq} has no rev_after snapshot; direct_state_edit_suspected cannot be evaluated.`,
-            'Run sigmarun repair after inspecting the latest transaction; then re-run audit.', [`seq:${latest.seq}`]),
+          finding('AUD-032', anyStamped ? 'error' : 'warn',
+            anyStamped
+              ? `latest event seq ${latest.seq} has no rev_after snapshot while earlier events do; direct_state_edit_suspected cannot be evaluated.`
+              : `ledger predates rev_after stamping (no event carries it); AUD-032 cannot run until new transactions land.`,
+            anyStamped
+              ? 'Run sigmarun repair after inspecting the latest transaction; then re-run audit.'
+              : 'Any new gateway write will start stamping rev_after; no action needed for legacy history.',
+            [`seq:${latest.seq}`]),
         ];
       }
       const snapshot = revAfter as Record<string, unknown>;
@@ -757,6 +765,7 @@ export function auditRun(opts: AuditOptions): Envelope {
   const snapshotSeq = events.length > 0 ? events[events.length - 1]!.seq : 0;
 
   const detailCache = new Map<string, Record<string, unknown> | null>();
+  const evidenceCache = new Map<string, Record<string, unknown> | null>();
   const reviewCache = new Map<string, Array<Record<string, unknown>>>();
   const ctx: Ctx = {
     repoRoot,
@@ -780,8 +789,11 @@ export function auditRun(opts: AuditOptions): Envelope {
       return detailCache.get(taskId)!;
     },
     evidence: (taskId) => {
-      const f = join(runDir, 'evidence', taskId, 'evidence.json');
-      return existsSync(f) ? (readJsonState(f).doc as Record<string, unknown>) : null;
+      if (!evidenceCache.has(taskId)) {
+        const f = join(runDir, 'evidence', taskId, 'evidence.json');
+        evidenceCache.set(taskId, existsSync(f) ? (readJsonState(f).doc as Record<string, unknown>) : null);
+      }
+      return evidenceCache.get(taskId)!;
     },
     reviews: (taskId) => {
       if (!reviewCache.has(taskId)) {

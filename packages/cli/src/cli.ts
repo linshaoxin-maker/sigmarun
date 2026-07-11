@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { initProject, doctorProject, importRun, publishTasks, runShow, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
-import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, verifySubmit } from '@sigmarun/dispatch';
+import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, verifySubmit } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
 import { statusRun, runList, taskShow, evidenceShow, watchOnce } from '@sigmarun/watch';
@@ -242,7 +242,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     env = !runId
       ? failEnvelope('usage_error', 'Usage: sigmarun export <RUN-ID> [--to=<dir>] [--full] [--force] [--json]')
       : exportRun({ cwd: opts.cwd, env: opts.env, runId, to: flag(argv, 'to'), full: argv.includes('--full'), force });
-  } else if (cmd === 'review' && (args[1] === 'claim' || args[1] === 'approve' || args[1] === 'request-changes')) {
+  } else if (cmd === 'review' && (args[1] === 'claim' || args[1] === 'approve' || args[1] === 'request-changes' || args[1] === 'block')) {
     const runId = args[2];
     const taskId = args[3];
     const agentId = flag(argv, 'agent');
@@ -257,22 +257,24 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       } else {
         try {
           const review = JSON.parse(readFileSync(reviewFile, 'utf8'));
-          env = reviewDecide({
-            cwd: opts.cwd, env: opts.env, runId, taskId, agentId,
-            decision: args[1] === 'approve' ? 'approve' : 'request_changes', review,
-          });
+          const decision = args[1] === 'approve' ? 'approve' : args[1] === 'block' ? 'block' : 'request_changes';
+          env = reviewDecide({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, decision, review });
         } catch (e) {
           env = failEnvelope('schema_invalid', `Review file is not valid JSON: ${String(e)}`);
         }
       }
     }
-  } else if (cmd === 'resume') {
+  } else if (cmd === 'resume' || cmd === 'unblock') {
     const runId = args[1];
     const taskId = args[2];
     const agentId = flag(argv, 'agent');
-    env = !runId || !taskId || !agentId
-      ? failEnvelope('usage_error', 'Usage: sigmarun resume <RUN-ID> <TASK-ID> --agent=<AGENT-ID> [--json]')
-      : resumeTask({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId });
+    if (!runId || !taskId || !agentId) {
+      env = failEnvelope('usage_error', `Usage: sigmarun ${cmd} <RUN-ID> <TASK-ID> --agent=<AGENT-ID> [--json]`);
+    } else if (cmd === 'resume') {
+      env = resumeTask({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId });
+    } else {
+      env = unblockTask({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, reason: flag(argv, 'reason') });
+    }
   } else if (cmd === 'submit') {
     const runId = args[1];
     const taskId = args[2];

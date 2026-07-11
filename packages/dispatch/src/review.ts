@@ -11,7 +11,7 @@ export interface ReviewClaimOptions extends ResolveOptions {
 }
 
 export interface ReviewDecideOptions extends ReviewClaimOptions {
-  decision: 'approve' | 'request_changes';
+  decision: 'approve' | 'request_changes' | 'block';
   review: {
     checklist?: Array<{ item: string; status: string }>;
     findings?: Array<Record<string, unknown> & { must_fix?: boolean; message?: string }>;
@@ -209,10 +209,24 @@ export function synthesizeReview(runDir: string, runId: string, agentId: string,
   const rc = loadReviewClaims(runDir, runId);
   sweepReviewClaims(runDir, runId, rc);
   const stores = loadClaims(runDir, runId);
+  // One pass over claims instead of rows x claims scans (review round: efficiency candidate).
+  const claimOwners = new Map<string, Set<string>>();
+  for (const c of stores.taskClaims.doc.claims) {
+    if (!claimOwners.has(c.task_id)) claimOwners.set(c.task_id, new Set());
+    claimOwners.get(c.task_id)!.add(c.agent_id);
+  }
+  const activeReview = new Set(rc.doc.claims.filter((c) => c.status === 'active').map((c) => c.task_id));
+  const ownedByAgent = (taskId: string): boolean => {
+    if (claimOwners.get(taskId)?.has(agentId)) return true;
+    const f = join(runDir, 'tasks', taskId, 'task.json');
+    if (!existsSync(f)) return false;
+    const attempts = (readJsonState(f).doc as { previous_attempts?: Array<{ agent_id: string }> }).previous_attempts ?? [];
+    return attempts.some((a) => a.agent_id === agentId);
+  };
   const candidates = rows
     .filter((r) => r.status === 'submitted')
-    .filter((r) => !rc.doc.claims.some((c) => c.task_id === r.task_id && c.status === 'active'))
-    .filter((r) => !historicalOwners(runDir, r.task_id, stores).has(agentId))
+    .filter((r) => !activeReview.has(r.task_id))
+    .filter((r) => !ownedByAgent(r.task_id))
     .map((r) => ({ row: r, submittedAt: evidenceSubmittedAt(runDir, r.task_id) }))
     .sort((a, b) => a.submittedAt.localeCompare(b.submittedAt) || a.row.task_id.localeCompare(b.row.task_id));
   const picked = candidates[0];
@@ -323,12 +337,11 @@ export function reviewDecide(opts: ReviewDecideOptions): Envelope {
       acceptance_opinion: opts.review.acceptance_opinion ?? [],
     });
 
-    claim.status = 'completed';
-    saveState(rc.file, rc.doc, rc.rev);
-
+    // docs/17 §5.3 order: detail -> index -> claims -> event (the append below is the commit point).
+    const NEXT_STATUS: Record<string, string> = { approve: 'approved', request_changes: 'changes_requested', block: 'blocked' };
+    const nextStatus = NEXT_STATUS[opts.decision]!;
     const taskFile = join(runDir, 'tasks', opts.taskId, 'task.json');
     const task = readJsonState(taskFile);
-    const nextStatus = opts.decision === 'approve' ? 'approved' : 'changes_requested';
     (task.doc as { status: string }).status = nextStatus;
     writeJsonStateAtomic(taskFile, task.doc as Record<string, unknown>, { expectedRev: task.rev });
     const listFile = join(runDir, 'team-task-list.json');
@@ -336,6 +349,9 @@ export function reviewDecide(opts: ReviewDecideOptions): Envelope {
     const row = (list.doc as { tasks: TaskRow[] }).tasks.find((r) => r.task_id === opts.taskId);
     if (row) row.status = nextStatus;
     writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
+
+    claim.status = 'completed';
+    saveState(rc.file, rc.doc, rc.rev);
 
     if (opts.decision === 'request_changes') {
       // Revive the owner's claim in place: same claim, fresh lease; path claims were never released (15 §4.4).
@@ -349,28 +365,72 @@ export function reviewDecide(opts: ReviewDecideOptions): Envelope {
       }
     }
 
+    const EVENT_BY_DECISION: Record<string, string> = {
+      approve: 'review_approved',
+      request_changes: 'changes_requested',
+      block: 'review_blocked',
+    };
     appendEvent(runDir, {
-      event: opts.decision === 'approve' ? 'review_approved' : 'changes_requested',
+      event: EVENT_BY_DECISION[opts.decision]!,
       actor: { type: 'agent', id: opts.agentId },
       run_id: runId,
       task_id: opts.taskId,
       claim_id: claim.claim_id,
       payload:
-        opts.decision === 'approve'
-          ? { review_id: reviewId, round: claim.round }
-          : { review_id: reviewId, must_fix_count: mustFix.length, mirrored: mirroredIds },
+        opts.decision === 'request_changes'
+          ? { review_id: reviewId, must_fix_count: mustFix.length, mirrored: mirroredIds }
+          : { review_id: reviewId, round: claim.round },
     });
 
+    const MESSAGE_BY_DECISION: Record<string, string> = {
+      approve: `${reviewId}: approved; ${opts.taskId} moves on.`,
+      request_changes: `${reviewId}: changes requested (${mustFix.length} must-fix); owner claim revived.`,
+      block: `${reviewId}: blocked; ${opts.taskId} needs a human decision before work continues.`,
+    };
+    const NEXT_BY_DECISION: Record<string, string[]> = {
+      approve: ['Verification/integration continue per run policy (FEAT-010).'],
+      request_changes: [`Owner resumes: sigmarun resume ${runId} ${opts.taskId} --agent=<owner>`],
+      block: [`Resolve the blocker, then: sigmarun unblock ${runId} ${opts.taskId} --agent=<owner>`],
+    };
     return okEnvelope({
-      message:
-        opts.decision === 'approve'
-          ? `${reviewId}: approved; ${opts.taskId} moves on.`
-          : `${reviewId}: changes requested (${mustFix.length} must-fix); owner claim revived.`,
+      message: MESSAGE_BY_DECISION[opts.decision]!,
       data: { review_id: reviewId, task_id: opts.taskId, round: claim.round, decision: opts.decision, mirrored: mirroredIds },
-      nextActions:
-        opts.decision === 'approve'
-          ? ['Verification/integration continue per run policy (FEAT-010).']
-          : [`Owner resumes: sigmarun resume ${runId} ${opts.taskId} --agent=<owner>`],
+      nextActions: NEXT_BY_DECISION[opts.decision]!,
+      startedAt,
+    });
+  });
+}
+
+/** 15 §3.3 blocked -> working (unblock; owner or user; event #15). */
+export function unblockTask(opts: ResumeOptions & { reason?: string }): Envelope {
+  const startedAt = Date.now();
+  return withRunLock(opts, startedAt, (runDir, runId) => {
+    const taskFile = join(runDir, 'tasks', opts.taskId, 'task.json');
+    if (!existsSync(taskFile)) {
+      return failEnvelope('task_not_found', `Task ${opts.taskId} does not exist on ${runId}.`, { startedAt });
+    }
+    const task = readJsonState(taskFile);
+    const status = (task.doc as { status: string }).status;
+    if (status !== 'blocked') {
+      return failEnvelope('invalid_transition', `Task ${opts.taskId} is ${status}; unblock applies to blocked.`, { startedAt });
+    }
+    (task.doc as { status: string }).status = 'working';
+    writeJsonStateAtomic(taskFile, task.doc as Record<string, unknown>, { expectedRev: task.rev });
+    const listFile = join(runDir, 'team-task-list.json');
+    const list = readJsonState(listFile);
+    const row = (list.doc as { tasks: TaskRow[] }).tasks.find((r) => r.task_id === opts.taskId);
+    if (row) row.status = 'working';
+    writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
+    appendEvent(runDir, {
+      event: 'task_unblocked',
+      actor: { type: 'agent', id: opts.agentId },
+      run_id: runId,
+      task_id: opts.taskId,
+      payload: { reason: opts.reason ?? null },
+    });
+    return okEnvelope({
+      message: `${opts.taskId} unblocked; back to working.`,
+      data: { task_id: opts.taskId },
       startedAt,
     });
   });

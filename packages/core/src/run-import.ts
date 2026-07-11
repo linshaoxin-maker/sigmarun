@@ -128,7 +128,7 @@ export function importRun(opts: ImportOptions): Envelope {
         weight: t.weight ?? 1,
         paths: t.paths ?? {},
         required_checks: t.required_checks ?? [],
-        review: t.review ?? { required: true },
+        review: t.review ?? {}, // absent = inherit run policy; explicit true overrides run-level false (docs/15 §9)
         metadata: { created_by: actor.id, created_at: now },
       });
       writeFileSync(join(dir, 'task.md'), taskMd(t, taskId));

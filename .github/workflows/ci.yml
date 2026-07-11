@@ -1,0 +1,31 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # NFR-007: the gateway must behave identically on the three desktop platforms.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [20, 22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Configure git identity (worktree fixtures commit)
+        run: |
+          git config --global user.email ci@sigmarun.local
+          git config --global user.name sigmarun-ci
+      - run: npm ci
+      - run: npm run build
+      - run: npx vitest run
+      - name: SCA (official registry; the default mirror lacks the audit endpoint)
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        run: npm audit --registry=https://registry.npmjs.org --audit-level=high

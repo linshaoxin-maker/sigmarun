@@ -324,7 +324,9 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
 
     // Step 7: D6 — review gate off => approved with an auditable skip trace.
     const run = readJsonState(join(runDir, 'run.json')).doc as { default_policy?: { require_review?: boolean } };
-    const reviewRequired = run.default_policy?.require_review !== false;
+    // docs/15 §9 strict-wins: an explicit task-level review.required: true overrides a run-level false.
+    const taskReview = (tdoc.review as { required?: boolean } | undefined) ?? {};
+    const reviewRequired = run.default_policy?.require_review !== false || taskReview.required === true;
     if (!reviewRequired) {
       tdoc.status = 'approved';
       const task2 = readJsonState(taskFile);

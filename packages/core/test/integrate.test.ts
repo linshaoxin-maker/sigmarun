@@ -53,6 +53,8 @@ describe('integrate + report (16 §4; BDD-008-01/02/03)', () => {
     expect(readJson('tasks/TASK-0003/task.json').status).toBe('integrated');
     const released = readJson('claims/path-claims.json').claims.filter((c: { task_id: string }) => c.task_id === 'TASK-0003');
     expect(released.every((c: { status: string }) => c.status === 'released')).toBe(true);
+    const taskClaims = readJson('claims/task-claims.json').claims.filter((c: { task_id: string }) => c.task_id === 'TASK-0003');
+    expect(taskClaims.every((c: { status: string }) => ['completed', 'released', 'reclaimed'].includes(c.status))).toBe(true); // AUD-009: no live claim survives integration
     const ev = events().find((e) => e.event === 'task_integrated');
     expect(ev.payload.merge_commit).toBe('abc1234');
 

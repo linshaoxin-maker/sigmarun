@@ -113,6 +113,13 @@
 - **修复**：14 项全修 + 12 回归锁；storage 收敛 `tryAcquireLock`/`runLockPath`（锁样板 11 处漂移根因）；core 新增 `readEventsSafe`（账本容错读）。192/192 绿、build 0、真机冒烟过。记录：[code-review-2026-07-11.md](code-review-2026-07-11.md)。
 - 登记收尾轮卫生项：grantReviewClaim/reviewDecide 内 claims-先于-详情 写序、效率三候选（audit evidence 缓存/synthesizeReview 预建 owners Map/repair 批量 meta 写）、worktree 正则转义。
 
+## 2026-07-11（收尾轮完成）
+
+- **批 1**（并行会话产物验收入库）：rev_after 全事件快照 + AUD-032 活化；AUD-005…020 审计批（33/40 规则在线，SKIPPED 仅剩 023–028 上下文对账批与 034 重放）；path_escape_detected + 路径围栏（worktree/export realpath 收容）。
+- **批 2**：SCA 归零（镜像源根因，官方源 0 漏洞）；review block/unblock；task 级 review.required（15 §9）；integrate 终结 task claim（新审计规则真机命中 AUD-009 即修 + 回归锁）；AUD-032 遗留账本降噪；模板全量 12+4；conformance（M38，25 命令面）+ NFR-001 压测（8 真进程并发）；CI 矩阵（3 OS × Node 20/22）；写序/效率卫生项；04 §1.1 回填。
+- 计数：**205/205 用例**、36 测试文件、33 条审计规则在线。收尾轮 ①–⑦ 全部销账。
+- **剩余 P1 面**（非阻塞）：run pause/resume/cancel/archive、task add/cancel、worktree list、graph show、AUD-023–028 对账批、AUD-034 重放、CLAUDE.md @import 接线、npm 打包发布（22 §Phase 1）。
+
 ## 下一步队列
 
 1. 收尾轮（原 ①–⑦ + 上表卫生项，按序）；完成后 22 号 §MVP 打包面（npm 发布物）评估。

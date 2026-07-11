@@ -247,6 +247,207 @@ Required flow:
 4. Do NOT claim, submit, or mutate anything from this command.
 `;
 
+
+const TEAM_VERIFY = `---
+description: Independently verify an approved Team Run task with real check runs
+allowed-tools: ["Bash", "Read", "Grep", "Glob"]
+argument-hint: <RUN-ID> [<TASK-ID>] [--as <window-name>]
+---
+${versionHeader}
+
+# Team Verify
+
+${RULES_BLOCK}
+
+Required flow:
+1. \`sigmarun run show <RUN-ID> --json\`; register with role verifier:
+   \`sigmarun agent register <RUN-ID> --tool=claude-code --role=verifier [--label="<--as>"] --json\`.
+2. Find work: \`sigmarun claim-next <RUN-ID> --agent=<AGENT-ID> --role=verifier --json\`
+   (data.kind="verify_work") or pick the given TASK-ID. You must NOT have
+   owned the task (independent verification).
+3. Read the evidence and the task worktree. RUN THE CHECKS YOURSELF —
+   build, focused tests, scope check; keep every output file.
+4. Build a verify JSON: { "target": {"kind":"task","task_id":"<TASK-ID>"},
+   "checks": [{name, cmd, exit_code, output_file, status}],
+   "gates": {build, focused_tests, regression_tests, scope_check,
+   evidence_complete}, "skip_reasons": {...}, "verdict": "pass"|"fail",
+   "failures_mapped": [] }. verdict pass requires every non-skipped gate pass.
+5. \`sigmarun verify submit <RUN-ID> --agent=<AGENT-ID> --verify=<file> --json\`.
+6. Report verdict, gates, and what the run needs next.
+`;
+
+const TEAM_INTEGRATE = `---
+description: Merge verified Team Run tasks onto the integration branch in gateway order
+allowed-tools: ["Bash", "Read", "Grep", "Glob"]
+argument-hint: <RUN-ID>
+---
+${versionHeader}
+
+# Team Integrate
+
+${RULES_BLOCK}
+
+Required flow:
+1. \`sigmarun integrate start <RUN-ID> --json\`; it returns the integration
+   branch name, base branch, and the DETERMINISTIC merge order — never
+   reorder it.
+2. \`git checkout -b <branch> <base>\` then for each entry IN ORDER:
+   \`git merge --no-ff <task branch>\`. On conflicts: resolve in the
+   integration worktree, summarize the resolution via
+   \`sigmarun msg post <RUN-ID> --type=decision ...\`.
+3. After each merge run the task's focused checks yourself:
+   - pass: \`sigmarun integrate record <RUN-ID> <TASK-ID> --merge-commit=<sha> --json\`
+   - fail: \`git revert -m 1 <merge sha>\` then
+     \`sigmarun integrate record <RUN-ID> <TASK-ID> --failed --reason="..." --json\`
+     and CONTINUE with the next task (a single failure never blocks the run).
+4. When nothing verified remains, run the full verification suite and submit
+   a run-level verify record, then \`sigmarun report <RUN-ID> --json\`.
+5. Report: merged list, reverted list, report path. NEVER merge to main —
+   the user opens the PR (BDD-008-03).
+`;
+
+const TEAM_RUNS = `---
+description: List all Team Runs in this repository
+allowed-tools: ["Bash"]
+argument-hint:
+---
+${versionHeader}
+
+# Team Runs
+
+${RULES_BLOCK}
+
+Run \`sigmarun run list --json\` and present run_id / status / title / mode
+as a table in the user's language. This command mutates nothing.
+`;
+
+const TEAM_TASKS = `---
+description: List the tasks of a Team Run with status and owners
+allowed-tools: ["Bash"]
+argument-hint: <RUN-ID> [--status <s>] [--owner <AGENT-ID>]
+---
+${versionHeader}
+
+# Team Tasks
+
+${RULES_BLOCK}
+
+Run \`sigmarun run show <RUN-ID> --json\` and present data.tasks
+(task_id / title / status / owner / depends_on), applying any --status or
+--owner filter locally. Mutates nothing.
+`;
+
+const TEAM_TASK = `---
+description: Show every recorded fact about one Team Run task
+allowed-tools: ["Bash", "Read"]
+argument-hint: <RUN-ID> <TASK-ID>
+---
+${versionHeader}
+
+# Team Task
+
+${RULES_BLOCK}
+
+Run \`sigmarun task show <RUN-ID> <TASK-ID> --json\` and report: status,
+claims history, worktree, evidence revision, previous_attempts. Point the
+user at .team/runs/<RUN-ID>/tasks/<TASK-ID>/task.md for the brief.
+Mutates nothing.
+`;
+
+const TEAM_EVIDENCE = `---
+description: Show the evidence panel of a Team Run task
+allowed-tools: ["Bash", "Read"]
+argument-hint: <RUN-ID> <TASK-ID>
+---
+${versionHeader}
+
+# Team Evidence
+
+${RULES_BLOCK}
+
+Run \`sigmarun evidence show <RUN-ID> <TASK-ID> --json\` and report:
+required check results, acceptance item-by-item, output files, revision
+history. "No evidence yet" is an answer, not an error. Mutates nothing.
+`;
+
+const TEAM_SUBMIT = `---
+description: Submit evidence for a task you own (manual re-entry of dispatch steps 7-9)
+allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep"]
+argument-hint: <RUN-ID> <TASK-ID> [--as <window-name>]
+---
+${versionHeader}
+
+# Team Submit
+
+${RULES_BLOCK}
+
+Required flow (docs/14 §2.1 evidence contract):
+1. Re-register with your window label to recover your AGENT-ID (D17):
+   \`sigmarun agent register <RUN-ID> --tool=claude-code --label="<--as>" --json\`.
+2. In the task worktree: run every required check and keep raw outputs;
+   ensure \`git status --porcelain\` is clean.
+3. Build evidence.json: summary, changed_files (from
+   \`git diff --name-status <base_commit>..HEAD\`), commands with exit codes
+   and output_file paths, required_checks_results covering every task check,
+   acceptance item-by-item, context_ack (the must_read list you actually
+   read), handoff (markdown for the next agent), risks, follow_ups.
+4. \`sigmarun submit <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --evidence=<file> --json\`.
+   On evidence_invalid: fix exactly the listed items and retry.
+5. Report the envelope outcome and the run's next step.
+`;
+
+const CODEX_PLAN_SKILL = `---
+name: team-run-plan
+description: Use when the user types \`/team-plan <goal>\` or asks Codex to
+  break a goal into a Team Run plan and import it into .team. Trigger
+  phrases: "team-plan", "plan a run", "拆解任务", "建一个 run".
+---
+${versionHeader}
+
+# Team Run Plan
+
+${RULES_BLOCK}
+
+Follow the /team-plan flow: doctor -> read repo + docs/team/MEMORY.md ->
+build a team.plan_payload.v1 (client_task_key deps, testable acceptance,
+paths.allow, required_checks) -> \`sigmarun run import <file> --json\` ->
+report RUN-ID and task table. Do NOT publish or claim (tool: codex).
+`;
+
+const CODEX_REVIEW_SKILL = `---
+name: team-run-review
+description: Use when the user types \`/team-review <RUN-ID>\` or asks Codex
+  to review a submitted Team Run task. Trigger phrases: "team-review",
+  "review the run", "评审任务", "审一下".
+---
+${versionHeader}
+
+# Team Run Review
+
+${RULES_BLOCK}
+
+Follow the /team-review flow with --tool=codex: register as reviewer ->
+\`sigmarun review claim\` or \`claim-next --role=reviewer\` (review_work) ->
+read evidence + diff -> decide via \`sigmarun review approve|request-changes|block\`
+(request-changes needs >=1 must_fix). self_approval_forbidden means STOP.
+`;
+
+const CODEX_STATUS_SKILL = `---
+name: team-run-status
+description: Use when the user types \`/team-status <RUN-ID>\` or asks Codex
+  how a Team Run is going. Trigger phrases: "team-status", "run progress",
+  "进展如何", "看下状态".
+---
+${versionHeader}
+
+# Team Run Status
+
+${RULES_BLOCK}
+
+Run \`sigmarun status <RUN-ID> --json\` and report progress, risks, open
+questions, and the Needs-user list with copyable commands. Read-only.
+`;
+
 /** docs/19 §6 — pasted into repo AGENTS.md between managed markers. */
 export const AGENTS_SECTION = `<!-- sigmarun:adapter-section:begin (managed by sigmarun adapter install) -->
 ## Team Run Protocol (.team/)
@@ -278,8 +479,18 @@ export const TEMPLATES: Record<string, Record<string, string>> = {
     '.claude/commands/team-publish.md': TEAM_PUBLISH,
     '.claude/commands/team-review.md': TEAM_REVIEW,
     '.claude/commands/team-status.md': TEAM_STATUS,
+    '.claude/commands/team-verify.md': TEAM_VERIFY,
+    '.claude/commands/team-integrate.md': TEAM_INTEGRATE,
+    '.claude/commands/team-runs.md': TEAM_RUNS,
+    '.claude/commands/team-tasks.md': TEAM_TASKS,
+    '.claude/commands/team-task.md': TEAM_TASK,
+    '.claude/commands/team-evidence.md': TEAM_EVIDENCE,
+    '.claude/commands/team-submit.md': TEAM_SUBMIT,
   },
   codex: {
     '.codex/skills/team-run-dispatch/SKILL.md': CODEX_DISPATCH_SKILL,
+    '.codex/skills/team-run-plan/SKILL.md': CODEX_PLAN_SKILL,
+    '.codex/skills/team-run-review/SKILL.md': CODEX_REVIEW_SKILL,
+    '.codex/skills/team-run-status/SKILL.md': CODEX_STATUS_SKILL,
   },
 };

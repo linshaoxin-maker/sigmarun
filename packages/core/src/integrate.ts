@@ -231,7 +231,8 @@ export function integrateRecord(opts: IntegrateRecordOptions): Envelope {
     if (row) row.status = 'integrated';
     writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
 
-    // 15 §4.2: hold ends at integrated — release the task's path claims.
+    // 15 §4.2: hold ends at integrated — release the task's path claims AND close the
+    // owner's task claim (an integrated task with a live claim is AUD-009 residue).
     const releasedIds: string[] = [];
     const pathFile = join(runDir, 'claims', 'path-claims.json');
     if (existsSync(pathFile)) {
@@ -243,6 +244,19 @@ export function integrateRecord(opts: IntegrateRecordOptions): Envelope {
         }
       }
       writeJsonStateAtomic(pathFile, pc.doc as Record<string, unknown>, { expectedRev: pc.rev });
+    }
+    const taskClaimsFile = join(runDir, 'claims', 'task-claims.json');
+    if (existsSync(taskClaimsFile)) {
+      const tc = readJsonState(taskClaimsFile);
+      let dirty = false;
+      for (const c of (tc.doc as { claims: Array<{ task_id: string; status: string; claim_id: string }> }).claims) {
+        if (c.task_id === opts.taskId && ['active', 'submitted'].includes(c.status)) {
+          c.status = 'completed';
+          releasedIds.push(c.claim_id);
+          dirty = true;
+        }
+      }
+      if (dirty) writeJsonStateAtomic(taskClaimsFile, tc.doc as Record<string, unknown>, { expectedRev: tc.rev });
     }
     appendEvent(runDir, {
       event: 'task_integrated',
