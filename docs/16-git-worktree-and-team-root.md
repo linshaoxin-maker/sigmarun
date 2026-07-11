@@ -138,6 +138,16 @@ team worktree register --run RUN-0001 --task TASK-0003 \
 
 ---
 
+### 3.6 依赖上游未集成时的分支策略（dogfood 实证，2026-07-11）
+
+场景：T2 `depends_on` T1，策略放宽（[10](10-claim-next-lock-and-conflict-rules.md) §6）使 T1 `verified` 即可领 T2——此时 T2 worktree 从 base tip 创建，**不含 T1 的未集成产出**。
+
+指导做法（非规范约束）：
+
+- 在 T2 worktree 内 `git merge team/<RUN>/<T1-branch>`（不 cherry-pick、不 rebase），并把该决定写 message pool（type `decision`，注明所带上游支）。
+- 集成阶段的拓扑序（§4.2）保证 T1 先合入 integration branch；T2 合入时该 merge 收敛为增量，冲突不会重复解决。
+- 反模式：把上游文件**复制**进本支——submit 的 in_scope 重算会把这些文件判为出处不明的越界变更（AUD-014）。
+
 ## 4. Integration / Merge 生命周期（M13 闭合）
 
 ### 4.1 流程总览

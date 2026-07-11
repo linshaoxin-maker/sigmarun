@@ -131,3 +131,10 @@
 
 1. npm 发布评估（等 scope 决策）；推 GitHub 跑三平台 CI 矩阵；真机双窗口实战一轮 run。
 2. 沿途维护：ASM-004/005/006 按期限确认；backflow 事件显式标注。
+
+## 2026-07-11（真机 dogfood 全旅程 · finding #3 修复）
+
+- **真机双代理 dogfood 完成**（独立 strutil 小项目，RUN-0001 北极星全旅程）：plan→import→publish→A 认领/hydrate/真 worktree/实现 slugify（4 真测试）→submit（AUD-014 正确警告越界 package.json 修复→MSG-0001）→B 评审（D15 合成）→approve→独立 verifier 重跑测试→verified→A 领 T2（hydrate 携带上游 handoff）→worktree 内合并未集成上游支（MSG-0002 决策）→titleCase（3 测试含"必须复用 tokenize"源码断言）→review→verify→integrate 拓扑序真 `--no-ff` 合并（每步 npm test）→record（path claims 释放）→run 级 verify→report（main 零污染）→export 9 文件→memory promote MEM-0001/0002→audit 40 规则 0 error。
+- **三枚 findings**：①（工具纪律）副作用命令勿过管 `head`——SIGPIPE 在建支后、checkout 前杀掉 `git worktree add`；②（设计空白）下游依赖未集成上游 → worktree 内 merge 上游 task branch，拓扑序集成收敛为增量（16 §3.6 新注 + MEM-0001）；③（产品缺陷）report 后 progress 显示 0%。
+- **finding #3 修复（本轮代码变更）**：`integrated → done` 边此前从未实现（15 §3.3 accept 行）——现 `report` 即 run 验收，integrated 批翻 done + 逐任务 `task_done` 事件；replay 表补映射（AUD-034 一致）；computeProgress 从二元 done 口径改为 docs/03 §9 分数全表（blocked 账本回溯保持前值、cancelled 剔除分母）。dogfood run 状态 0%→95%（旧账本无 accept 事件，95% 如实）；回归锁：report 验收断言、§9 混合态 82%、blocked/cancelled 分数场景。测试 214/214。
+- 残余（外部动作）：npm publish（scope 归属待用户 npm 账号）、GitHub push 触发 CI 矩阵、CLAUDE.md @import 接线。

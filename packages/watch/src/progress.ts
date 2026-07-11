@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { GatewayError, readJsonState, resolveTeamRoot, type ResolveOptions } from '@sigmarun/storage';
-import { failEnvelope, okEnvelope, type Envelope } from '@sigmarun/core';
+import { failEnvelope, okEnvelope, readEventsSafe, type Envelope } from '@sigmarun/core';
+import { EVENT_STATUS } from '@sigmarun/audit';
 import { openRun } from '@sigmarun/dispatch';
 
 export interface StatusOptions extends ResolveOptions {
@@ -37,6 +38,21 @@ function readMessages(runDir: string): Msg[] {
   return readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as Msg);
 }
 
+/** docs/03 §9 — per-status progress fractions; blocked keeps the pre-block value, cancelled leaves the denominator. */
+const PROGRESS_BY_STATUS: Record<string, number> = {
+  draft: 0,
+  ready: 0,
+  claimed: 0.05,
+  working: 0.35,
+  submitted: 0.6,
+  reviewing: 0.7,
+  changes_requested: 0.45,
+  approved: 0.8,
+  verified: 0.9,
+  integrated: 0.95,
+  done: 1,
+};
+
 /**
  * Derive the run progress snapshot (docs/03 §9 weights · docs/15 §5.1 blocked exemption · M32 Needs-user).
  * Pure read; the caller decides whether to persist progress.json.
@@ -51,10 +67,26 @@ export function computeProgress(runDir: string): Record<string, unknown> {
   const counts: Record<string, number> = {};
   let weightTotal = 0;
   let weightDone = 0;
+  let progressWeighted = 0;
+  let ledger: ReturnType<typeof readEventsSafe>['events'] | null = null;
+  const blockedPrev = (taskId: string): number => {
+    // docs/03 §9: blocked keeps the last pre-block fraction — replay the ledger backwards for it.
+    const events = (ledger ??= readEventsSafe(runDir).events);
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]!;
+      if (e.task_id !== taskId) continue;
+      const st = EVENT_STATUS[e.event];
+      if (st && st !== 'blocked' && st in PROGRESS_BY_STATUS) return PROGRESS_BY_STATUS[st]!;
+    }
+    return 0;
+  };
   for (const r of rows) {
     counts[r.status] = (counts[r.status] ?? 0) + 1;
-    weightTotal += r.weight ?? 1;
-    if (r.status === 'done') weightDone += r.weight ?? 1;
+    if (r.status === 'cancelled') continue; // §9: out of the denominator
+    const w = r.weight ?? 1;
+    weightTotal += w;
+    if (r.status === 'done') weightDone += w;
+    progressWeighted += (r.status === 'blocked' ? blockedPrev(r.task_id) : (PROGRESS_BY_STATUS[r.status] ?? 0)) * w;
   }
 
   const ttlMs = (run.default_policy?.claim_ttl_minutes ?? 30) * 60_000;
@@ -142,7 +174,7 @@ export function computeProgress(runDir: string): Record<string, unknown> {
     counts,
     weight_total: weightTotal,
     weight_done: weightDone,
-    progress_pct: weightTotal === 0 ? 0 : Math.round((weightDone / weightTotal) * 100),
+    progress_pct: weightTotal === 0 ? 0 : Math.round((progressWeighted / weightTotal) * 100),
     risks,
     needs_user: needsUser,
     open_questions: openQuestions,

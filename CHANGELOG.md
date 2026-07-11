@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 真机 dogfood（双代理全旅程）+ finding #3 修复：`report` 即 run 验收——integrated 任务批量翻 `done` 并逐个记 `task_done` 事件（15 §3.3 最后一条未实现边闭合，写序 详情→索引→事件）；progress 落实 docs/03 §9 分数全表（claimed 0.05…integrated 0.95，blocked 经账本回溯保持前值，cancelled 剔除分母）——修复"两任务已合并仍显 0%"；replay 表补 `task_done`。dogfood 另两枚 findings：副作用命令勿过管 `head`（SIGPIPE 半途杀 git）；下游依赖未集成上游的分支策略（16 §3.6 新注 + 项目记忆 MEM-0001）。测试 214/214。
+
 - P1 面收官：`run pause/resume/cancel/archive`（15 §2.3 全转换，cancel 级联 claim/task + BDD-007-09，reported 只可 archive）、`task add`（草稿落位 + 图节点/blocks 边 + 依赖校验）与 `task cancel`（级联三类 claim）、`worktree list`、`graph show`（节点带派生状态）；**审计目录 40/40 全在线**——AUD-023…028（上下文/handoff 对账批）+ AUD-034（账本重放引擎，与 repair 共用 foldLedger 单一事实源，补齐 review_blocked/task_cancelled 映射）；review block 决定同步镜像 blocker 消息（AUD-024 一致性）；AUD-026 收敛为仅对含条目的记忆文件要求出处（import 骨架不再误报）。测试 213/213。
 
 - 收尾轮批 2：SCA 归零（根因=镜像源缺 audit 端点，官方源补跑并修 glob 传递依赖）；review `block` 决定 + `unblock` 原语（15 §3.3 blocked 双边，事件 #34/#15）；task 级 `review.required` 覆盖 run 级 false（15 §9 更严格者胜，import 保留字段缺省语义）；integrate 终结 task claim（AUD-009 真机命中即修）；AUD-032 对升级前遗留账本降 warn；adapter 补齐至 12 命令模板 + 4 Codex skills；conformance suite（25 命令面单信封断言，M38）+ NFR-001 真进程并发压测（8 路 claim 唯一分派 + seq 无缝）；CI 三平台×双 Node 矩阵工作流；reviewDecide/grantReviewClaim 写序对齐 17 §5.3；audit evidence 缓存与 synthesizeReview 单遍预建；docs/04 §1.1 命令面实现对齐注记回填。测试 205/205。

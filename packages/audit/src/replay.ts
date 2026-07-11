@@ -24,6 +24,7 @@ export const EVENT_STATUS: Record<string, string> = {
   verification_passed: 'verified',
   task_integrated: 'integrated',
   task_cancelled: 'cancelled',
+  task_done: 'done',
 };
 
 const OWNER_SETTING = new Set(['task_claimed', 'task_started']);

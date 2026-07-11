@@ -3,6 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { integrateStart, integrateRecord, reportRun } from '@sigmarun/core';
+import { foldLedger } from '@sigmarun/audit';
+import { statusRun } from '@sigmarun/watch';
 import { registerAgent } from '@sigmarun/dispatch';
 import { cleanup } from '../../storage/test/helpers.js';
 import { mkClaimRepo, registerDefault, driveToVerified } from '../../dispatch/test/fixture.js';
@@ -84,6 +86,21 @@ describe('integrate + report (16 §4; BDD-008-01/02/03)', () => {
     expect(events().some((e) => e.event === 'run_reported')).toBe(true);
     const mainAfter = execFileSync('git', ['-C', repo, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim();
     expect(mainAfter).toBe(mainBefore); // gateway never commits to the checkout
+
+    // 15 §3.3 `integrated -> done`: reporting accepts the merged tasks (dogfood finding #3)
+    for (const id of ['TASK-0001', 'TASK-0002']) {
+      expect(readJson(`tasks/${id}/task.json`).status).toBe('done');
+      expect(readJson('team-task-list.json').tasks.find((r: { task_id: string }) => r.task_id === id).status).toBe('done');
+    }
+    expect(readJson('tasks/TASK-0003/task.json').status).toBe('changes_requested'); // failed merge is not accepted
+    const doneEvents = events().filter((e) => e.event === 'task_done');
+    expect(doneEvents.map((e) => e.task_id).sort()).toEqual(['TASK-0001', 'TASK-0002']);
+    expect(doneEvents[0].payload.via).toBe('report_accept');
+    // replay folds task_done -> done, so AUD-034 stays coherent on reported runs
+    expect(foldLedger(events()).get('TASK-0001')?.status).toBe('done');
+    // docs/03 S9 fractional progress: done 1 + done 1 + changes_requested 0.45 over 3
+    const status = statusRun({ cwd: repo, runId: 'RUN-0001' });
+    expect((status.data as { progress_pct: number }).progress_pct).toBe(82);
   });
 
   it('report refuses while verified tasks remain unintegrated', () => {

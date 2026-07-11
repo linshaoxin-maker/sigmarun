@@ -282,10 +282,36 @@ export function reportRun(opts: IntegrateStartOptions): Envelope {
     if (rdoc.status !== 'integrating') {
       return failEnvelope('invalid_transition', `Run ${opts.runId} is ${rdoc.status}; report follows integration.`, { startedAt });
     }
-    const rows = (readJsonState(join(runDir, 'team-task-list.json')).doc as { tasks: Array<{ task_id: string; title: string; status: string }> }).tasks;
+    const listState = readJsonState(join(runDir, 'team-task-list.json'));
+    const rows = (listState.doc as { tasks: Array<{ task_id: string; title: string; status: string }> }).tasks;
     const remaining = rows.filter((r) => r.status === 'verified');
     if (remaining.length > 0) {
       return failEnvelope('invalid_transition', `${remaining.length} verified task(s) still await integrate record: ${remaining.map((r) => r.task_id).join(', ')}.`, { startedAt });
+    }
+
+    // 15 §3.3 `integrated -> done: accept` — reporting IS the run accepting its results.
+    const accepted: string[] = [];
+    for (const row of rows.filter((r) => r.status === 'integrated')) {
+      const taskFile = join(runDir, 'tasks', row.task_id, 'task.json');
+      if (existsSync(taskFile)) {
+        const task = readJsonState(taskFile);
+        (task.doc as { status: string }).status = 'done';
+        writeJsonStateAtomic(taskFile, task.doc as Record<string, unknown>, { expectedRev: task.rev });
+      }
+      row.status = 'done';
+      accepted.push(row.task_id);
+    }
+    if (accepted.length > 0) {
+      writeJsonStateAtomic(join(runDir, 'team-task-list.json'), listState.doc as Record<string, unknown>, { expectedRev: listState.rev });
+      for (const taskId of accepted) {
+        appendEvent(runDir, {
+          event: 'task_done',
+          actor: { type: 'user', id: 'integrator' },
+          run_id: opts.runId,
+          task_id: taskId,
+          payload: { via: 'report_accept' },
+        });
+      }
     }
 
     const events = readEventsSafe(runDir).events;

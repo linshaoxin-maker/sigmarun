@@ -37,7 +37,7 @@ describe('status (Slice 7 acceptance; M32 Needs-user; INV-006 derived progress)'
     const data = env.data as { counts: Record<string, number>; progress_pct: number; weight_total: number };
     expect(data.counts.claimed).toBe(1);
     expect(data.counts.ready).toBe(1);
-    expect(data.progress_pct).toBe(0);
+    expect(data.progress_pct).toBe(3); // docs/03 §9: claimed 0.05 x w1 over total 2 -> 2.5 -> round
     expect(data.weight_total).toBe(2);
     const derived = JSON.parse(readFileSync(join(runDir(), 'progress.json'), 'utf8'));
     expect(derived.schema_version).toBe('team.progress.v1');
@@ -58,6 +58,27 @@ describe('status (Slice 7 acceptance; M32 Needs-user; INV-006 derived progress)'
     env = statusRun({ cwd: repo, runId: 'RUN-0001' });
     risks = (env.data as { risks: Array<{ kind: string }> }).risks;
     expect(risks.some((r) => r.kind === 'stale_lease')).toBe(false); // docs/15 §5.1 exemption
+  });
+
+  it('S9 fractions: blocked keeps its pre-block value, cancelled leaves the denominator', async () => {
+    const { submitEvidence, taskCancel } = await import('@sigmarun/core');
+    const { registerAgent, reviewClaim, reviewDecide } = await import('@sigmarun/dispatch');
+    await setupWorking(repo, agent);
+    submitEvidence({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, evidencePath: validDraft(repo) });
+    const reviewer = (registerAgent({ cwd: repo, runId: 'RUN-0001', tool: 'codex', role: 'reviewer', label: 'w-rev' }).data as { agent_id: string }).agent_id;
+    reviewClaim({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: reviewer });
+    const blocked = reviewDecide({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: reviewer, decision: 'block', review: { findings: [] } });
+    expect(blocked.ok).toBe(true);
+    let env = statusRun({ cwd: repo, runId: 'RUN-0001' });
+    // blocked keeps reviewing's 0.7 (docs/03 S9): (0.7*1 + 0*1) / 2 -> 35%
+    expect((env.data as { progress_pct: number }).progress_pct).toBe(35);
+
+    taskCancel({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0002', reason: 'descoped' });
+    env = statusRun({ cwd: repo, runId: 'RUN-0001' });
+    // cancelled row leaves the denominator: 0.7 / 1 -> 70%
+    const data = env.data as { progress_pct: number; weight_total: number };
+    expect(data.weight_total).toBe(1);
+    expect(data.progress_pct).toBe(70);
   });
 
   it('unresolved blockers are risks; Needs-user lists approval/blocker/reclaim with commands (M32)', () => {
