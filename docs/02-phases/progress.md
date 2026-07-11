@@ -155,3 +155,9 @@
 ## 2026-07-11（D20 裁决落地）
 
 - F4 以选择题（4 档带推荐）呈报，产品负责人选定推荐档：**默认 `["verified","integrated","done"]`**。落地：claim-engine 双站点统一 `DEPS_SATISFIED_DEFAULT` 常量、docs/10 §6 默认规则改写（保留 done-only 为最严档语义）、docs/13 决策账本 D20、回归锁（verified 上游默认解锁下游）+ 现有 deps 测试复核（上游 claimed/ready 场景不受影响）。tarball 重装真机复验：hand-set verified 上游后定向领取下游成功。218/218。
+
+## 2026-07-11（真实项目战役第二轮 · mathkit）
+
+- 回应缺口"真实测试用例驱动整条流水线只被 strutil 浅走过一次"：新建 **mathkit** 项目（node --test），3 任务真实 DAG 全链——**14 个真实测试用例**驱动每一道闸门，被测物仍为 tarball CLI。
+- 全链实况：双窗口真并行（A=stats、B=format 同时活跃 claim）→ 真实现+真测试+真日志 evidence（无一合成输出）→ **评审抓真缺口**（formatPercent 非有限输入无守卫，must_fix）→ **真 TDD 返工**（RED 1 fail 实录 → 修复 → GREEN，evidence rev 2、REVIEW-02 新文件）→ 验证者三次独立重跑真测试 → **D20 首次真实生效**（T1 verified → A claim-next 零配置自动领 T2）→ hydrate 携带上游 handoff（must_read 四项与 docs/12 示例形状一致）→ **16 §3.6 上游支合并**（T2 worktree 缺 stats.js，合并 T1 支）→ 拓扑序集成每步真测试（**3→5→8 增量收敛实录**）→ run 级验证全量 8/8 → report 验收 **100% done**（finding #3 修复后首个如实收官的 run）→ export 12 文件 → **审计 40 规则零 findings 零跳过** → memory candidates 恰好捞出两个知识时刻（§3.6 决策 + must_fix）→ MEM-0001 晋升 L4 → main 全程零污染。
+- 顺手取证两枚观察项（未修，记录）：①worktree 规范根 `../.team-worktrees/<RUN-ID>` 为兄弟目录共享——相邻两个 repo 各自的 RUN-0001 会撞目录，register 围栏只验 realpath 不验 git 归属（单项目布局无害；project.json default_worktree_root 可配规避；候选改进=根内加项目名段）；②`git worktree add -b` 失败于目录已存在时分支已建（半途失败留分支，与 dogfood finding #1 同族——工具侧纪律，非 gateway 缺陷）。
