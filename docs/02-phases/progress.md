@@ -138,3 +138,9 @@
 - **三枚 findings**：①（工具纪律）副作用命令勿过管 `head`——SIGPIPE 在建支后、checkout 前杀掉 `git worktree add`；②（设计空白）下游依赖未集成上游 → worktree 内 merge 上游 task branch，拓扑序集成收敛为增量（16 §3.6 新注 + MEM-0001）；③（产品缺陷）report 后 progress 显示 0%。
 - **finding #3 修复（本轮代码变更）**：`integrated → done` 边此前从未实现（15 §3.3 accept 行）——现 `report` 即 run 验收，integrated 批翻 done + 逐任务 `task_done` 事件；replay 表补映射（AUD-034 一致）；computeProgress 从二元 done 口径改为 docs/03 §9 分数全表（blocked 账本回溯保持前值、cancelled 剔除分母）。dogfood run 状态 0%→95%（旧账本无 accept 事件，95% 如实）；回归锁：report 验收断言、§9 混合态 82%、blocked/cancelled 分数场景。测试 214/214。
 - 残余（外部动作）：npm publish（scope 归属待用户 npm 账号）、GitHub push 触发 CI 矩阵、CLAUDE.md @import 接线。
+
+## 2026-07-11（npm 发布准备）
+
+- **单包装配落地**（22 §4.1 裁决执行）：`scripts/build-release.mjs`——esbuild bundle `packages/cli/dist/bin.js`（8 内部包并入，zod/minimatch 外置为真实依赖，adapter 模板本为内联字符串随 bundle 走），产出 `release/`（package.json name=`sigmarun` bin=`sigmarun` files=dist+README+CHANGELOG，engines node>=20）+ npm 面 README（双语开头，10 分钟上手）。
+- **tarball 冒烟**：全新 git repo `npm i sigmarun-0.1.0.tgz` → init、doctor 10/10、run import→task publish→agent register→claim-next→status（§9 分数口径 claimed=5% 正确）→audit 40 规则 0 findings→adapter install 13 模板。踩坑一枚：esbuild banner 与源 shebang 叠加成双 shebang（ESM 解析错误）——去 banner，入注释。
+- **发布门（用户侧）**：`npm whoami` ENEEDAUTH（未登录）；`sigmarun` 名字复核仍 E404 空闲（D12 占名窗口仍在）；license 未裁决（package.json 暂缺该字段）。发布命令与两项待裁决见会话报告。

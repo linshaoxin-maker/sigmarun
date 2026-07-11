@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 发布装配（形态 B 前置，22 §4.1 单包裁决落地）：`npm run release` = 构建 + esbuild 把 8 个 workspace 包 bundle 成单包 `sigmarun`（单 bin，zod/minimatch 保持外部依赖，模板内联随包）；npm 面 README；tarball 冒烟通过（全新 repo 安装 → init/doctor 10 项 → import→publish→claim→status(§9 5%)→audit 40 规则→adapter install 13 模板）。实际 `npm publish` 待账号登录与 license 裁决。
+
 - 真机 dogfood（双代理全旅程）+ finding #3 修复：`report` 即 run 验收——integrated 任务批量翻 `done` 并逐个记 `task_done` 事件（15 §3.3 最后一条未实现边闭合，写序 详情→索引→事件）；progress 落实 docs/03 §9 分数全表（claimed 0.05…integrated 0.95，blocked 经账本回溯保持前值，cancelled 剔除分母）——修复"两任务已合并仍显 0%"；replay 表补 `task_done`。dogfood 另两枚 findings：副作用命令勿过管 `head`（SIGPIPE 半途杀 git）；下游依赖未集成上游的分支策略（16 §3.6 新注 + 项目记忆 MEM-0001）。测试 214/214。
 
 - P1 面收官：`run pause/resume/cancel/archive`（15 §2.3 全转换，cancel 级联 claim/task + BDD-007-09，reported 只可 archive）、`task add`（草稿落位 + 图节点/blocks 边 + 依赖校验）与 `task cancel`（级联三类 claim）、`worktree list`、`graph show`（节点带派生状态）；**审计目录 40/40 全在线**——AUD-023…028（上下文/handoff 对账批）+ AUD-034（账本重放引擎，与 repair 共用 foldLedger 单一事实源，补齐 review_blocked/task_cancelled 映射）；review block 决定同步镜像 blocker 消息（AUD-024 一致性）；AUD-026 收敛为仅对含条目的记忆文件要求出处（import 骨架不再误报）。测试 213/213。
