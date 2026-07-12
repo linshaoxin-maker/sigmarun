@@ -169,3 +169,10 @@
 - **台账 20 项 → 修复 9 项**（全带回归锁，225/225；两冒烟 run 终审计 40 规则全零）：verify 租约（15 §7 违约实锤）、heartbeat 盖 gate 租约、worktree 根项目段、changed_files 形状、user 演员、AUD-026/032 校准、help 面、AUD-020 分 kind。模板 v0.2.0 + codex verify skill + AGENTS headless 前置注记。
 - **部署级发现（文档化，非代码）**：L1 claude CLI 需独立 `/login`；L2 codex workspace-write 禁 `.git` 写（worktree add/commit 全死，`--add-dir` 无效）→ 分发需 bypass/danger-full-access；L16 codex exec 后台须 `< /dev/null` 防 stdin 挂死。
 - 台账全文: scratchpad ftest/smoke/FINDINGS.md（会话级）；关键结论已入本文与 CHANGELOG。
+
+## 2026-07-11（桌面版真实代理轮 · RUN-0002）
+
+- **形态升级**：sigmarun 以 `npm i -g`（形态 B）全局安装；Claude 侧窗口改用**真实桌面 Claude Code 会话**（ccd spawn_task 弹卡片、用户一键启动、原生加载已安装 `/team-*` 斜杠命令）——比子代理手读模板更贴近真实用户路径。
+- **北极星全链（真桌面斜杠命令）**：desktop-A `/team-dispatch RUN-0002 --as desktop-A` 领取/实现 normalize（复用 parse+stringify、16 真测试一次过、submit rev1 零返工）→ Codex 真进程 `/team-review` approve → desktop-V `/team-verify RUN-0002 --as desktop-V` 独立重跑 6 检查（含 import-no-reimpl 源码检查）→ 集成拓扑序真合并 16/16 → run 级 verify → report 100% done → 用户侧合 main。终审计 40 规则 0 findings 0 skipped。
+- **三项契约首次真机验证**：①L13 verify 租约（`verify_claimed` seq19 真机出现，`CLAIM-verify-0004` kind=verify status=completed 完整生命周期——冒烟轮前该机制不存在）；②docs/16 §2 git-common-dir 解析（桌面会话开在 fresh worktree、`.team/` gitignored，gateway 经 `git rev-parse --git-common-dir` 解析回主检出，跨会话协作成立）；③L21 版本感知升级（12 Claude 模板 + 5 Codex skills 一次滚 v0.2.0）。
+- **新缺陷 L22**（低/DX）：Codex 评审沿用 review skill 的"register as reviewer"简写误试顶层 `sigmarun register`（一次 usage_error 后自恢复）→ codex review skill 补全 `sigmarun agent register` 完整命令签名，模板 v0.2.1。台账全文 scratchpad ftest/smoke/DESKTOP-ROUND.md。

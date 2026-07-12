@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.2.0';
+export const TEMPLATE_VERSION = '0.2.1';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -442,10 +442,14 @@ ${versionHeader}
 
 ${RULES_BLOCK}
 
-Follow the /team-review flow with --tool=codex: register as reviewer ->
-\`sigmarun review claim\` or \`claim-next --role=reviewer\` (review_work) ->
-read evidence + diff -> decide via \`sigmarun review approve|request-changes|block\`
-(request-changes needs >=1 must_fix). self_approval_forbidden means STOP.
+Follow the /team-review flow with --tool=codex:
+1. \`sigmarun agent register <RUN-ID> --tool=codex --role=reviewer [--label="<window>"] --json\`
+   (there is no top-level \`sigmarun register\`; registration is \`agent register\`).
+2. \`sigmarun review claim <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --json\`, or
+   \`sigmarun claim-next <RUN-ID> --agent=<AGENT-ID> --role=reviewer --json\` (data.kind=review_work).
+3. Read evidence (\`sigmarun evidence show <RUN-ID> <TASK-ID> --json\`) + the diff; RERUN the checks.
+4. Decide: \`sigmarun review approve|request-changes|block <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --review=<file> --json\`
+   (request-changes needs >=1 must_fix finding). self_approval_forbidden means STOP.
 `;
 
 const CODEX_VERIFY_SKILL = `---

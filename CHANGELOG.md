@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 桌面版真实代理轮（RUN-0002 jsonlkit，全局 `npm i -g` 形态 B）：北极星旅程首次由**真实桌面 Claude Code 会话**驱动——desktop-A 原生跑 `/team-dispatch` 领取并实现 normalize（复用 parse+stringify，16 真测试一次过），Codex 真进程交叉评审 approve，desktop-V 原生跑 `/team-verify` 独立重跑 6 检查并提交验证，集成 100% done、终审计 40 规则 0 findings 0 skipped。三项契约首次真机验证：**L13 verify 租约实锤**（`verify_claimed` 事件真机出现、`CLAIM-verify-*` 完整生命周期）、**docs/16 §2 git-common-dir 解析**（桌面会话在 fresh worktree 中经共享 .team/ 协作）、**L21 版本感知升级**（真机 12+5 模板滚 0.2.0）。新缺陷 L22（Codex 评审误试顶层 `sigmarun register`）→ codex review skill 补全 `agent register` 命令签名，模板 v0.2.1。测试 226/226。
+
 - adapter 模板版本感知升级（冒烟 L21）：`adapter install` 原先"文件存在即跳过"，0.1.0 模板永远升不到新版（违反 22 §4.3 模板版本化）——现比对 `template_version` 标记，异版本自动改写并报 `updated` 清单，同版本跳过，`--update` 保留为强制改写；信封文案改为 new/updated/up-to-date 三段计数。真机验证：12 个 Claude 模板 + 5 个 Codex skills 一次滚到 v0.2.0。测试 226/226。
 
 - 真实代理冒烟测试轮（两项目 × claude/codex 真进程分发，senior-tester 监控全流程）：北极星以真跨厂牌代理达成——Claude 规划一次成型、Codex/Claude 并行认领互不越界、交叉评审带对抗探针、独立验证真重跑、集成 100%、main 零污染；真代理带回 20 项台账。**修复 9 项（全带回归锁，225/225）**：①verify 合成落租约（CLAIM-verify-*/verify_claimed/verify_released，双真代理独立命中 15 §7 违约——合成无 claim 无互斥）；②heartbeat 覆盖 review/verify gate 租约（RULE 7 此前对评审/验证者不可满足，双厂牌各命中一次）；③worktree 默认根加项目名段（两项目同父目录 RUN-0001 撞路径，Codex 真机撞上）；④changed_files 形状校验入 evidence_invalid 清单（原样误报 path_escape 逼真代理读源码自救）；⑤`msg post --from=user`（人类回 blocker 不再借代理身份）；⑥AUD-026 豁免 handoff 镜像（健康 run 必噪）；⑦AUD-032 豁免 counters.json（INV-011 无事件写手误报）；⑧`--help`/`help` 命令面；⑨AUD-020 按 kind 分组。模板 v0.2.0：submit 四参与五坑清单、heartbeat 全签名、codex 补 team-run-verify skill、AGENTS 段补 headless 前置（claude 登录/codex 沙箱禁 .git 写需 bypass/stdin 闭合）；review claim checklist 自含。两冒烟项目终审计 40 规则全零。
