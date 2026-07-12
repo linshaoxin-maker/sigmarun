@@ -57,3 +57,28 @@ describe('adapter install (docs/19; docs/22 §installation; D12 sigmarun naming)
     expect(env.code).toBe('usage_error');
   });
 });
+
+describe('smoke-round L21: managed templates roll forward by version', () => {
+  it('re-install rewrites files whose template_version differs and reports them as updated', async () => {
+    const { installAdapters: installAdapter } = await import('@sigmarun/adapters');
+    const { mkTmpGitRepo, cleanup } = await import('../../storage/test/helpers.js');
+    const { readFileSync, writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const repo = mkTmpGitRepo();
+    try {
+      installAdapter({ cwd: repo, tool: 'claude-code' });
+      const file = join(repo, '.claude', 'commands', 'team-dispatch.md');
+      const downgraded = readFileSync(file, 'utf8').replace(/template_version: [\d.]+/, 'template_version: 0.0.1');
+      writeFileSync(file, downgraded);
+      const env = installAdapter({ cwd: repo, tool: 'claude-code' });
+      expect(env.ok).toBe(true);
+      const data = env.data as { updated: string[]; skipped: string[] };
+      expect(data.updated.some((u) => u.includes('team-dispatch.md'))).toBe(true);
+      expect(readFileSync(file, 'utf8')).not.toContain('template_version: 0.0.1');
+      // unchanged files stay skipped
+      expect(data.skipped.length).toBeGreaterThan(0);
+    } finally {
+      cleanup(repo);
+    }
+  });
+});

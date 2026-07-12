@@ -29,12 +29,24 @@ export function installAdapters(opts: InstallOptions): Envelope {
   }
 
   const written: string[] = [];
+  const updated: string[] = [];
   const skipped: string[] = [];
   const warnings: EnvelopeWarning[] = [];
+  const versionOf = (text: string): string | null => /template_version: ([\d.]+)/.exec(text)?.[1] ?? null;
   for (const [rel, content] of Object.entries(files)) {
     const target = join(repoRoot, rel);
     if (existsSync(target) && !opts.update) {
-      skipped.push(rel);
+      // Managed files upgrade themselves when the shipped template_version differs
+      // (docs/22 §4.3; smoke-round L21: exists-means-skip could never roll 0.1.0 forward).
+      const current = versionOf(readFileSync(target, 'utf8'));
+      const shipped = versionOf(content);
+      if (current === shipped) {
+        skipped.push(rel);
+        continue;
+      }
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, content, 'utf8');
+      updated.push(`${rel} (${current ?? '?'} -> ${shipped ?? '?'})`);
       continue;
     }
     mkdirSync(dirname(target), { recursive: true });
@@ -44,7 +56,7 @@ export function installAdapters(opts: InstallOptions): Envelope {
   if (skipped.length > 0) {
     warnings.push({
       code: 'already_installed',
-      message: `${skipped.length} template(s) already exist and were left untouched (use --update to overwrite): ${skipped.join(', ')}.`,
+      message: `${skipped.length} template(s) already at this version and left untouched (use --update to force): ${skipped.join(', ')}.`,
     });
   }
 
@@ -57,8 +69,8 @@ export function installAdapters(opts: InstallOptions): Envelope {
   }
 
   return okEnvelope({
-    message: `Installed ${opts.tool} adapter: ${written.length} file(s) written, ${skipped.length} skipped.`,
-    data: { tool: opts.tool, written, skipped },
+    message: `Installed ${opts.tool} adapter: ${written.length} new, ${updated.length} updated, ${skipped.length} up-to-date.`,
+    data: { tool: opts.tool, written, updated, skipped },
     warnings,
     nextActions:
       opts.tool === 'claude-code'

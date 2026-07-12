@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.1.0';
+export const TEMPLATE_VERSION = '0.2.0';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -30,8 +30,10 @@ export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
    \`requires_approval\` paths needs \`sigmarun approve-paths\` FIRST.
 6. Submitting evidence is the ONLY way to finish a task. Never state
    a task is done without a successful \`sigmarun submit\`.  [F1]
-7. Call \`sigmarun heartbeat\` at natural pauses (after a test run, after
-   finishing a file). Other \`sigmarun\` calls auto-extend your lease.
+7. Heartbeat at natural pauses (after a test run, after finishing a
+   file): \`sigmarun heartbeat <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --json\`.
+   It extends implementation leases AND review/verify gate leases.
+   Other \`sigmarun\` calls auto-extend your lease too.
 8. After completing ONE task, stop and report. Continue claiming only
    if the user passed \`--loop\`.  [D5]
 9. Never review or approve a task you have ever owned.  [INV-008]

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- adapter 模板版本感知升级（冒烟 L21）：`adapter install` 原先"文件存在即跳过"，0.1.0 模板永远升不到新版（违反 22 §4.3 模板版本化）——现比对 `template_version` 标记，异版本自动改写并报 `updated` 清单，同版本跳过，`--update` 保留为强制改写；信封文案改为 new/updated/up-to-date 三段计数。真机验证：12 个 Claude 模板 + 5 个 Codex skills 一次滚到 v0.2.0。测试 226/226。
+
 - 真实代理冒烟测试轮（两项目 × claude/codex 真进程分发，senior-tester 监控全流程）：北极星以真跨厂牌代理达成——Claude 规划一次成型、Codex/Claude 并行认领互不越界、交叉评审带对抗探针、独立验证真重跑、集成 100%、main 零污染；真代理带回 20 项台账。**修复 9 项（全带回归锁，225/225）**：①verify 合成落租约（CLAIM-verify-*/verify_claimed/verify_released，双真代理独立命中 15 §7 违约——合成无 claim 无互斥）；②heartbeat 覆盖 review/verify gate 租约（RULE 7 此前对评审/验证者不可满足，双厂牌各命中一次）；③worktree 默认根加项目名段（两项目同父目录 RUN-0001 撞路径，Codex 真机撞上）；④changed_files 形状校验入 evidence_invalid 清单（原样误报 path_escape 逼真代理读源码自救）；⑤`msg post --from=user`（人类回 blocker 不再借代理身份）；⑥AUD-026 豁免 handoff 镜像（健康 run 必噪）；⑦AUD-032 豁免 counters.json（INV-011 无事件写手误报）；⑧`--help`/`help` 命令面；⑨AUD-020 按 kind 分组。模板 v0.2.0：submit 四参与五坑清单、heartbeat 全签名、codex 补 team-run-verify skill、AGENTS 段补 headless 前置（claude 登录/codex 沙箱禁 .git 写需 bypass/stdin 闭合）；review claim checklist 自含。两冒烟项目终审计 40 规则全零。
 
 - **D20**：`deps_satisfied_when` 默认档改为 `["verified","integrated","done"]`（产品负责人裁决，2026-07-11）——原 `["done"]` 与"done 仅在 report 验收产生"（15 §3.3）组合使 run 内依赖链默认不可行进（功能测试轮 F4 真机取证）；上游过独立验证即解锁下游，配合 16 §3.6 上游支合并模式；要更严由 planner 显式收紧。docs/10 §6 + docs/13 D20 + 回归锁；tarball 真机复验通过。测试 218/218。
