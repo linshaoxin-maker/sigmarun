@@ -51,13 +51,19 @@ writeFileSync(join(out, 'package.json'), JSON.stringify({
   description: 'Repo-local multi-agent collaboration protocol + gateway CLI for AI coding agents (Claude Code, Codex): runs, task claims, evidence gates, review/verify, audit.',
   type: 'module',
   bin: { sigmarun: 'dist/bin.js' },
-  files: ['dist', 'README.md', 'CHANGELOG.md'],
+  files: ['dist', 'README.md', 'CHANGELOG.md', 'LICENSE'],
   engines: { node: '>=20' },
-  keywords: ['ai-agents', 'multi-agent', 'claude-code', 'codex', 'orchestration', 'cli', 'collaboration'],
+  keywords: ['ai-agents', 'multi-agent', 'claude-code', 'codex', 'orchestration', 'cli', 'collaboration', 'gateway'],
+  license: 'MIT',
+  author: 'Lin Shaoxin <skyaward@icloud.com>',
+  repository: { type: 'git', url: 'git+https://github.com/OWNER/sigmarun.git' },
+  bugs: { url: 'https://github.com/OWNER/sigmarun/issues' },
+  homepage: 'https://github.com/OWNER/sigmarun#readme',
   dependencies,
 }, null, 2) + '\n');
 
 cpSync(join(root, 'CHANGELOG.md'), join(out, 'CHANGELOG.md'));
+cpSync(join(root, 'LICENSE'), join(out, 'LICENSE'));
 cpSync(join(root, 'scripts/release-readme.md'), join(out, 'README.md'));
 
 console.log('release/ assembled: sigmarun@' + rootPkg.version);

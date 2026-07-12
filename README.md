@@ -1,26 +1,90 @@
 # sigmarun
 
-**让多个 AI 编程窗口（Claude Code、Codex）像一个小团队一样协作同一个项目**——repo-local 的 `.team/` 协作协议 + gateway CLI。coding agent 出智能，gateway 出秩序，`.team/` 是事实源。
+**Make multiple AI coding windows (Claude Code, Codex) collaborate on one repo
+like a small team.** sigmarun is a repo-local coordination protocol plus a
+gateway CLI: the coding agents supply the intelligence, the gateway supplies the
+order, and a `.team/` directory in your repo is the single source of truth.
 
-> 北极星验收：一个 Claude Code 生成的 `RUN-ID`，能被 Codex 用 `/team-dispatch` 领取唯一 `TASK-ID`、写回 evidence，用户能用 `/team-status` 查到可信 progress。
+> 让多个 AI 编程窗口（Claude Code、Codex）像一个小团队一样协作同一个项目。
 
-## 快速入口
+**Status:** early release (`0.x`). The protocol and full command surface are
+implemented and tested (build green, 40/40 audit rules, real cross-vendor
+smoke runs). Interfaces may still move before 1.0.
 
-| 想看什么 | 去哪 |
-|---|---|
-| 怎么用（用户视角） | [docs/00-user-guide.md](docs/00-user-guide.md) |
-| 设计总索引 + 决策账本 D1–D19 | [docs/README.md](docs/README.md) · [docs/13 §2.1](docs/13-design-audit-and-next-breakdown.md) |
-| 方法论工作区（P0–P5 / gate / traceability） | [docs/02-phases/progress.md](docs/02-phases/progress.md) |
-| FEAT 清单与开发计划 | [docs/02-phases/P4-feature.md](docs/02-phases/P4-feature.md) |
+## Why
 
-## 仓库布局
+Point two agent windows at the same repo and they collide: duplicate work,
+clobbered files, "done" with no evidence, no shared memory. sigmarun gives them
+deterministic primitives to coordinate through — task claims with leases,
+evidence gates, independent review/verify, topological integration — while the
+agents keep doing the thinking.
 
-```text
-sigmarun/
-├── docs/            # 设计语料库（00–25）+ ai-dev-methodology 工作区 + Codex 触发 testkit
-└── (packages/ …)    # TS monorepo 九包，随 P5 开工建立（docs/20 §3）
+## Install
+
+```bash
+npm i -g sigmarun     # Node >= 20
+sigmarun --version
 ```
 
-## 状态
+## Quick start
 
-设计层定稿（26 份文档、D1–D19、双路径触发实测通过）；**P1 需求形式化是开工前最后一步**（[docs/02-phases/P1-requirement.md](docs/02-phases/P1-requirement.md)）。
+```bash
+cd your-repo
+sigmarun init                    # creates .team/ (gitignored) + scaffolding
+sigmarun doctor                  # 10-point self-check
+sigmarun adapter install --tool=claude-code   # or --tool=codex
+
+# Plan a run (a planning agent writes the payload), then:
+sigmarun run import plan.json    # -> RUN-0001
+sigmarun task publish RUN-0001   # draft -> ready
+
+# In each agent window (the installed /team-* commands drive these):
+sigmarun agent register RUN-0001 --tool=claude-code --label=window-A
+sigmarun claim-next RUN-0001 --agent=<AGENT-ID>
+# ... agent works in the suggested git worktree, runs tests, then:
+sigmarun submit RUN-0001 TASK-0001 --agent=<AGENT-ID> --evidence=evidence.json
+
+# From anywhere:
+sigmarun status RUN-0001         # weight-based progress, risks, "needs you"
+sigmarun audit run RUN-0001      # 40-rule consistency audit, findings are data
+sigmarun --help                  # the full command map
+```
+
+Agents drive this through installed slash commands / skills — `/team-plan`,
+`/team-dispatch`, `/team-review`, `/team-verify`, `/team-status`,
+`/team-integrate` (Claude Code) or the matching `team-run-*` Codex skills.
+
+## How it works
+
+- **State** lives in `.team/` as plain JSON plus an append-only `events.jsonl`.
+  The event append is the commit point of every transaction.
+- **Every command** emits exactly one machine envelope (`team.envelope.v1`) on
+  `--json`, with a stable exit-code map. Agents branch on `ok` / `code` /
+  `next_actions`, never on human text.
+- **Concurrency** is safe through optimistic `rev` locking plus directory locks;
+  the audit engine can replay the ledger and prove the on-disk state honest.
+- **The gateway never touches your git history** — it records merge commits you
+  make on an integration branch; you open the final PR.
+
+## What's not here yet
+
+- No MCP server front-end (`mcp serve`) — the CLI is the interface today. It is a
+  planned form, not a regression.
+- Semantic search / cross-run remote sync are future phases.
+
+## Documentation
+
+The full design corpus (product boundary, domain model, state machine, CLI/MCP
+contract, audit catalog, packaging) lives under [`docs/`](docs/) (numbered
+00–25, currently written in Chinese). Start with
+[`docs/00-user-guide.md`](docs/00-user-guide.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for build/test setup and the ground rules.
+Security reports: [SECURITY.md](SECURITY.md). Community expectations:
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+## License
+
+[MIT](LICENSE) © Lin Shaoxin
