@@ -77,9 +77,21 @@ const DISPATCH_FLOW = (tool: string) => `Required flow:
 8. Build \`evidence.json\` per team.evidence.v1 (docs/14 §2.1: commands
    with exit codes + output refs, acceptance item-by-item,
    context_ack = the must_read list you actually read, risks,
-   follow_ups). Then \`sigmarun submit <RUN-ID> <TASK-ID> --evidence=<file> --json\`.
-   The submit command requires ALL THREE: run id, task id, and
-   --evidence <file>.
+   follow_ups). Then:
+   \`sigmarun submit <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --evidence=<file> --json\`
+   (all FOUR are required: run id, task id, --agent, --evidence).
+   Traps that cost real submit attempts:
+   - \`changed_files\` entries are OBJECTS: {"path":"src/x.js","change_type":"added|modified|deleted"}.
+   - \`acceptance[].item\` must match the task's acceptance text byte-for-byte;
+     its status enum is met/unmet/partial while required_checks_results[].status
+     is pass/fail/skipped — two different enums by design.
+   - \`required_checks_results[].check\` must equal the task's required_checks
+     string exactly, with cmd_ref pointing at the commands[] entry that ran it.
+   - output_file paths resolve from the CWD WHERE YOU INVOKE sigmarun
+     (absolute paths always work — prefer them, or submit from the worktree).
+   - Keep check logs out of git: put them under .evidence-out/ and append
+     that folder to the SHARED .git/info/exclude (per-worktree info/exclude
+     is ignored by git).
    If \`evidence_invalid\`: fix exactly what \`data\` lists and retry.
 9. Report to the user: TASK-ID, what changed, check results,
    submit status, and what the run needs next (from status).
@@ -273,6 +285,8 @@ Required flow:
    evidence_complete}, "skip_reasons": {...}, "verdict": "pass"|"fail",
    "failures_mapped": [] }. verdict pass requires every non-skipped gate pass.
 5. \`sigmarun verify submit <RUN-ID> --agent=<AGENT-ID> --verify=<file> --json\`.
+   output_file paths resolve from your invocation CWD — use absolute
+   paths or run the command from where the logs live (e.g. the worktree).
 6. Report verdict, gates, and what the run needs next.
 `;
 
@@ -432,6 +446,36 @@ read evidence + diff -> decide via \`sigmarun review approve|request-changes|blo
 (request-changes needs >=1 must_fix). self_approval_forbidden means STOP.
 `;
 
+const CODEX_VERIFY_SKILL = `---
+name: team-run-verify
+description: Use when the user asks Codex to verify an approved Team Run
+  task (independent verification gate). Trigger phrases: "team-verify",
+  "verify task", "验证任务", "独立验证".
+---
+${versionHeader}
+
+# Team Run Verify
+
+${RULES_BLOCK}
+
+Required flow:
+1. \`sigmarun run show <RUN-ID> --json\`; register with role verifier:
+   \`sigmarun agent register <RUN-ID> --tool=codex --role=verifier [--label="<window>"] --json\`.
+2. Find work: \`sigmarun claim-next <RUN-ID> --agent=<AGENT-ID> --role=verifier --json\`
+   — data.kind="verify_work" with claim_id + lease_until (verify work is
+   leased; heartbeat extends it). You must NOT have owned the task.
+3. cd into the task worktree (\`sigmarun worktree list <RUN-ID> --json\`),
+   RUN THE CHECKS YOURSELF, keep every output file.
+4. Build a verify JSON: { "target": {"kind":"task","task_id":"<TASK-ID>"},
+   "checks": [{name, cmd, exit_code, output_file, status}],
+   "gates": {build, focused_tests, regression_tests, scope_check,
+   evidence_complete}, "skip_reasons": {...}, "verdict": "pass"|"fail",
+   "failures_mapped": [] }. verdict pass requires every non-skipped gate pass.
+5. From the directory where the logs live (output_file resolves from your
+   CWD): \`sigmarun verify submit <RUN-ID> --agent=<AGENT-ID> --verify=<file> --json\`.
+6. Report verdict, gates, and what the run needs next.
+`;
+
 const CODEX_STATUS_SKILL = `---
 name: team-run-status
 description: Use when the user types \`/team-status <RUN-ID>\` or asks Codex
@@ -469,6 +513,12 @@ This repository uses the Team Run Protocol for multi-agent collaboration.
   memory). Read it before planning or cross-module changes. Propose
   additions via \`sigmarun memory promote\`; never hand-edit its managed
   entries.
+- Headless invocation prerequisites (operators): \`claude -p\` needs a
+  one-time \`claude /login\` on the machine; \`codex exec\` needs
+  \`--dangerously-bypass-approvals-and-sandbox\` (or danger-full-access)
+  because workspace-write sandboxes block the \`.git\` writes that
+  \`git worktree add\`/\`git commit\` require, and pipe \`< /dev/null\`
+  so it never hangs waiting for stdin.
 <!-- sigmarun:adapter-section:end -->`;
 
 /** tool -> repo-relative file -> content */
@@ -492,5 +542,6 @@ export const TEMPLATES: Record<string, Record<string, string>> = {
     '.codex/skills/team-run-plan/SKILL.md': CODEX_PLAN_SKILL,
     '.codex/skills/team-run-review/SKILL.md': CODEX_REVIEW_SKILL,
     '.codex/skills/team-run-status/SKILL.md': CODEX_STATUS_SKILL,
+    '.codex/skills/team-run-verify/SKILL.md': CODEX_VERIFY_SKILL,
   },
 };

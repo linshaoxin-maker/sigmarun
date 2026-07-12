@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
   GatewayError,
   tryAcquireLock,
@@ -181,7 +181,7 @@ export function importRun(opts: ImportOptions): Envelope {
       created_by: { tool: payload.source.tool, agent_id: payload.source.agent_id ?? null },
       source: { tool: payload.source.tool, command: payload.source.command, prompt: payload.source.prompt, payload_hash: hash },
       base_branch: payload.run.base_branch ?? project.default_base_branch ?? 'main',
-      worktree_root: `${project.default_worktree_root ?? '../.team-worktrees'}/${runId}`,
+      worktree_root: `${project.default_worktree_root ?? `../.team-worktrees/${basename(root.repoRoot)}`}/${runId}`,
       default_policy: {
         claim_ttl_minutes: 30,
         max_parallel_tasks: 4,

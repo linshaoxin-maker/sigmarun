@@ -291,6 +291,9 @@ Run policy 新增：
 
 ## 8. Heartbeat 捎带续租（解 M5）
 
+> **2026-07-11 冒烟修正（L9/L13）**：`team heartbeat` 同时覆盖 review/verify gate 租约（按 `review_ttl_minutes` 续）；`claim-next --role=verifier` 的合成命中现在**落 verify claim**（`CLAIM-verify-*`，事件 `verify_claimed`，过期由 sweep 释放并记 `verify_released`）——与 §7 D15"命中即落 claim"的既有文字对齐（此前实现漏掉了 verifier 半边，真代理两次独立命中该缺口）。
+
+
 显式 `team heartbeat` 保留，但不再是唯一续租途径：
 
 | 规则 | 内容 |

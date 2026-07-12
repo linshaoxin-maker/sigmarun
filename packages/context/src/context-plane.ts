@@ -127,9 +127,10 @@ export function postMessage(opts: PostMessageOptions): Envelope {
   if (!opts.body || opts.body.trim().length === 0) {
     return failEnvelope('schema_invalid', 'Message body must not be empty.', { startedAt });
   }
-  if (!existsSync(join(runDir, 'agents', `${opts.fromAgentId}.json`))) {
+  // Smoke-test L3: the human answering a blocker must not need to borrow an agent identity.
+  if (opts.fromAgentId !== 'user' && !existsSync(join(runDir, 'agents', `${opts.fromAgentId}.json`))) {
     return failEnvelope('agent_not_registered', `Agent ${opts.fromAgentId} is not registered on ${runId}.`, {
-      nextActions: [`Register first: sigmarun agent register ${runId} --tool=<tool> --label=<window>`],
+      nextActions: [`Register first: sigmarun agent register ${runId} --tool=<tool> --label=<window>`, 'Posting as the human? Use --from=user.'],
       startedAt,
     });
   }

@@ -30,7 +30,11 @@ interface ReviewClaim {
   status: string;
   acquired_at: string;
   lease_until: string;
+  /** absent = review (pre-verify-claim ledgers); D15 leases verify work through the same file. */
+  kind?: 'review' | 'verify';
 }
+
+const claimKind = (c: ReviewClaim): 'review' | 'verify' => c.kind ?? 'review';
 
 function loadReviewClaims(runDir: string, runId: string) {
   const file = join(runDir, 'claims', 'review-claims.json');
@@ -88,7 +92,7 @@ function sweepReviewClaims(runDir: string, runId: string, rc: ReturnType<typeof 
     rc.rev = (rc.rev ?? 0) + 1;
     for (const claim of released) {
       appendEvent(runDir, {
-        event: 'review_released',
+        event: claimKind(claim) === 'verify' ? 'verify_released' : 'review_released',
         actor: { type: 'sweep', id: 'sweep' },
         run_id: runId,
         task_id: claim.task_id,
@@ -191,7 +195,7 @@ export function reviewClaim(opts: ReviewClaimOptions): Envelope {
         round: result.round,
         lease_until: result.claim.lease_until,
         evidence_ref: `evidence/${opts.taskId}/evidence.json`,
-        checklist_source: 'task.review.focus | run-mode default (docs/15 §10)',
+        checklist_source: 'task.review.focus, else: scope respected / acceptance items hold / tests real and passing / evidence complete',
       },
       nextActions: [
         `Read the evidence: .team/runs/${runId}/evidence/${opts.taskId}/evidence.json`,
@@ -247,7 +251,7 @@ export function synthesizeReview(runDir: string, runId: string, agentId: string,
       round: result.round,
       lease_until: result.claim.lease_until,
       evidence_ref: `evidence/${picked.row.task_id}/evidence.json`,
-      checklist_source: 'task.review.focus | run-mode default (docs/15 §10)',
+      checklist_source: 'task.review.focus, else: scope respected / acceptance items hold / tests real and passing / evidence complete',
     },
     nextActions: [
       `Read the evidence, then decide: sigmarun review approve|request-changes ${runId} ${picked.row.task_id} --agent=${agentId} --review=<file>`,
@@ -498,4 +502,96 @@ export function resumeTask(opts: ResumeOptions): Envelope {
       startedAt,
     });
   });
+}
+
+// ---------- verify work leases (15 §7 D15: reviewer OR verifier synthesis drops a claim) ----------
+
+/** The active verify claim on a task, if any (smoke-test L13: verify work must be leased + mutually exclusive). */
+export function activeVerifyClaim(runDir: string, runId: string, taskId: string): { claim_id: string; reviewer_agent_id: string; lease_until: string } | null {
+  const rc = loadReviewClaims(runDir, runId);
+  sweepReviewClaims(runDir, runId, rc);
+  const hit = rc.doc.claims.find((c) => c.task_id === taskId && c.status === 'active' && claimKind(c) === 'verify');
+  return hit ? { claim_id: hit.claim_id, reviewer_agent_id: hit.reviewer_agent_id, lease_until: hit.lease_until } : null;
+}
+
+/**
+ * Lease verify work to an agent. Idempotent for the same agent; refuses when another
+ * agent holds the lease. Emits `verify_claimed` after the claims file persists.
+ */
+export function grantVerifyClaim(
+  runDir: string,
+  runId: string,
+  taskId: string,
+  agentId: string,
+): { claim_id: string; lease_until: string } | { code: string; message: string } {
+  const rc = loadReviewClaims(runDir, runId);
+  sweepReviewClaims(runDir, runId, rc);
+  const existing = rc.doc.claims.find((c) => c.task_id === taskId && c.status === 'active' && claimKind(c) === 'verify');
+  if (existing) {
+    if (existing.reviewer_agent_id === agentId) {
+      return { claim_id: existing.claim_id, lease_until: existing.lease_until };
+    }
+    return { code: 'task_already_claimed', message: `Verify work on ${taskId} is already leased to ${existing.reviewer_agent_id} (${existing.claim_id}).` };
+  }
+  const run = readJsonState(join(runDir, 'run.json')).doc as { default_policy?: { review_ttl_minutes?: number } };
+  const ttlMin = run.default_policy?.review_ttl_minutes ?? 20;
+  const countersFile = join(runDir, 'counters.json');
+  const counters = readJsonState(countersFile);
+  const cdoc = counters.doc as Record<string, unknown>;
+  const n = Number(cdoc.next_claim ?? 1);
+  const now = new Date();
+  const claim: ReviewClaim = {
+    claim_id: `CLAIM-verify-${String(n).padStart(4, '0')}`,
+    task_id: taskId,
+    reviewer_agent_id: agentId,
+    round: evidenceRevision(runDir, taskId),
+    status: 'active',
+    acquired_at: now.toISOString(),
+    lease_until: new Date(now.getTime() + ttlMin * 60_000).toISOString(),
+    kind: 'verify',
+  };
+  rc.doc.claims.push(claim);
+  saveState(rc.file, rc.doc, rc.rev);
+  writeJsonStateAtomic(countersFile, { ...cdoc, next_claim: n + 1 }, { expectedRev: counters.rev });
+  appendEvent(runDir, {
+    event: 'verify_claimed',
+    actor: { type: 'agent', id: agentId },
+    run_id: runId,
+    task_id: taskId,
+    claim_id: claim.claim_id,
+    payload: { round: claim.round },
+  });
+  return { claim_id: claim.claim_id, lease_until: claim.lease_until };
+}
+
+/** Close the agent's verify lease once the verification record lands (either verdict). */
+export function completeVerifyClaim(runDir: string, runId: string, taskId: string, agentId: string): void {
+  const rc = loadReviewClaims(runDir, runId);
+  const hit = rc.doc.claims.find(
+    (c) => c.task_id === taskId && c.status === 'active' && claimKind(c) === 'verify' && c.reviewer_agent_id === agentId,
+  );
+  if (!hit) return;
+  hit.status = 'completed';
+  saveState(rc.file, rc.doc, rc.rev);
+}
+
+/**
+ * Heartbeat fallback for gate work (smoke-test L9: RULE 7 was unsatisfiable for reviewers/verifiers):
+ * extend the agent's active review/verify lease on the task by the review TTL.
+ */
+export function extendGateLease(
+  runDir: string,
+  runId: string,
+  taskId: string,
+  agentId: string,
+): { claim_id: string; lease_until: string; kind: 'review' | 'verify' } | null {
+  const rc = loadReviewClaims(runDir, runId);
+  const hit = rc.doc.claims.find((c) => c.task_id === taskId && c.status === 'active' && c.reviewer_agent_id === agentId);
+  if (!hit) return null;
+  const run = readJsonState(join(runDir, 'run.json')).doc as { default_policy?: { review_ttl_minutes?: number } };
+  const ttlMin = run.default_policy?.review_ttl_minutes ?? 20;
+  const now = new Date();
+  hit.lease_until = new Date(now.getTime() + ttlMin * 60_000).toISOString();
+  saveState(rc.file, rc.doc, rc.rev);
+  return { claim_id: hit.claim_id, lease_until: hit.lease_until, kind: claimKind(hit) };
 }

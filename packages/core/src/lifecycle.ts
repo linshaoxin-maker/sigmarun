@@ -64,7 +64,8 @@ export function initProject(opts: ResolveOptions = {}): Envelope {
       team_dir: '.team',
       min_gateway_version: GATEWAY_VERSION,
       default_base_branch: currentBranch(root.repoRoot),
-      default_worktree_root: '../.team-worktrees',
+      // Smoke-test L17: sibling repos with the same RUN-ID collide without a project segment.
+      default_worktree_root: `../.team-worktrees/${basename(root.repoRoot)}`,
       default_checks: [],
       project_memory_path: 'docs/team/MEMORY.md',
       tooling: { supports_claude_code: true, supports_codex: true, supports_cursor: false },

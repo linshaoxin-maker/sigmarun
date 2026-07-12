@@ -161,3 +161,11 @@
 - 回应缺口"真实测试用例驱动整条流水线只被 strutil 浅走过一次"：新建 **mathkit** 项目（node --test），3 任务真实 DAG 全链——**14 个真实测试用例**驱动每一道闸门，被测物仍为 tarball CLI。
 - 全链实况：双窗口真并行（A=stats、B=format 同时活跃 claim）→ 真实现+真测试+真日志 evidence（无一合成输出）→ **评审抓真缺口**（formatPercent 非有限输入无守卫，must_fix）→ **真 TDD 返工**（RED 1 fail 实录 → 修复 → GREEN，evidence rev 2、REVIEW-02 新文件）→ 验证者三次独立重跑真测试 → **D20 首次真实生效**（T1 verified → A claim-next 零配置自动领 T2）→ hydrate 携带上游 handoff（must_read 四项与 docs/12 示例形状一致）→ **16 §3.6 上游支合并**（T2 worktree 缺 stats.js，合并 T1 支）→ 拓扑序集成每步真测试（**3→5→8 增量收敛实录**）→ run 级验证全量 8/8 → report 验收 **100% done**（finding #3 修复后首个如实收官的 run）→ export 12 文件 → **审计 40 规则零 findings 零跳过** → memory candidates 恰好捞出两个知识时刻（§3.6 决策 + must_fix）→ MEM-0001 晋升 L4 → main 全程零污染。
 - 顺手取证两枚观察项（未修，记录）：①worktree 规范根 `../.team-worktrees/<RUN-ID>` 为兄弟目录共享——相邻两个 repo 各自的 RUN-0001 会撞目录，register 围栏只验 realpath 不验 git 归属（单项目布局无害；project.json default_worktree_root 可配规避；候选改进=根内加项目名段）；②`git worktree add -b` 失败于目录已存在时分支已建（半途失败留分支，与 dogfood finding #1 同族——工具侧纪律，非 gateway 缺陷）。
+
+## 2026-07-11（真实代理冒烟测试轮 · 两项目 × claude/codex 真进程）
+
+- **形态**：jsonlkit（JS）+ textstat（Python）两个独立项目；规划/分发/评审/验证由 headless 真代理执行（Codex=codex exec 真进程；Claude=会话真子代理逐字执行已安装模板——本机 claude CLI 未登录，见 L1）；我作为 senior tester 只做监控、blocker 解阻与缺陷记账。
+- **北极星真机达成**：Claude 规划（payload 一次合法+零警告）→ Codex/Claude **并行认领**（gateway 仲裁无越界）→ 真实现真测试（5+5/6 用例）→ 交叉评审（对抗探针、advisory findings）→ 独立验证（真重跑）→ 拓扑集成（5→10 用例递增）→ run 级验证 → report 100% → main 零污染。协议纪律亮点：Codex 遇沙箱阻断不绕过、发 blocker、清残支、停机（M42 两次满分）。
+- **台账 20 项 → 修复 9 项**（全带回归锁，225/225；两冒烟 run 终审计 40 规则全零）：verify 租约（15 §7 违约实锤）、heartbeat 盖 gate 租约、worktree 根项目段、changed_files 形状、user 演员、AUD-026/032 校准、help 面、AUD-020 分 kind。模板 v0.2.0 + codex verify skill + AGENTS headless 前置注记。
+- **部署级发现（文档化，非代码）**：L1 claude CLI 需独立 `/login`；L2 codex workspace-write 禁 `.git` 写（worktree add/commit 全死，`--add-dir` 无效）→ 分发需 bypass/danger-full-access；L16 codex exec 后台须 `< /dev/null` 防 stdin 挂死。
+- 台账全文: scratchpad ftest/smoke/FINDINGS.md（会话级）；关键结论已入本文与 CHANGELOG。

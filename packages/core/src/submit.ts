@@ -154,6 +154,12 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
     if (!draft.summary || draft.summary.trim() === '') errors.push('summary must not be empty');
     const changed = draft.changed_files ?? [];
     if (changed.length === 0) errors.push('changed_files must not be empty (docs/14 §2.1)');
+    // Smoke-test L6: plain strings here used to surface as a misleading path_escape_detected.
+    changed.forEach((f, i) => {
+      if (typeof f !== 'object' || f === null || typeof (f as { path?: unknown }).path !== 'string') {
+        errors.push(`changed_files[${i}] must be an object {path, change_type}, got ${JSON.stringify(f).slice(0, 60)}`);
+      }
+    });
     const commands = draft.commands ?? [];
     const byCmdId = new Map(commands.map((c) => [c.cmd_id, c]));
 
@@ -165,7 +171,7 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
     }
     for (const c of commands) {
       if (c.output_file && !existsSync(c.output_file)) {
-        errors.push(`command ${c.cmd_id}: declared output file does not exist: ${c.output_file}`);
+        errors.push(`command ${c.cmd_id}: declared output file does not exist: ${c.output_file} (resolved from the invocation cwd; absolute paths are accepted)`);
       }
     }
     for (const r of checkResults) {
@@ -175,7 +181,7 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
         const cmd = r.cmd_ref ? byCmdId.get(r.cmd_ref) : undefined;
         if (!cmd) errors.push(`check "${r.check}": cmd_ref ${r.cmd_ref ?? '(missing)'} does not match any command`);
         else if (!cmd.output_file || !existsSync(cmd.output_file)) {
-          errors.push(`check "${r.check}": raw output file missing for ${cmd.cmd_id} (D8 requires it)`);
+          errors.push(`check "${r.check}": raw output file missing for ${cmd.cmd_id} (D8; paths resolve from the invocation cwd — absolute paths are accepted)`);
         }
       }
     }

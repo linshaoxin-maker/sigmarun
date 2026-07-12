@@ -148,3 +148,24 @@ describe('submit — required check coverage against a task that declares checks
     }
   });
 });
+
+describe('smoke-test L6: changed_files entry shape', () => {
+  it('plain strings produce a precise evidence_invalid, not path_escape_detected', async () => {
+    const { mkClaimRepo, registerDefault, setupWorking } = await import('../../dispatch/test/fixture.js');
+    const { submitEvidence } = await import('@sigmarun/core');
+    const { validDraft } = await import('./submit-fixture.js');
+    const { cleanup } = await import('../../storage/test/helpers.js');
+    const repo = mkClaimRepo([{ key: 'a' }]);
+    try {
+      const owner = registerDefault(repo, 'w-shape');
+      await setupWorking(repo, owner);
+      const draftPath = validDraft(repo, { changed_files: ['src/a/index.ts'] as unknown as Array<Record<string, unknown>> });
+      const env = submitEvidence({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: owner, evidencePath: draftPath });
+      expect(env.ok).toBe(false);
+      expect(env.code).toBe('evidence_invalid');
+      expect(JSON.stringify(env.data)).toContain('must be an object {path, change_type}');
+    } finally {
+      cleanup(repo);
+    }
+  }, 30_000);
+});

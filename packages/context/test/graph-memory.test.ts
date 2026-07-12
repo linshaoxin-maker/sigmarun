@@ -76,3 +76,18 @@ describe('memory update (docs/12 §7; BR-005 spirit)', () => {
     expect(readFileSync(join(runDir(), 'context', 'run-memory.md'), 'utf8')).toBe('original\n');
   });
 });
+
+describe('smoke-test L3: the human is a first-class message author', () => {
+  it('msg post --from=user lands without agent registration', async () => {
+    const { postMessage } = await import('@sigmarun/context');
+    const { mkClaimRepo } = await import('../../dispatch/test/fixture.js');
+    const { cleanup } = await import('../../storage/test/helpers.js');
+    const repo = mkClaimRepo([{ key: 'a' }]);
+    try {
+      const env = postMessage({ cwd: repo, runId: 'RUN-0001', fromAgentId: 'user', type: 'answer', body: 'Blocker resolved by the user.' });
+      expect(env.ok).toBe(true);
+    } finally {
+      cleanup(repo);
+    }
+  });
+});

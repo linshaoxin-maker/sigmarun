@@ -24,7 +24,8 @@ const BRANCH = 'team/RUN-0001/TASK-0001-task-a';
 function mkWorktree(name = 'wt1', branch = BRANCH, underRoot = true): string {
   // the tmp fixture repo starts with an unborn HEAD; git worktree add needs a commit
   execFileSync('git', ['-C', repo, 'commit', '--allow-empty', '-m', 'base', '--no-gpg-sign'], { stdio: 'ignore' });
-  const base = underRoot ? join(repo, '..', '.team-worktrees', 'RUN-0001') : join(repo, '..');
+  const wtRel = (JSON.parse(readFileSync(join(repo, '.team', 'runs', 'RUN-0001', 'run.json'), 'utf8')) as { worktree_root: string }).worktree_root;
+  const base = underRoot ? join(repo, wtRel) : join(repo, '..');
   mkdirSync(base, { recursive: true });
   const path = join(base, `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
   execFileSync('git', ['-C', repo, 'worktree', 'add', path, '-b', branch, 'HEAD'], { stdio: 'ignore' });

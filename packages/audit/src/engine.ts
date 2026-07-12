@@ -435,16 +435,18 @@ const RULES: Rule[] = [
   {
     id: 'AUD-020',
     check: (ctx) => {
-      const byTask = new Map<string, string[]>();
+      const byTaskKind = new Map<string, string[]>();
       for (const c of ctx.reviewClaims.filter(ACTIVE)) {
-        byTask.set(c.task_id, [...(byTask.get(c.task_id) ?? []), c.claim_id]);
+        const key = `${c.task_id}\u0000${(c as { kind?: string }).kind ?? 'review'}`;
+        byTaskKind.set(key, [...(byTaskKind.get(key) ?? []), c.claim_id]);
       }
-      return [...byTask.entries()]
+      return [...byTaskKind.entries()]
         .filter(([, ids]) => ids.length > 1)
-        .map(([task, ids]) =>
-          finding('AUD-020', 'error', `${task} has ${ids.length} active review claims: ${ids.join(', ')}.`,
-            'Keep the first valid reviewer claim and release the duplicates after checking events order.', ids),
-        );
+        .map(([key, ids]) => {
+          const [task, kind] = key.split('\u0000');
+          return finding('AUD-020', 'error', `${task} has ${ids.length} active ${kind} claims: ${ids.join(', ')}.`,
+            'Keep the first valid claim and release the duplicates after checking events order.', ids);
+        });
     },
   },
   {
@@ -586,6 +588,10 @@ const RULES: Rule[] = [
       const current = collectStateRevs(ctx.runDir);
       const mismatches: string[] = [];
       for (const [rel, rev] of Object.entries(current)) {
+        // counters.json legitimately moves without a ledger entry: msg post allocates
+        // MSG ids but never events (INV-011). Smoke-test regression: a message as the
+        // run's last action made every audit scream direct_state_edit_suspected.
+        if (rel === 'counters.json') continue;
         if (snapshot[rel] !== rev) mismatches.push(`${rel}: event=${String(snapshot[rel] ?? '(missing)')} current=${rev}`);
       }
       for (const [rel, rev] of Object.entries(snapshot)) {
@@ -799,9 +805,10 @@ const CONTEXT_RULES: Rule[] = [
     id: 'AUD-026',
     check: (ctx) => {
       const out: Finding[] = [];
+      // context/tasks/*.md are handoff mirrors the gateway writes at submit — their provenance
+      // IS the linked evidence record, so demanding per-bullet Source: refs there is pure noise
+      // (smoke-test L19: every healthy real-agent run warned). Rule scope: memory files only.
       const candidates: string[] = ['context/run-memory.md'];
-      const handoffDir = join(ctx.runDir, 'context', 'tasks');
-      if (existsSync(handoffDir)) for (const f of readdirSync(handoffDir)) candidates.push(`context/tasks/${f}`);
       for (const rel of candidates) {
         const abs = join(ctx.runDir, rel);
         if (!existsSync(abs)) continue;

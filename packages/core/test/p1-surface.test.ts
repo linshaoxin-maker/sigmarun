@@ -157,3 +157,23 @@ describe('AUD-024/025/027/034 — the context + replay batch goes live', () => {
     expect(findings.filter((f) => f.rule_id === 'AUD-034')).toEqual([]);
   });
 });
+
+describe('smoke-test L20: INV-011 writers do not trip AUD-032', () => {
+  it('a message as the last action keeps the audit clean', async () => {
+    const { mkClaimRepo, registerDefault } = await import('../../dispatch/test/fixture.js');
+    const { postMessage } = await import('@sigmarun/context');
+    const { auditRun } = await import('@sigmarun/audit');
+    const { cleanup } = await import('../../storage/test/helpers.js');
+    const repo = mkClaimRepo([{ key: 'a' }]);
+    try {
+      const agent = registerDefault(repo, 'w-msg');
+      postMessage({ cwd: repo, runId: 'RUN-0001', fromAgentId: agent, type: 'context_update', body: 'note after last event' });
+      const env = auditRun({ cwd: repo, runId: 'RUN-0001' });
+      const findings = (env.data as { findings: Array<{ rule_id: string }> }).findings;
+      expect(findings.filter((f) => f.rule_id === 'AUD-032')).toEqual([]);
+    } finally {
+      cleanup(repo);
+    }
+  });
+});
+

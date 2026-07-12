@@ -115,6 +115,9 @@ team worktree register --run RUN-0001 --task TASK-0003 \
 
 ### 3.3 命名规范
 
+> **2026-07-11 冒烟修正（真机实锤）**：默认 worktree 根由 `../.team-worktrees/` 改为 **`../.team-worktrees/<项目目录名>/`**——两个项目同父目录时各自的 RUN-0001 会撞出同一路径（Codex 真代理当场撞上并正确停机）。`project.json.default_worktree_root` 已配置的项目不受影响；仅新 `init` 采用新默认。
+
+
 | 对象 | 规范 |
 |---|---|
 | branch | `team/<RUN-ID>/<TASK-ID>-<slug>`（slug 来自 title，kebab-case，≤40 字符） |

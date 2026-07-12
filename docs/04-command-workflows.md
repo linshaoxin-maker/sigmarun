@@ -399,6 +399,8 @@ heartbeat
 task_started
 evidence_submitted
 review_claimed
+verify_claimed
+verify_released
 review_approved
 changes_requested
 task_blocked

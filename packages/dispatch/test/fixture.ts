@@ -95,7 +95,9 @@ async function setupWorkingClaimed(repo: string, agent: string, taskId: string, 
   const { registerWorktree } = await import('@sigmarun/dispatch');
   execFileSync('git', ['-C', repo, 'commit', '--allow-empty', '-m', 'base', '--no-gpg-sign'], { stdio: 'ignore' });
   const branch = `team/RUN-0001/${taskId}-${slug}`;
-  const root = join(repo, '..', '.team-worktrees', 'RUN-0001');
+  const { readFileSync } = await import('node:fs');
+  const wtRel = (JSON.parse(readFileSync(join(repo, '.team', 'runs', 'RUN-0001', 'run.json'), 'utf8')) as { worktree_root: string }).worktree_root;
+  const root = join(repo, wtRel);
   mkdirSync(root, { recursive: true });
   const path = join(root, `wt-${taskId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
   execFileSync('git', ['-C', repo, 'worktree', 'add', path, '-b', branch, 'HEAD'], { stdio: 'ignore' });
@@ -112,7 +114,9 @@ export async function setupWorking(repo: string, agent: string, taskId = 'TASK-0
   claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent, taskId });
   execFileSync('git', ['-C', repo, 'commit', '--allow-empty', '-m', 'base', '--no-gpg-sign'], { stdio: 'ignore' });
   const branch = `team/RUN-0001/${taskId}-${slug}`;
-  const root = join(repo, '..', '.team-worktrees', 'RUN-0001');
+  const { readFileSync } = await import('node:fs');
+  const wtRel = (JSON.parse(readFileSync(join(repo, '.team', 'runs', 'RUN-0001', 'run.json'), 'utf8')) as { worktree_root: string }).worktree_root;
+  const root = join(repo, wtRel);
   mkdirSync(root, { recursive: true });
   const path = join(root, `wt-${taskId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
   execFileSync('git', ['-C', repo, 'worktree', 'add', path, '-b', branch, 'HEAD'], { stdio: 'ignore' });

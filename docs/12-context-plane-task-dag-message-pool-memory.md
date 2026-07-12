@@ -201,6 +201,9 @@ DAG 不能有 cycle。`team run import` 和 `team task add` 必须校验。
 
 ## 6. Message Pool Schema
 
+> **user 演员（2026-07-11 冒烟修正 L3）**：`from_agent_id` 允许字面量 `"user"`——人类回 blocker/answer 不需要借用代理身份（`sigmarun msg post <RUN> --from=user ...`），该值不做注册校验。
+
+
 `context/messages.jsonl` 是 append-only，但它不是审计 event。它记录协作语义。
 
 ```jsonl

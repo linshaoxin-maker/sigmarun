@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { readJsonState, redactText, writeJsonStateAtomic, writeJsonStateNew, type ResolveOptions } from '@sigmarun/storage';
 import { appendEvent, failEnvelope, okEnvelope, truncateOutput, type Envelope } from '@sigmarun/core';
 import { loadClaims, withRunLock, type ClaimStores, type TaskRow } from './claim-engine.js';
-import { historicalOwners } from './review.js';
+import { activeVerifyClaim, completeVerifyClaim, grantVerifyClaim, historicalOwners } from './review.js';
 
 export interface VerifyOptions extends ResolveOptions {
   runId: string;
@@ -84,7 +84,7 @@ export function verifySubmit(opts: VerifyOptions): Envelope {
       if (!['pass', 'fail', 'skipped'].includes(c.status)) errors.push(`check "${c.name}": status must be pass/fail/skipped`);
       if (c.status === 'pass' && c.exit_code !== 0) errors.push(`check "${c.name}": status pass contradicts exit_code ${c.exit_code}`);
       if (c.status === 'fail' && c.exit_code === 0) errors.push(`check "${c.name}": status fail contradicts exit_code 0`);
-      if (c.output_file && !existsSync(c.output_file)) errors.push(`check "${c.name}": output file missing: ${c.output_file}`);
+      if (c.output_file && !existsSync(c.output_file)) errors.push(`check "${c.name}": output file missing: ${c.output_file} (resolved from the invocation cwd; absolute paths are accepted)`);
     });
     const gates = draft.gates ?? {};
     for (const key of GATE_KEYS) {
@@ -178,6 +178,7 @@ export function verifySubmit(opts: VerifyOptions): Envelope {
       payload: { verify_id: verifyId, target: draft.target },
     });
 
+    if (kind === 'task' && taskId) completeVerifyClaim(runDir, runId, taskId, opts.agentId);
     if (verdict === 'pass') {
       if (kind === 'task') {
         const taskFile = join(runDir, 'tasks', taskId!, 'task.json');
@@ -245,20 +246,29 @@ export function synthesizeVerify(runDir: string, runId: string, agentId: string,
   const candidate = rows
     .filter((r) => r.status === 'approved')
     .filter((r) => !historicalOwners(runDir, r.task_id, stores).has(agentId))
+    .filter((r) => {
+      const held = activeVerifyClaim(runDir, runId, r.task_id);
+      return !held || held.reviewer_agent_id === agentId; // L13: leased verify work is not re-offered
+    })
     .sort((a, b) => a.task_id.localeCompare(b.task_id))[0];
   if (!candidate) {
     return failEnvelope('no_claimable_task', `No approved task is waiting for verification on ${runId}.`, { startedAt });
   }
+  const lease = grantVerifyClaim(runDir, runId, candidate.task_id, agentId);
+  if (!('claim_id' in lease)) return failEnvelope('task_already_claimed', lease.message, { startedAt });
   return okEnvelope({
-    message: `Verify work: ${candidate.task_id} awaits independent verification.`,
+    message: `Verify work: ${candidate.task_id} leased as ${lease.claim_id} until ${lease.lease_until}.`,
     data: {
       kind: 'verify_work',
       task_id: candidate.task_id,
+      claim_id: lease.claim_id,
+      lease_until: lease.lease_until,
       evidence_ref: `evidence/${candidate.task_id}/evidence.json`,
       gates: GATE_KEYS,
     },
     nextActions: [
       `Run the checks yourself, then: sigmarun verify submit ${runId} --agent=${agentId} --verify=<file> (target.kind=task).`,
+      `Heartbeat at pauses: sigmarun heartbeat ${runId} ${candidate.task_id} --agent=${agentId}.`,
     ],
     startedAt,
   });

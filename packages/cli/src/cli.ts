@@ -68,7 +68,31 @@ function render(env: Envelope, json: boolean): string {
  * CLI front-end: parse argv, delegate to a primitive, print the envelope, map exit code.
  * @contract docs/17 §1 command table · §2 envelope · §2.2 exit-code map · docs/20 §3 (front ends hold no business rules)
  */
+const HELP_TEXT = [
+  'sigmarun — repo-local multi-agent collaboration gateway (.team/)',
+  '',
+  'Setup:      init | doctor | adapter install --tool=claude-code|codex',
+  'Plan:       run import <payload.json> [--force] | task publish <RUN> [--tasks=..] [--force]',
+  'Runs:       run list | run show <RUN> | run pause|resume|cancel|archive <RUN> | status <RUN> | watch <RUN> [--interval=s]',
+  'Tasks:      task add <RUN> --file=<task.json> | task cancel <RUN> <TASK> [--reason=..] | task show <RUN> <TASK> | graph show|validate <RUN>',
+  'Dispatch:   agent register <RUN> --tool=<t> [--role=r] [--label=w] | claim-next <RUN> --agent=<A> [--role=r] [--task=T] [--dry-run]',
+  '            heartbeat <RUN> <TASK> --agent=<A> | release <RUN> <TASK> --agent=<A> | reclaim <RUN> <TASK> | approve-paths <RUN> <TASK> --paths=g1,g2',
+  'Worktrees:  worktree register <RUN> <TASK> --agent=<A> --path=<p> --branch=<b> | worktree adopt <RUN> <TASK> --agent=<A> | worktree list <RUN>',
+  'Deliver:    submit <RUN> <TASK> --agent=<A> --evidence=<draft.json> | evidence show <RUN> <TASK>',
+  'Gates:      review claim|approve|request-changes|block <RUN> <TASK> --agent=<A> [--review=<r.json>] | resume <RUN> <TASK> --agent=<A> | unblock <RUN> <TASK>',
+  '            verify submit <RUN> --agent=<A> --verify=<v.json>   (draft: {target:{kind:task|run,..},checks:[{name,cmd,exit_code,output_file,status}],gates,skip_reasons,verdict,failures_mapped})',
+  'Finish:     integrate start <RUN> | integrate record <RUN> <TASK> --merge-commit=<sha> | --failed --reason=".." | report <RUN> | export <RUN> --to=<dir> [--force]',
+  'Context:    msg post <RUN> --from=<A|user> --type=<t> --body=".." [--task=T] [--reply-to=MSG] | msg list <RUN> [--open] [--type=t]',
+  '            context hydrate <RUN> <TASK> --agent=<A> | memory update <RUN> --file=<md> | memory candidates <RUN> | memory promote <RUN> --entry=".." --section=<S> --from=<refs>',
+  'Health:     audit run <RUN> | repair <RUN>',
+  '',
+  'Every command accepts --json (single-envelope machine face, team.envelope.v1). Exit codes: docs/17 §2.2.',
+].join('\n');
+
 export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string, string | undefined> } = {}): CliResult {
+  if (argv.includes('--help') || argv.includes('-h') || argv[0] === 'help') {
+    return { exitCode: 0, stdout: HELP_TEXT };
+  }
   const json = argv.includes('--json');
   const force = argv.includes('--force');
   const args = argv.filter((a) => !a.startsWith('--'));

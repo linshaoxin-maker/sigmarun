@@ -13,6 +13,7 @@ import {
 } from '@sigmarun/storage';
 import { synthesizeReview } from './review.js';
 import { synthesizeVerify } from './verify.js';
+import { extendGateLease } from './review.js';
 import {
   appendEvent,
   failEnvelope,
@@ -803,7 +804,18 @@ export function heartbeat(opts: HeartbeatOptions): Envelope {
   return withRunLock(opts, startedAt, (runDir, runId) => {
     const stores = loadClaims(runDir, runId);
     const found = findActiveClaim(stores, opts.taskId, opts.agentId);
-    if (!('claim' in found)) return failEnvelope(found.code, found.message, { startedAt });
+    if (!('claim' in found)) {
+      // L9: RULE 7 applies to gate work too — extend an active review/verify lease instead.
+      const gate = extendGateLease(runDir, runId, opts.taskId, opts.agentId);
+      if (gate) {
+        return okEnvelope({
+          message: `Lease on ${gate.claim_id} (${gate.kind} work for ${opts.taskId}) extended until ${gate.lease_until}.`,
+          data: { claim_id: gate.claim_id, kind: gate.kind, lease_until: gate.lease_until },
+          startedAt,
+        });
+      }
+      return failEnvelope(found.code, found.message, { startedAt });
+    }
     const run = readJsonState(join(runDir, 'run.json'));
     const ttl = ((run.doc as { default_policy?: { claim_ttl_minutes?: number } }).default_policy?.claim_ttl_minutes ?? 30) * 60_000;
     const now = new Date();
@@ -842,7 +854,18 @@ export function releaseTask(opts: ReleaseOptions): Envelope {
   return withRunLock(opts, startedAt, (runDir, runId) => {
     const stores = loadClaims(runDir, runId);
     const found = findActiveClaim(stores, opts.taskId, opts.agentId);
-    if (!('claim' in found)) return failEnvelope(found.code, found.message, { startedAt });
+    if (!('claim' in found)) {
+      // L9: RULE 7 applies to gate work too — extend an active review/verify lease instead.
+      const gate = extendGateLease(runDir, runId, opts.taskId, opts.agentId);
+      if (gate) {
+        return okEnvelope({
+          message: `Lease on ${gate.claim_id} (${gate.kind} work for ${opts.taskId}) extended until ${gate.lease_until}.`,
+          data: { claim_id: gate.claim_id, kind: gate.kind, lease_until: gate.lease_until },
+          startedAt,
+        });
+      }
+      return failEnvelope(found.code, found.message, { startedAt });
+    }
     const listFile = join(runDir, 'team-task-list.json');
     const list = readJsonState(listFile);
     const row = (list.doc as { tasks: TaskRow[] }).tasks.find((r) => r.task_id === opts.taskId);

@@ -157,3 +157,28 @@ describe('cli front-end (contract: docs/17 §1/§2.2 — parse, delegate, map ex
     expect(watch.exitCode).toBe(0);
   });
 });
+
+describe('smoke-test fixes: help surface (L15) and project-scoped worktree root (L17)', () => {
+  it('--help and help exit 0 with the command map', () => {
+    for (const argv of [['--help'], ['help'], ['-h']]) {
+      const r = runCli(argv);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).toContain('claim-next');
+      expect(r.stdout).toContain('verify submit');
+    }
+  });
+
+  it('init writes a worktree root that carries the repo dirname', async () => {
+    const { mkTmpGitRepo, cleanup } = await import('../../storage/test/helpers.js');
+    const { readFileSync } = await import('node:fs');
+    const { basename, join } = await import('node:path');
+    const repo = mkTmpGitRepo();
+    try {
+      runCli(['init'], { cwd: repo });
+      const project = JSON.parse(readFileSync(join(repo, '.team', 'project.json'), 'utf8'));
+      expect(project.default_worktree_root).toBe(`../.team-worktrees/${basename(repo)}`);
+    } finally {
+      cleanup(repo);
+    }
+  });
+});
