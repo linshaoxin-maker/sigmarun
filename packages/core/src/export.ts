@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { GatewayError, resolveRepoRelativeInside, resolveTeamRoot, scanForSecrets, type ResolveOptions } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope } from './envelope.js';
 
@@ -168,6 +168,11 @@ export function exportRun(opts: ExportOptions): Envelope {
 
   let totalBytes = 0;
   for (const f of files) {
+    // f.rel embeds ids read from disk (review_id, task_id). A crafted `../` there would
+    // escape the export target (mkdir recursive would even create the parents). Confine it.
+    if (f.rel.split('/').some((seg) => seg === '..') || isAbsolute(f.rel)) {
+      return failEnvelope('export_target_invalid', `Refusing to write outside the export target: ${f.rel}.`, { startedAt });
+    }
     const dest = join(target, f.rel);
     mkdirSync(dirname(dest), { recursive: true });
     writeFileSync(dest, f.content);

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { initProject, doctorProject, importRun, publishTasks, runShow, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, taskAdd, taskCancel, failEnvelope, type Envelope, type DoctorCheck } from '@sigmarun/core';
+import { initProject, doctorProject, importRun, publishTasks, runShow, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, taskAdd, taskCancel, failEnvelope, type Envelope, type DoctorCheck, GATEWAY_VERSION } from '@sigmarun/core';
 import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, verifySubmit, listWorktrees } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, showGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
@@ -92,6 +92,9 @@ const HELP_TEXT = [
 export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string, string | undefined> } = {}): CliResult {
   if (argv.includes('--help') || argv.includes('-h') || argv[0] === 'help') {
     return { exitCode: 0, stdout: HELP_TEXT };
+  }
+  if (argv.includes('--version') || argv.includes('-v') || argv[0] === 'version') {
+    return { exitCode: 0, stdout: GATEWAY_VERSION };
   }
   const json = argv.includes('--json');
   const force = argv.includes('--force');

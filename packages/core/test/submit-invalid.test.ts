@@ -169,3 +169,26 @@ describe('smoke-test L6: changed_files entry shape', () => {
     }
   }, 30_000);
 });
+
+describe('OSS security review: cmd_id is confined to a bare identifier', () => {
+  it('a path-traversal cmd_id is rejected as evidence_invalid (arbitrary .log write prevented)', async () => {
+    const { mkClaimRepo, registerDefault, setupWorking } = await import('../../dispatch/test/fixture.js');
+    const { submitEvidence } = await import('@sigmarun/core');
+    const { validDraft } = await import('./submit-fixture.js');
+    const { cleanup } = await import('../../storage/test/helpers.js');
+    const repo = mkClaimRepo([{ key: 'a' }]);
+    try {
+      const owner = registerDefault(repo, 'w-cmdid');
+      await setupWorking(repo, owner);
+      const draftPath = validDraft(repo, {
+        commands: [{ cmd_id: '../../../../../../tmp/pwned', cmd: 'noop', exit_code: 0 }],
+      });
+      const env = submitEvidence({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: owner, evidencePath: draftPath });
+      expect(env.ok).toBe(false);
+      expect(env.code).toBe('evidence_invalid');
+      expect(JSON.stringify(env.data)).toContain('cmd_id must match');
+    } finally {
+      cleanup(repo);
+    }
+  }, 30_000);
+});

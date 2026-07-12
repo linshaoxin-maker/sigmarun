@@ -160,6 +160,14 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
         errors.push(`changed_files[${i}] must be an object {path, change_type}, got ${JSON.stringify(f).slice(0, 60)}`);
       }
     });
+    // Security: cmd_id becomes the on-disk artifact path `outputs/<cmd_id>.log`. An unvalidated
+    // value ("../../.." etc.) is an arbitrary-write primitive reachable through the sanctioned API.
+    // Confine it to a bare identifier.
+    (draft.commands ?? []).forEach((c, i) => {
+      if (typeof c?.cmd_id !== 'string' || !/^[A-Za-z0-9._-]+$/.test(c.cmd_id) || c.cmd_id === '.' || c.cmd_id === '..') {
+        errors.push(`commands[${i}].cmd_id must match [A-Za-z0-9._-] (no path separators); got ${JSON.stringify(c?.cmd_id)}`);
+      }
+    });
     const commands = draft.commands ?? [];
     const byCmdId = new Map(commands.map((c) => [c.cmd_id, c]));
 

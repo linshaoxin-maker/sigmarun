@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { GatewayError } from './errors.js';
 
@@ -34,26 +34,52 @@ export function runLockPath(runDir: string): string {
   return join(runDir, 'run.lock');
 }
 
+let lockCounter = 0;
+
+/**
+ * Remove the lock ONLY if meta.json still carries our token. A takeover (below) or a
+ * concurrent holder will have replaced the token, in which case releasing must be a no-op —
+ * otherwise a slow-but-alive holder's `release()` would destroy the taker-over's live lock,
+ * and a third contender would then mkdir into the gap: two holders at once (the silent-
+ * corruption path the tokenless version had). If meta is unreadable we cannot prove ownership,
+ * so we also leave it (a leaked dir is cleaned by the next stale takeover).
+ */
+function releaseIfMine(lockDir: string, token: string): void {
+  try {
+    const meta = JSON.parse(readFileSync(join(lockDir, 'meta.json'), 'utf8')) as { token?: string };
+    if (meta.token === token) rmSync(lockDir, { recursive: true, force: true });
+  } catch { /* absent/unreadable — cannot confirm ownership; do not remove */ }
+}
+
 export function acquireLock(lockDir: string, opts: LockOptions = {}): () => void {
   const timeoutMs = opts.timeoutMs ?? 5000;
   const staleMs = opts.staleMs ?? 30_000;
   const start = Date.now();
+  const token = `${process.pid}-${Date.now()}-${lockCounter++}`;
   let wait = 50;
   for (;;) {
     try {
       mkdirSync(lockDir);
       writeFileSync(join(lockDir, 'meta.json'), JSON.stringify({
         pid: process.pid,
+        token,
         acquired_at: new Date().toISOString(),
       }));
-      return () => rmSync(lockDir, { recursive: true, force: true });
+      return () => releaseIfMine(lockDir, token);
     } catch {
       let stale = false;
       try {
         stale = Date.now() - statSync(lockDir).mtimeMs > staleMs;
       } catch { /* raced away between attempts; retry immediately */ }
       if (stale) {
-        rmSync(lockDir, { recursive: true, force: true });
+        // Exclusive takeover: rename is atomic, so only ONE contender wins it — the losers
+        // get ENOENT and fall back to the mkdir attempt. (The tokenless version had every
+        // contender rmSync+mkdir, so two could both "win".)
+        const dead = `${lockDir}.dead-${token}`;
+        try {
+          renameSync(lockDir, dead);
+          rmSync(dead, { recursive: true, force: true });
+        } catch { /* another contender took it first — just retry the mkdir */ }
         continue;
       }
       if (Date.now() - start >= timeoutMs) {

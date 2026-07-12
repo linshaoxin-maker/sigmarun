@@ -35,7 +35,17 @@ interface Msg {
 function readMessages(runDir: string): Msg[] {
   const file = join(runDir, 'context', 'messages.jsonl');
   if (!existsSync(file)) return [];
-  return readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as Msg);
+  // Tolerate a torn tail (non-atomic append) — a corrupt last line must not crash status/watch.
+  const out: Msg[] = [];
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      out.push(JSON.parse(line) as Msg);
+    } catch {
+      // skip
+    }
+  }
+  return out;
 }
 
 /** docs/03 §9 — per-status progress fractions; blocked keeps the pre-block value, cancelled leaves the denominator. */
@@ -193,15 +203,22 @@ export function statusRun(opts: StatusOptions): Envelope {
   const startedAt = Date.now();
   const ctx = openRun(opts);
   if (ctx instanceof GatewayError) return failEnvelope(ctx.code, ctx.message, { startedAt });
-  const snapshot = computeProgress(ctx.runDir);
-  writeProgress(ctx.runDir, snapshot);
-  const needs = snapshot.needs_user as unknown[];
-  return okEnvelope({
-    message: `${opts.runId} ${snapshot.run_status as string}: ${snapshot.progress_pct as number}% by weight; ${(snapshot.risks as unknown[]).length} risk(s), ${needs.length} item(s) need you.`,
-    data: snapshot,
-    nextActions: needs.length > 0 ? [(needs[0] as { command: string }).command] : [],
-    startedAt,
-  });
+  try {
+    const snapshot = computeProgress(ctx.runDir);
+    writeProgress(ctx.runDir, snapshot);
+    const needs = snapshot.needs_user as unknown[];
+    return okEnvelope({
+      message: `${opts.runId} ${snapshot.run_status as string}: ${snapshot.progress_pct as number}% by weight; ${(snapshot.risks as unknown[]).length} risk(s), ${needs.length} item(s) need you.`,
+      data: snapshot,
+      nextActions: needs.length > 0 ? [(needs[0] as { command: string }).command] : [],
+      startedAt,
+    });
+  } catch (err) {
+    // computeProgress reads several state files; a corrupt one (merge conflict, torn write)
+    // throws a GatewayError that must surface as a clean envelope, not escape to the bin net.
+    if (err instanceof GatewayError) return failEnvelope(err.code, err.message, { startedAt });
+    throw err;
+  }
 }
 
 export function runList(opts: ResolveOptions): Envelope {

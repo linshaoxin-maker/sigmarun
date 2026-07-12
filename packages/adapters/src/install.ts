@@ -33,7 +33,8 @@ export function installAdapters(opts: InstallOptions): Envelope {
   const skipped: string[] = [];
   const warnings: EnvelopeWarning[] = [];
   const versionOf = (text: string): string | null => /template_version: ([\d.]+)/.exec(text)?.[1] ?? null;
-  for (const [rel, content] of Object.entries(files)) {
+  try {
+   for (const [rel, content] of Object.entries(files)) {
     const target = join(repoRoot, rel);
     if (existsSync(target) && !opts.update) {
       // Managed files upgrade themselves when the shipped template_version differs
@@ -52,6 +53,10 @@ export function installAdapters(opts: InstallOptions): Envelope {
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, content, 'utf8');
     written.push(rel);
+   }
+  } catch (err) {
+    // An existing managed target that is now a directory or unreadable must not crash the CLI.
+    return failEnvelope('io_error', `Cannot write adapter files under ${repoRoot}: ${err instanceof Error ? err.message : String(err)}`, { startedAt });
   }
   if (skipped.length > 0) {
     warnings.push({

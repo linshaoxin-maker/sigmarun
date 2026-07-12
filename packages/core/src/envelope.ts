@@ -32,7 +32,7 @@ const DEFAULT_NEXT_ACTIONS: Record<string, string[]> = {
   bare_repo_unsupported: ['Use a non-bare working checkout of the repository.'],
   team_root_not_found: ['Run `sigmarun init` inside the target repository first.'],
   rev_conflict: ['Run `sigmarun doctor` and inspect the reported state files.'],
-  unsupported_schema_version: ['Upgrade sigmarun, or migrate the on-disk state.'],
+  unsupported_schema_version: ['Upgrade sigmarun to a version that understands this on-disk schema.'],
   io_error: ['Check filesystem permissions and free space, then retry.'],
 };
 

@@ -182,3 +182,30 @@ describe('smoke-test fixes: help surface (L15) and project-scoped worktree root 
     }
   });
 });
+
+describe('OSS-readiness: version flag and crash-safety', () => {
+  it('--version, -v, and version print the gateway version at exit 0', () => {
+    for (const argv of [['--version'], ['-v'], ['version']]) {
+      const r = runCli(argv);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).toMatch(/^\d+\.\d+\.\d+$/);
+    }
+  });
+
+  it('every surveyed bad invocation returns a single JSON envelope, never a throw', () => {
+    // bin.ts has a last-resort guard, but runCli itself should not throw on hostile input.
+    const hostile: string[][] = [
+      ['run', 'import', '/does/not/exist.json', '--json'],
+      ['status', 'RUN-9999', '--json'],
+      ['claim-next', 'RUN-1', '--agent=', '--json'],
+      ['task', 'add', 'RUN-1', '--file=/nope.json', '--json'],
+      ['verify', 'submit', 'RUN-1', '--agent=x', '--verify=/nope.json', '--json'],
+    ];
+    for (const argv of hostile) {
+      expect(() => runCli(argv)).not.toThrow();
+      const r = runCli(argv);
+      expect(() => JSON.parse(r.stdout)).not.toThrow();
+      expect(r.stdout.trim().split('\n').length).toBe(1);
+    }
+  });
+});

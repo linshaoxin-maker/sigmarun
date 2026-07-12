@@ -641,6 +641,10 @@ const RULES: Rule[] = [
       let weightTotal = 0;
       for (const r of ctx.rows) {
         counts[r.status] = (counts[r.status] ?? 0) + 1;
+        // Match computeProgress exactly (docs/03 §9: cancelled leaves the denominator). AUD-035
+        // used to sum every row, so any run with a cancelled task warned forever (the remedy
+        // `status` just rewrote the same excluding-cancelled value — state-machine review Finding 3).
+        if (r.status === 'cancelled') continue;
         weightTotal += r.weight ?? 1;
       }
       const drift =

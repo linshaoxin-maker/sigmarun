@@ -446,6 +446,17 @@ export function unblockTask(opts: ResumeOptions & { reason?: string }): Envelope
     if (status !== 'blocked') {
       return failEnvelope('invalid_transition', `Task ${opts.taskId} is ${status}; unblock applies to blocked.`, { startedAt });
     }
+    // 15 §3.3: unblock is an owner-or-user action. A block means "needs a human decision",
+    // so an arbitrary agent must not be able to lift it (security review: no check existed).
+    if (opts.agentId !== 'user') {
+      if (!existsSync(join(runDir, 'agents', `${opts.agentId}.json`))) {
+        return failEnvelope('agent_not_registered', `Agent ${opts.agentId} is not registered on ${runId}.`, { startedAt });
+      }
+      const owners = historicalOwners(runDir, opts.taskId, loadClaims(runDir, runId));
+      if (!owners.has(opts.agentId)) {
+        return failEnvelope('not_claim_owner', `Only a task owner or the user may unblock ${opts.taskId}; pass --agent=user for a human override.`, { startedAt });
+      }
+    }
     (task.doc as { status: string }).status = 'working';
     writeJsonStateAtomic(taskFile, task.doc as Record<string, unknown>, { expectedRev: task.rev });
     const listFile = join(runDir, 'team-task-list.json');
@@ -453,12 +464,28 @@ export function unblockTask(opts: ResumeOptions & { reason?: string }): Envelope
     const row = (list.doc as { tasks: TaskRow[] }).tasks.find((r) => r.task_id === opts.taskId);
     if (row) row.status = 'working';
     writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
+    // docs/15 line 199 + §5.1 line 223: a working task holds exactly one ACTIVE claim, and the
+    // lease is reset on blocked -> working. review-block inherited a 'submitted' owner claim and
+    // never revived it, so without this the task became permanently unclaimable (state-machine
+    // review Finding 1: submit/resume/release/reclaim all fail; only `task cancel` escaped).
+    const stores = loadClaims(runDir, runId);
+    const owner = stores.taskClaims.doc.claims.find(
+      (c) => c.task_id === opts.taskId && ['submitted', 'completed', 'active'].includes(c.status),
+    );
+    if (owner) {
+      const run = readJsonState(join(runDir, 'run.json')).doc as { default_policy?: { claim_ttl_minutes?: number } };
+      const ttl = (run.default_policy?.claim_ttl_minutes ?? 30) * 60_000;
+      owner.status = 'active';
+      owner.lease_until = new Date(Date.now() + ttl).toISOString();
+      saveState(stores.taskClaims.file, stores.taskClaims.doc, stores.taskClaims.rev);
+    }
     appendEvent(runDir, {
       event: 'task_unblocked',
       actor: { type: 'agent', id: opts.agentId },
       run_id: runId,
       task_id: opts.taskId,
-      payload: { reason: opts.reason ?? null },
+      claim_id: owner?.claim_id,
+      payload: { reason: opts.reason ?? null, claim_revived: Boolean(owner) },
     });
     return okEnvelope({
       message: `${opts.taskId} unblocked; back to working.`,

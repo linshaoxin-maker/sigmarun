@@ -119,7 +119,18 @@ export function readJsonState(file: string): JsonState {
   } catch (e) {
     throw new GatewayError('io_error', `Cannot read state file: ${file}`, { cause: String(e) });
   }
-  const doc = JSON.parse(raw) as JsonState['doc'];
+  let doc: JsonState['doc'];
+  try {
+    doc = JSON.parse(raw) as JsonState['doc'];
+  } catch {
+    // A readable-but-malformed state file (git merge-conflict markers, a torn
+    // write, an editor swap file, a hand-edit) must not crash the CLI with a raw
+    // SyntaxError. Every primitive already handles GatewayError → clean envelope.
+    throw new GatewayError(
+      'io_error',
+      `State file is not valid JSON: ${file}. If this repo shares .team/ across branches, check for an unresolved git merge conflict, then re-run.`,
+    );
+  }
   assertSupportedSchema(doc, file);
   return { doc, rev: typeof doc.rev === 'number' ? doc.rev : 0 };
 }
@@ -139,7 +150,7 @@ function assertSupportedSchema(doc: Record<string, unknown>, file: string): void
   if (Number(m[1]) > SUPPORTED_SCHEMA_MAJOR) {
     throw new GatewayError(
       'unsupported_schema_version',
-      `${file} carries ${sv}, newer than this gateway understands (v${SUPPORTED_SCHEMA_MAJOR}). Upgrade sigmarun or run its migrate.`,
+      `${file} carries ${sv}, newer than this gateway understands (v${SUPPORTED_SCHEMA_MAJOR}). Upgrade sigmarun to a version that understands it.`,
     );
   }
 }

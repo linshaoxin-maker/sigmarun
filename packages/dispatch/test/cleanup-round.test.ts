@@ -33,10 +33,24 @@ describe('review decision=block + unblock (docs/14 §3.2; docs/15 §3.3 blocked 
     expect(readJson('claims/review-claims.json').claims[0].status).toBe('completed');
     expect(events().some((e) => e.event === 'review_blocked' && e.payload.review_id === 'REVIEW-TASK-0001-01')).toBe(true);
 
+    // Security (review): only a task owner or --agent=user may lift a block.
+    const stranger = (registerAgent({ cwd: repo, runId: 'RUN-0001', tool: 'codex', role: 'implementer', label: 'w-x' }).data as { agent_id: string }).agent_id;
+    expect(unblockTask({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: stranger }).code).toBe('not_claim_owner');
+
     const un = unblockTask({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: owner, reason: 'decision made' });
     expect(un.ok).toBe(true);
     expect(readJson('tasks/TASK-0001/task.json').status).toBe('working');
     expect(events().some((e) => e.event === 'task_unblocked' && e.payload.reason === 'decision made')).toBe(true);
+
+    // CRITICAL (state-machine review Finding 1): unblock must revive the owner claim to active,
+    // or the task is permanently unclaimable (submit/resume/release/reclaim all fail). Assert the
+    // claim is active AND a forward op (heartbeat, which requires an active owner claim) succeeds.
+    const ownerClaim = readJson('claims/task-claims.json').claims.find((c: { task_id: string; status: string }) => c.task_id === 'TASK-0001' && c.status === 'active');
+    expect(ownerClaim).toBeTruthy();
+    expect(ownerClaim.agent_id).toBe(owner);
+    const { heartbeat } = await import('@sigmarun/dispatch');
+    const hb = heartbeat({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: owner });
+    expect(hb.ok).toBe(true);
 
     const again = unblockTask({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: owner });
     expect(again.code).toBe('invalid_transition');

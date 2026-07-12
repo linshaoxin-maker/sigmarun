@@ -96,11 +96,18 @@ function openRun(opts: ResolveOptions & { runId: string }): RunCtx | GatewayErro
 function readMessages(runDir: string): MessageLine[] {
   const file = join(runDir, 'context', 'messages.jsonl');
   if (!existsSync(file)) return [];
-  return readFileSync(file, 'utf8')
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l) as MessageLine);
+  // messages.jsonl is appended non-atomically; a torn tail (crash/ENOSPC mid-append)
+  // must not crash readers. Skip unparseable lines, same discipline as readEventsSafe.
+  const out: MessageLine[] = [];
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      out.push(JSON.parse(line) as MessageLine);
+    } catch {
+      // torn/corrupt line — skip it
+    }
+  }
+  return out;
 }
 
 /** M23: open questions are derived — a question is open until an answer replies to it. */

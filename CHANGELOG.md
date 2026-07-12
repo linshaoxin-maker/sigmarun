@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- 开源就绪审查轮（4 代理并行 bug 猎捕：并发/锁、状态机/重放、安全围栏、CLI 健壮性）+ 开源脚手架。**修复 12 项（全带回归锁，232/232）**：
+  - CRITICAL 崩溃：`readJsonState` 的 JSON.parse 未包 try/catch——git 合并冲突的 `run.json` 让 ~11 命令抛原始堆栈（本产品前提就是跨分支共享 .team/）→ 转 GatewayError(io_error/exit8)+ statusRun 补 catch + bin.ts 兜底网。
+  - CRITICAL 死锁：`review block → unblock` 永久卡死任务——block 后 owner claim 停在 submitted，unblock 只翻状态不复活 claim → submit/resume/release/reclaim 全失败仅 cancel 可逃，repair 也救不了（缺陷在 claim 面）→ unblock 复活 owner claim 到 active + 新租约（docs/15 line 199+223）。
+  - HIGH 安全：`submit` 把 agent 自报 `cmd_id` 直接拼 `outputs/<cmd_id>.log` 写入——正规 API 的任意 .log 写原语 → 限定裸标识符。
+  - HIGH 并发：run 锁无 ownership token——stale 接管与 release 都无条件 rmSync，慢 holder 恢复后删掉接管者的锁致双持有（已确定性复现）→ token 化 release（只删自己）+ rename 化独占接管。
+  - HIGH 崩溃：torn `messages.jsonl` 崩 status/watch/msg list/hydrate（不像 events.jsonl 有容错读）→ 两处 readMessages 逐行容错。
+  - MEDIUM 安全：redaction 漏 AWS_SECRET_ACCESS_KEY / DSA 私钥 / 纯密码 URL（export 以此为阻断保证）→ 补模式；`export` 的 review_id 从盘上读入拼写路径可穿越 → dest 限定 target 内；memory-promote 用裸 startsWith 前缀判定（兄弟目录绕过）→ 换共享 insideRoot 围栏；`unblock` 无身份检查任何 agent 可解锁 → 限 owner-or-user。
+  - MEDIUM 假阳性：AUD-035 重算含全部行、computeProgress 剔除 cancelled → 任何含 cancelled 的 run 永久告警 → AUD-035 同步剔除。
+  - MEDIUM 崩溃：`adapter install` 未防 EISDIR → 包 try/catch。
+  - CLI 面：`--version`/`-v`/`version`（公共 CLI 必备，此前不响应）；`migrate` 悬空引用（命令不存在）→ 改措辞。
+- **开源脚手架**：LICENSE(MIT)、CONTRIBUTING/SECURITY/CODE_OF_CONDUCT、issue/PR 模板、.editorconfig、英文 README(GitHub 门面)、package.json 全量元数据（repository/bugs/homepage/author/keywords/license，仓库 URL 待填 OWNER）；发布物随包携带 LICENSE。
+
 - 桌面版真实代理轮（RUN-0002 jsonlkit，全局 `npm i -g` 形态 B）：北极星旅程首次由**真实桌面 Claude Code 会话**驱动——desktop-A 原生跑 `/team-dispatch` 领取并实现 normalize（复用 parse+stringify，16 真测试一次过），Codex 真进程交叉评审 approve，desktop-V 原生跑 `/team-verify` 独立重跑 6 检查并提交验证，集成 100% done、终审计 40 规则 0 findings 0 skipped。三项契约首次真机验证：**L13 verify 租约实锤**（`verify_claimed` 事件真机出现、`CLAIM-verify-*` 完整生命周期）、**docs/16 §2 git-common-dir 解析**（桌面会话在 fresh worktree 中经共享 .team/ 协作）、**L21 版本感知升级**（真机 12+5 模板滚 0.2.0）。新缺陷 L22（Codex 评审误试顶层 `sigmarun register`）→ codex review skill 补全 `agent register` 命令签名，模板 v0.2.1。测试 226/226。
 
 - adapter 模板版本感知升级（冒烟 L21）：`adapter install` 原先"文件存在即跳过"，0.1.0 模板永远升不到新版（违反 22 §4.3 模板版本化）——现比对 `template_version` 标记，异版本自动改写并报 `updated` 清单，同版本跳过，`--update` 保留为强制改写；信封文案改为 new/updated/up-to-date 三段计数。真机验证：12 个 Claude 模板 + 5 个 Codex skills 一次滚到 v0.2.0。测试 226/226。

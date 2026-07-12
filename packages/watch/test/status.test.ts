@@ -79,6 +79,13 @@ describe('status (Slice 7 acceptance; M32 Needs-user; INV-006 derived progress)'
     const data = env.data as { progress_pct: number; weight_total: number };
     expect(data.weight_total).toBe(1);
     expect(data.progress_pct).toBe(70);
+
+    // AUD-035 must agree with computeProgress on the cancelled-excluded denominator, or it
+    // warns forever on any run with a cancelled task (state-machine review Finding 3).
+    const { auditRun } = await import('@sigmarun/audit');
+    const audit = auditRun({ cwd: repo, runId: 'RUN-0001' });
+    const findings = (audit.data as { findings: Array<{ rule_id: string }> }).findings;
+    expect(findings.filter((f) => f.rule_id === 'AUD-035')).toEqual([]);
   });
 
   it('unresolved blockers are risks; Needs-user lists approval/blocker/reclaim with commands (M32)', () => {

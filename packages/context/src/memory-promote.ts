@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import {
   GatewayError,
+  assertRealPathInside,
   tryAcquireLock,
   readJsonState,
   resolveTeamRoot,
@@ -95,8 +96,15 @@ export function promoteMemory(opts: PromoteOptions): Envelope {
   const project = readJsonState(join(teamRoot, 'project.json')).doc as { project_memory_path?: string };
   const memRel = project.project_memory_path ?? 'docs/team/MEMORY.md';
   const memPath = resolve(repoRoot, memRel);
-  if (!memPath.startsWith(repoRoot) || memPath.startsWith(teamRoot)) {
-    return invalid(`project_memory_path must live in the repo outside .team/: ${memRel}.`, startedAt);
+  // Separator-safe + symlink-catching containment (the shared fence), not a raw startsWith
+  // prefix test — "../repo-evil/M.md" satisfies startsWith(repoRoot) but escapes the repo.
+  try {
+    assertRealPathInside(repoRoot, memPath, 'project_memory_path');
+  } catch {
+    return invalid(`project_memory_path must resolve inside the repo: ${memRel}.`, startedAt);
+  }
+  if (memPath.startsWith(teamRoot + sep) || memPath === teamRoot) {
+    return invalid(`project_memory_path must live outside .team/: ${memRel}.`, startedAt);
   }
   const ignored = (() => {
     try {
