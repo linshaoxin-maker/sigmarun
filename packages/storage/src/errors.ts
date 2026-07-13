@@ -29,6 +29,7 @@ export type ReasonCode =
   | 'evidence_invalid'
   | 'self_approval_forbidden'
   | 'export_target_invalid'
+  | 'backup_not_found'
   | 'export_redaction_hit'
   | 'path_escape_detected'
   | 'memory_entry_invalid'

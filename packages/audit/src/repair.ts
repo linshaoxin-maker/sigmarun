@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   GatewayError,
@@ -7,6 +7,7 @@ import {
   readJsonState,
   resolveTeamRoot,
   writeJsonStateAtomic,
+  writeBackup,
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { appendEvent, failEnvelope, okEnvelope, readEventsSafe, type Envelope } from '@sigmarun/core';
@@ -99,19 +100,12 @@ export function repairRun(opts: RepairOptions): Envelope {
       });
     }
 
-    // ----- backup, then apply -----
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupDir = join(teamRoot, 'backups', stamp, opts.runId);
-    mkdirSync(backupDir, { recursive: true });
-    for (const rel of ['team-task-list.json', 'events.meta.json', 'progress.json']) {
-      const src = join(runDir, rel);
-      if (existsSync(src)) cpSync(src, join(backupDir, rel));
-    }
-    for (const fix of taskFixes) {
-      const rel = fix.file.slice(runDir.length + 1);
-      mkdirSync(join(backupDir, rel, '..'), { recursive: true });
-      cpSync(fix.file, join(backupDir, rel));
-    }
+    // ----- backup, then apply ----- (unified backup store so `restore` works across producers)
+    const backupTargets = [
+      ...['team-task-list.json', 'events.meta.json', 'progress.json'].map((rel) => join(runDir, rel)),
+      ...taskFixes.map((fix) => fix.file),
+    ];
+    const backupId = writeBackup(teamRoot, 'repair', backupTargets);
 
     // meta first — appendEvent must allocate fresh seq numbers after a counter roll-forward.
     if (plan.some((p) => p.target === 'events.meta.json')) {
@@ -135,8 +129,8 @@ export function repairRun(opts: RepairOptions): Envelope {
     }
 
     return okEnvelope({
-      message: `Repaired ${plan.length} residue item(s) on ${opts.runId}; backup at .team/backups/${stamp}/.`,
-      data: { repaired: plan, findings, backup: `backups/${stamp}/${opts.runId}` },
+      message: `Repaired ${plan.length} residue item(s) on ${opts.runId}; backup ${backupId} (restore with: sigmarun restore ${backupId}).`,
+      data: { repaired: plan, findings, backup: backupId },
       startedAt,
     });
   } catch (err) {

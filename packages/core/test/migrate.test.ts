@@ -40,7 +40,8 @@ describe('sigmarun migrate — eager on-disk schema upgrade (roadmap Phase 2)', 
     expect(onDisk.migrated_marker).toBe(true);
     expect(onDisk.rev).toBe(revBefore); // rev preserved
     const backup = (env.data as { backup: string }).backup;
-    expect(existsSync(join(repo, '.team', backup, 'project.json'))).toBe(true);
+    expect(backup).toMatch(/^migrate-/);
+    expect(existsSync(join(repo, '.team', 'backups', backup, 'project.json'))).toBe(true);
     // second run is now a no-op
     expect((migrateState({ cwd: repo }).data as { migrated: unknown[] }).migrated.length).toBe(0);
   });

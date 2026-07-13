@@ -17,6 +17,8 @@ export { publishTasks, pathsOverlapConservative } from './publish.js';
 export type { PublishOptions } from './publish.js';
 export { runShow, readEvents } from './run-query.js';
 export { migrateState } from './migrate.js';
+export { backupList, restoreBackup } from './backup.js';
+export type { RestoreOptions } from './backup.js';
 export type { MigrateOptions } from './migrate.js';
 export type { RunShowOptions, EventsReadOptions } from './run-query.js';
 export { submitEvidence, fileInScope, truncateOutput } from './submit.js';

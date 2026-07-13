@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { setVerbose } from '@sigmarun/storage';
-import { initProject, doctorProject, importRun, publishTasks, runShow, readEvents, migrateState, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, taskAdd, taskCancel, failEnvelope, type Envelope, type DoctorCheck, GATEWAY_VERSION } from '@sigmarun/core';
+import { initProject, doctorProject, importRun, publishTasks, runShow, readEvents, migrateState, backupList, restoreBackup, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, taskAdd, taskCancel, failEnvelope, type Envelope, type DoctorCheck, GATEWAY_VERSION } from '@sigmarun/core';
 import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, verifySubmit, listWorktrees, pruneWorktrees } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, showGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
@@ -31,6 +31,7 @@ const EXIT_BY_CODE: Record<string, number> = {
   parallel_limit_reached: 6,
   agent_claim_limit: 6,
   run_not_found: 5,
+  backup_not_found: 5,
   task_not_found: 5,
   agent_not_registered: 5,
   claim_not_found: 5,
@@ -112,7 +113,8 @@ const HELP_TEXT = [
   'Finish:     integrate start <RUN> | integrate record <RUN> <TASK> --merge-commit=<sha> | --failed --reason=".." | report <RUN> | export <RUN> --to=<dir> [--force]',
   'Context:    msg post <RUN> --from=<A|user> --type=<t> --body=".." [--task=T] [--reply-to=MSG] | msg list <RUN> [--open] [--type=t]',
   '            context hydrate <RUN> <TASK> --agent=<A> | memory update <RUN> --file=<md> | memory candidates <RUN> | memory promote <RUN> --entry=".." --section=<S> --from=<refs>',
-  'Health:     audit run <RUN> | repair <RUN> | migrate [<RUN>] [--dry-run] — bring on-disk state to the current schema major (auto on read; this rewrites + backs up)',
+  'Health:     audit run <RUN> | repair <RUN> | migrate [<RUN>] [--dry-run] — schema upgrade (auto on read; this rewrites + backs up)',
+  'Recover:    backup list | restore <backup-id> [--dry-run] — roll back a repair/migrate; restore is itself reversible',
   '',
   'Every command accepts --json (single-envelope machine face) and --verbose (step trace to stderr). Exit codes: docs/17 §2.2.',
 ].join('\n');
@@ -268,6 +270,13 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       : repairRun({ cwd: opts.cwd, env: opts.env, runId });
   } else if (cmd === 'migrate') {
     env = migrateState({ cwd: opts.cwd, env: opts.env, runId: args[1], dryRun: argv.includes('--dry-run') });
+  } else if (cmd === 'backup' && args[1] === 'list') {
+    env = backupList({ cwd: opts.cwd, env: opts.env });
+  } else if (cmd === 'restore') {
+    const backupId = args[1];
+    env = !backupId
+      ? failEnvelope('usage_error', 'Usage: sigmarun restore <backup-id> [--dry-run] [--json] (list ids: sigmarun backup list)')
+      : restoreBackup({ cwd: opts.cwd, env: opts.env, backupId, dryRun: argv.includes('--dry-run') });
   } else if (cmd === 'run' && ['pause', 'resume', 'cancel', 'archive'].includes(args[1] ?? '')) {
     const runId = args[2];
     if (!runId) {

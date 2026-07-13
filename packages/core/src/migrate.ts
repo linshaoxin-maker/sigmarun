@@ -1,7 +1,7 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
-  GatewayError, resolveTeamRoot, readJsonState, parseSchemaVersion, currentSchemaMajor,
+  GatewayError, resolveTeamRoot, readJsonState, parseSchemaVersion, currentSchemaMajor, writeBackup,
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope } from './envelope.js';
@@ -83,12 +83,8 @@ export function migrateState(opts: MigrateOptions): Envelope {
       });
     }
 
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupRoot = join(teamRoot, 'backups', `migrate-${stamp}`);
+    const backupId = writeBackup(teamRoot, 'migrate', pending.map((p) => p.file));
     for (const p of pending) {
-      const backupPath = join(backupRoot, rel(p.file));
-      mkdirSync(dirname(backupPath), { recursive: true });
-      copyFileSync(p.file, backupPath);
       const migrated = readJsonState(p.file).doc; // upgraded in memory (rev preserved)
       const tmp = `${p.file}.tmp-${process.pid}`;
       writeFileSync(tmp, JSON.stringify(migrated, null, 2) + '\n');
@@ -96,8 +92,8 @@ export function migrateState(opts: MigrateOptions): Envelope {
     }
 
     return okEnvelope({
-      message: `Migrated ${pending.length} file(s)${scope} to the current schema major; originals backed up under ${rel(backupRoot)}.`,
-      data: { migrated: summary, backup: rel(backupRoot), dry_run: false },
+      message: `Migrated ${pending.length} file(s)${scope} to the current schema major; originals backed up as ${backupId}.`,
+      data: { migrated: summary, backup: backupId, dry_run: false },
       startedAt,
     });
   } catch (err) {

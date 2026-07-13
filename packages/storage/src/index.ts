@@ -5,6 +5,8 @@ import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path';
 export { GatewayError } from './errors.js';
 export { setVerbose, isVerbose, vlog, shortPath } from './log.js';
 export { registerMigration, clearMigrations, currentSchemaMajor, parseSchemaVersion, migrateDoc } from './migrate.js';
+export { writeBackup, rotateBackups, listBackupManifests, readBackupManifest, backupBytes } from './backup.js';
+export type { BackupManifest } from './backup.js';
 export type { MigrationFn } from './migrate.js';
 export type { ReasonCode } from './errors.js';
 export { acquireLock, tryAcquireLock, runLockPath } from './lock.js';
