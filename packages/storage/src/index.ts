@@ -4,6 +4,8 @@ import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path';
 
 export { GatewayError } from './errors.js';
 export { setVerbose, isVerbose, vlog, shortPath } from './log.js';
+export { registerMigration, clearMigrations, currentSchemaMajor, parseSchemaVersion, migrateDoc } from './migrate.js';
+export type { MigrationFn } from './migrate.js';
 export type { ReasonCode } from './errors.js';
 export { acquireLock, tryAcquireLock, runLockPath } from './lock.js';
 export type { LockOptions } from './lock.js';
@@ -11,6 +13,7 @@ export { scanForSecrets, redactText, SECRET_PATTERNS } from './redaction.js';
 export type { SecretHit } from './redaction.js';
 import { GatewayError } from './errors.js';
 import { vlog, shortPath as _shortPath } from './log.js';
+import { migrateDoc } from './migrate.js';
 
 export interface TeamRootResolution {
   repoRoot: string;
@@ -133,28 +136,11 @@ export function readJsonState(file: string): JsonState {
       `State file is not valid JSON: ${file}. If this repo shares .team/ across branches, check for an unresolved git merge conflict, then re-run.`,
     );
   }
-  assertSupportedSchema(doc, file);
-  return { doc, rev: typeof doc.rev === 'number' ? doc.rev : 0 };
-}
-
-/** All shipped schemas are major 1; every subsequent major must land with a migration chain (docs/21 §6.1). */
-const SUPPORTED_SCHEMA_MAJOR = 1;
-
-/**
- * Version handshake on every state read (docs/17 §11, docs/21 §7 pre-flight defence):
- * an unknown schema major means a newer gateway wrote this file — refuse instead of misreading it.
- */
-function assertSupportedSchema(doc: Record<string, unknown>, file: string): void {
-  const sv = doc.schema_version;
-  if (typeof sv !== 'string') return; // derived/older files without the field stay readable
-  const m = /^team\.[a-z_]+\.v(\d+)$/.exec(sv);
-  if (!m) return; // foreign naming is not ours to police
-  if (Number(m[1]) > SUPPORTED_SCHEMA_MAJOR) {
-    throw new GatewayError(
-      'unsupported_schema_version',
-      `${file} carries ${sv}, newer than this gateway understands (v${SUPPORTED_SCHEMA_MAJOR}). Upgrade sigmarun to a version that understands it.`,
-    );
-  }
+  // Version handshake + auto migrate-on-read (docs/21 §6.1): an older major is upgraded in memory
+  // via the registered chain; a newer major throws unsupported_schema_version. No write during a
+  // read — the on-disk file converges on the next write or via `sigmarun migrate`.
+  const { doc: current } = migrateDoc(doc, file);
+  return { doc: current, rev: typeof current.rev === 'number' ? current.rev : 0 };
 }
 
 /**

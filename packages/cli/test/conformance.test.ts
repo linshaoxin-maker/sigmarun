@@ -48,6 +48,8 @@ describe('conformance — one envelope per command, uniform failure classes (M38
       { argv: ['events', 'RUN-0001', '--type=task_published', '--limit=5'], exit: 0 },
       { argv: ['worktree', 'prune', 'RUN-0001'], exit: 0 },
       { argv: ['doctor', '--fix'], exit: 0 },
+      { argv: ['migrate'], exit: 0 },
+      { argv: ['migrate', '--dry-run'], exit: 0 },
       { argv: ['task', 'show', 'RUN-0001', 'TASK-0001'], exit: 0 },
       { argv: ['evidence', 'show', 'RUN-0001', 'TASK-0001'], exit: 0 },
       { argv: ['msg', 'post', 'RUN-0001', '--from=AGENT-codex-001', '--type=note', '--body=hi'], exit: 0 },

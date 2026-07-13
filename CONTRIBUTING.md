@@ -45,6 +45,33 @@ one envelope per command (`team.envelope.v1`) with a stable exit-code map
 5. **Reason codes are a contract.** A new reason code must be registered in the
    exit-code map (`packages/cli/src/cli.ts`) and `docs/17 §3`.
 
+## Schema evolution
+
+On-disk state under `.team/` is versioned as `team.<object>.v<major>` (e.g.
+`team.run.v1`). The policy:
+
+- **Additive changes are a minor bump — no version change on disk.** New optional
+  fields must round-trip: readers preserve unknown fields, so an older gateway
+  keeps working. Do not bump the major for additions.
+- **A breaking on-disk change bumps the schema major, and ships *with* a
+  migration.** When you change the shape in a way an older reader can't handle,
+  register a migration from the previous major with `registerMigration('<object>',
+  <fromMajor>, fn)` in `packages/storage/src/migrate.ts`. The migration is a pure
+  in-memory transform to the next major.
+- **Migration is automatic on read.** `readJsonState` upgrades an older doc in
+  memory via the registered chain, so any newer gateway reads any older state; the
+  file converges to the new major on its next write, or eagerly via
+  `sigmarun migrate` (which backs up the originals first). A doc *newer* than the
+  gateway understands is refused with `unsupported_schema_version` — there is no
+  down-conversion.
+- **Never bump a major without its migration.** A major with no registered
+  migration from `major-1` makes every older file unreadable. The
+  `currentSchemaMajor` of an object is defined as the highest major reachable by a
+  contiguous chain of registered migrations from v1.
+
+CLI semver tracks the code surface (commands, flags, envelope fields); the
+`.team/` schema major tracks the on-disk contract. They can move independently.
+
 ## Submitting a change
 
 - Branch from `main`, keep the diff focused.
