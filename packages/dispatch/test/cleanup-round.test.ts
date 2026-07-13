@@ -91,3 +91,30 @@ describe('task-level review.required overrides run-level false (docs/15 §9 stri
     expect(events().some((e) => e.event === 'review_skipped')).toBe(true);
   });
 });
+
+describe('OSS review: an orphaned active review claim self-heals (sweep, concurrency Finding 4)', () => {
+  it('a submitted task carrying a stale active review claim can be re-reviewed without waiting out the TTL', async () => {
+    repo = mkClaimRepo([{ key: 'a' }]);
+    const owner = registerDefault(repo, 'w-owner');
+    await setupWorking(repo, owner);
+    submitEvidence({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: owner, evidencePath: validDraft(repo) });
+    const rev1 = (registerAgent({ cwd: repo, runId: 'RUN-0001', tool: 'claude-code', role: 'reviewer', label: 'w-r1' }).data as { agent_id: string }).agent_id;
+    reviewClaim({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: rev1 }); // task -> reviewing, claim active
+
+    // Simulate the crash window: task flipped back to submitted but the claim was never released.
+    const { readJsonState, writeJsonStateAtomic } = await import('@sigmarun/storage');
+    const tf = join(runDir(), 'tasks', 'TASK-0001', 'task.json');
+    const ts = readJsonState(tf);
+    (ts.doc as { status: string }).status = 'submitted';
+    writeJsonStateAtomic(tf, ts.doc as Record<string, unknown>, { expectedRev: ts.rev });
+    expect(readJson('claims/review-claims.json').claims[0].status).toBe('active'); // orphan on disk
+
+    // A different reviewer claims — the sweep releases the orphan (its task is no longer reviewing), no TTL wait.
+    const rev2 = (registerAgent({ cwd: repo, runId: 'RUN-0001', tool: 'codex', role: 'reviewer', label: 'w-r2' }).data as { agent_id: string }).agent_id;
+    const env = reviewClaim({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: rev2 });
+    expect(env.ok).toBe(true);
+    const claims = readJson('claims/review-claims.json').claims as Array<{ reviewer_agent_id: string; status: string }>;
+    expect(claims.find((c) => c.reviewer_agent_id === rev1)!.status).toBe('released'); // orphan cleared
+    expect(claims.find((c) => c.reviewer_agent_id === rev2)!.status).toBe('active');
+  });
+});

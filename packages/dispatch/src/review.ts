@@ -68,9 +68,17 @@ function evidenceRevision(runDir: string, taskId: string): number {
 function sweepReviewClaims(runDir: string, runId: string, rc: ReturnType<typeof loadReviewClaims>): number {
   const now = Date.now();
   const released: ReviewClaim[] = [];
-  for (const claim of rc.doc.claims.filter((c) => c.status === 'active' && now > Date.parse(c.lease_until))) {
-    claim.status = 'released';
+  for (const claim of rc.doc.claims.filter((c) => c.status === 'active')) {
     const taskFile = join(runDir, 'tasks', claim.task_id, 'task.json');
+    const taskStatus = existsSync(taskFile) ? (readJsonState(taskFile).doc as { status: string }).status : 'unknown';
+    const leaseExpired = now > Date.parse(claim.lease_until);
+    // An active review claim should always sit on a 'reviewing' task. If the task has moved on
+    // (crash between the sweep's task-flip and its claim persist — concurrency review Finding 4),
+    // the claim is orphaned: release it immediately instead of waiting out the lease TTL.
+    const orphaned = claimKind(claim) === 'review' && taskStatus !== 'reviewing';
+    const verifyOrphaned = claimKind(claim) === 'verify' && !['approved'].includes(taskStatus) && taskStatus !== 'unknown';
+    if (!leaseExpired && !orphaned && !verifyOrphaned) continue;
+    claim.status = 'released';
     if (existsSync(taskFile)) {
       const task = readJsonState(taskFile);
       if ((task.doc as { status: string }).status === 'reviewing') {

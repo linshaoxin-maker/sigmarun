@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- backlog 清库（审查遗留低危项全修，各带回归锁，238/238）：①importRun 查重 TOCTOU——锁内复查 findDuplicateRun（并发同 payload 不再双建 run，Finding 3）；②sweepReviewClaims 崩溃窗——sweep 现也释放"孤儿"活 claim（task 已不在 reviewing 的 review claim / 不在 approved 的 verify claim），崩溃留下的 submitted+active 组合立即自愈而非等满 TTL（Finding 4）；③payload/task/review 文件读容忍 UTF-8 BOM（编辑器加的 BOM 不再报"非法 JSON"）；④adapter install 对无 template_version 标记的手改文件不再静默覆盖——跳过并 `unmanaged_template` 警告（保住本地编辑，--update 强制）；⑤memory promote 的文件 ref 限定 repo/run 内（`../../etc/passwd` 既污染出处又是存在性 oracle，现拒收）。
+
 - 性能（并发审查 Finding 2）：`appendEvent` 的 `rev_after` 快照此前每个事件都全树遍历 + JSON.parse 每个 `.json`，批量事务（cancel/report/import 各附 O(N) 事件）成 O(N×树)——不仅慢，还会拉宽 run 锁的 stale 窗口（操作跑太久被误判接管，Finding 1 无需 OS 暂停即可触发）。引入 storage 侧 state-write 代次计数器，`appendEvent` 按 (runDir, 代次) 记忆化：事务内所有 state 写在事件 append 之前（17 §5.3 events-last），故一批事件只遍历一次。**关键正确性**：`collectStateRevs` 本体保持始终新鲜（AUD-032 等跨进程读当前态必须看见别进程的写）——记忆化仅限锁内的 appendEvent，其代次准确反映本进程写入。第一版曾把记忆化加到导出函数上致跨进程陈旧，被 NFR-001 真进程压测当场抓住并修正。30 任务 cancel（31 事件）0.07s、审计 CLEAN。测试 234/234。
 
 - 文档国际化起步：两篇高频入口文档译成英文（`docs/en/00-user-guide.md` + `docs/en/17-cli-mcp-contract-and-error-model.md`），并行代理翻译后结构化校验通过——行数逐行对齐（358/358、304/304）、零残留中文、所有命令名/标识符/reason code/exit code 逐字节保留（17 号 55 个反引号代码 0 缺失、退出码表 0/2/…/8 原样、133 表行两侧一致）。README 增双语入口 + `docs/en/README.md` 索引（声明实现与测试为规范权威）。其余 01–16/18–25 暂中文。

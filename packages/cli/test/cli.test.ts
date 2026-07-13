@@ -209,3 +209,23 @@ describe('OSS-readiness: version flag and crash-safety', () => {
     }
   });
 });
+
+describe('OSS review: a UTF-8 BOM on a payload file does not break import', () => {
+  it('run import strips a leading BOM and succeeds', async () => {
+    const { mkTmpGitRepo, cleanup } = await import('../../storage/test/helpers.js');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    const { writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const repo = mkTmpGitRepo();
+    try {
+      runCli(['init'], { cwd: repo });
+      const file = join(repo, 'payload.json');
+      writeFileSync(file, '\uFEFF' + JSON.stringify(validPayload()), 'utf8'); // BOM-prefixed
+      const r = runCli(['run', 'import', file, '--json'], { cwd: repo });
+      expect(r.exitCode).toBe(0);
+      expect(JSON.parse(r.stdout).ok).toBe(true);
+    } finally {
+      cleanup(repo);
+    }
+  });
+});

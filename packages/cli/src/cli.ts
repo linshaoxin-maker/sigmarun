@@ -43,6 +43,13 @@ const EXIT_BY_CODE: Record<string, number> = {
   unsupported_schema_version: 8,
 };
 
+/** Read + parse a user-supplied JSON file, tolerating a leading UTF-8 BOM (editors add it). */
+function readJsonFileBom(file: string): unknown {
+  let raw = readFileSync(file, 'utf8');
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+  return JSON.parse(raw);
+}
+
 /** `--name=value` flag lookup. */
 function flag(argv: string[], name: string): string | undefined {
   const hit = argv.find((a) => a.startsWith(`--${name}=`));
@@ -120,7 +127,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       env = failEnvelope('usage_error', 'Usage: sigmarun run import <payload.json> [--force] [--json]');
     } else {
       try {
-        const payload = JSON.parse(readFileSync(file, 'utf8'));
+        const payload = readJsonFileBom(file);
         env = importRun({ cwd: opts.cwd, env: opts.env, payload, force });
       } catch (e) {
         env = failEnvelope('schema_invalid', `Payload file is not valid JSON: ${String(e)}`);
@@ -233,7 +240,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       env = failEnvelope('usage_error', 'Usage: sigmarun task add <RUN-ID> --file=<task.json> [--json]');
     } else {
       try {
-        env = taskAdd({ cwd: opts.cwd, env: opts.env, runId, task: JSON.parse(readFileSync(file, 'utf8')) });
+        env = taskAdd({ cwd: opts.cwd, env: opts.env, runId, task: readJsonFileBom(file) as Record<string, unknown> });
       } catch (e) {
         env = failEnvelope('schema_invalid', `Task file is not valid JSON: ${String(e)}`);
       }
@@ -324,9 +331,9 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
         env = failEnvelope('usage_error', 'review approve/request-changes needs --review=<review.json>.');
       } else {
         try {
-          const review = JSON.parse(readFileSync(reviewFile, 'utf8'));
+          const review = readJsonFileBom(reviewFile);
           const decision = args[1] === 'approve' ? 'approve' : args[1] === 'block' ? 'block' : 'request_changes';
-          env = reviewDecide({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, decision, review });
+          env = reviewDecide({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, decision, review: review as Parameters<typeof reviewDecide>[0]['review'] });
         } catch (e) {
           env = failEnvelope('schema_invalid', `Review file is not valid JSON: ${String(e)}`);
         }

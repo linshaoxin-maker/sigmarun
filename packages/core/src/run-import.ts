@@ -82,6 +82,18 @@ export function importRun(opts: ImportOptions): Envelope {
 
   let runDir = '';
   try {
+    // Re-check dedup INSIDE the lock: two identical concurrent imports both passed the pre-lock
+    // check, so without this they would each create a run (concurrency review Finding 3).
+    if (!opts.force) {
+      const dup = findDuplicateRun(runsDir, hash);
+      if (dup) {
+        release();
+        return failEnvelope('duplicate_payload', `Identical payload already imported as ${dup}.`, {
+          startedAt,
+          nextActions: [`Inspect the existing run: .team/runs/${dup}/plan.md`, 'Pass --force to import a duplicate run on purpose.'],
+        });
+      }
+    }
     const countersFile = join(root.teamRoot, 'counters.json');
     const counters = readJsonState(countersFile);
     const runNo = Number(counters.doc.next_run ?? 1);

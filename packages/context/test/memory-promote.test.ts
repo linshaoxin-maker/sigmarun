@@ -129,3 +129,21 @@ describe('memory audit batch + size discipline (AUD-036…040; BDD-009-05)', () 
     expect((env.data as { findings: Array<{ rule_id: string }> }).findings.some((f) => f.rule_id === 'AUD-040')).toBe(true);
   });
 });
+
+describe('OSS security review: memory-promote ref cannot escape the repo (existence oracle)', () => {
+  it('rejects a ../ path ref instead of accepting it as a resolvable file', () => {
+    const repo = mkClaimRepo([{ key: 'a' }]);
+    try {
+      postMessage({ cwd: repo, runId: 'RUN-0001', fromAgentId: registerDefault(repo, 'w'), type: 'decision', body: 'D.' });
+      const env = promoteMemory({
+        cwd: repo, runId: 'RUN-0001', entry: 'Escapes the repo.',
+        section: 'Architecture', refs: ['../../../../../../etc/passwd'],
+      });
+      expect(env.ok).toBe(false);
+      expect(env.code).toBe('memory_entry_invalid');
+      expect(env.message).toMatch(/MSG id or a repo-relative path/);
+    } finally {
+      cleanup(repo);
+    }
+  });
+});

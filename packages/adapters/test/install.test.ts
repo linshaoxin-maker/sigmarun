@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installAdapters } from '@sigmarun/adapters';
 import { mkTmpGitRepo, cleanup } from '../../storage/test/helpers.js';
@@ -77,6 +77,26 @@ describe('smoke-round L21: managed templates roll forward by version', () => {
       expect(readFileSync(file, 'utf8')).not.toContain('template_version: 0.0.1');
       // unchanged files stay skipped
       expect(data.skipped.length).toBeGreaterThan(0);
+    } finally {
+      cleanup(repo);
+    }
+  });
+});
+
+describe('OSS review: hand-edited (marker-less) templates are preserved, not silently overwritten', () => {
+  it('a file whose template_version marker was removed is left untouched with a warning', () => {
+    const repo = mkTmpGitRepo();
+    try {
+      installAdapters({ cwd: repo, tool: 'claude-code' });
+      const file = join(repo, '.claude', 'commands', 'team-dispatch.md');
+      const edited = readFileSync(file, 'utf8').replace(/<!-- template_version:[^>]*-->/, '<!-- (hand-edited, marker removed) -->') + '\nMY LOCAL EDIT\n';
+      writeFileSync(file, edited);
+      const env = installAdapters({ cwd: repo, tool: 'claude-code' });
+      expect(env.ok).toBe(true);
+      expect(env.warnings.map((w) => w.code)).toContain('unmanaged_template');
+      expect(readFileSync(file, 'utf8')).toContain('MY LOCAL EDIT'); // not clobbered
+      const data = env.data as { updated: string[]; skipped: string[] };
+      expect(data.skipped.some((s) => s.includes('team-dispatch.md'))).toBe(true);
     } finally {
       cleanup(repo);
     }

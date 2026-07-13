@@ -85,8 +85,18 @@ export function promoteMemory(opts: PromoteOptions): Envelope {
           .split('\n')
           .some((l) => l.includes(`"message_id":"${ref}"`));
       if (!hit) return invalid(`ref ${ref} does not exist in the run message pool.`, startedAt);
-    } else if (!existsSync(resolve(repoRoot, ref)) && !existsSync(resolve(runDir, ref))) {
-      return invalid(`ref ${ref} resolves to no existing file.`, startedAt);
+    } else {
+      // A file ref must resolve to an existing file INSIDE the repo or the run — not escape via
+      // ../ into the wider filesystem (security review: existsSync(resolve(repoRoot, '../../etc/passwd'))
+      // both polluted provenance and leaked a file-existence oracle).
+      const inRepo = resolve(repoRoot, ref);
+      const inRun = resolve(runDir, ref);
+      const confined = (base: string, abs: string) => abs === base || abs.startsWith(base + sep);
+      const okRepo = confined(repoRoot, inRepo) && existsSync(inRepo);
+      const okRun = confined(runDir, inRun) && existsSync(inRun);
+      if (!okRepo && !okRun) {
+        return invalid(`ref ${ref} must be a MSG id or a repo-relative path to an existing file.`, startedAt);
+      }
     }
   }
   if (scanForSecrets(opts.entry).length > 0) {

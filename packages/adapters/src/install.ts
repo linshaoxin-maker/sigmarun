@@ -45,9 +45,16 @@ export function installAdapters(opts: InstallOptions): Envelope {
         skipped.push(rel);
         continue;
       }
+      if (current === null) {
+        // The on-disk file carries no managed version marker — it was hand-edited or is not ours.
+        // Overwriting would silently destroy the user's edits; leave it and warn (use --update to force).
+        skipped.push(rel);
+        warnings.push({ code: 'unmanaged_template', message: `${rel} has no template_version marker (hand-edited?) — left untouched. Pass --update to overwrite with the shipped template.` });
+        continue;
+      }
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, content, 'utf8');
-      updated.push(`${rel} (${current ?? '?'} -> ${shipped ?? '?'})`);
+      updated.push(`${rel} (${current} -> ${shipped ?? '?'})`);
       continue;
     }
     mkdirSync(dirname(target), { recursive: true });
