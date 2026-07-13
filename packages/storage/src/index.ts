@@ -159,6 +159,16 @@ function assertSupportedSchema(doc: Record<string, unknown>, file: string): void
  * Atomic state write: temp file + rename, rev bumped by exactly 1.
  * @contract docs/17 §5.1–5.2 — rev mismatch means a bypassing write happened; refuse with rev_conflict.
  */
+/**
+ * Monotonic counter bumped by every atomic state write. collectStateRevs (in core) keys its
+ * memo on this so a transaction that appends N events walks the state tree once, not N times
+ * (concurrency review Finding 2: the per-event full-tree walk widened the lock's stale window).
+ */
+let stateGeneration = 0;
+export function currentStateGeneration(): number {
+  return stateGeneration;
+}
+
 export function writeJsonStateAtomic(
   file: string,
   doc: Record<string, unknown>,
@@ -177,6 +187,7 @@ export function writeJsonStateAtomic(
   try {
     writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
     renameSync(tmp, file);
+    stateGeneration++;
   } catch (e) {
     throw new GatewayError('io_error', `Atomic write failed for: ${file}`, { cause: String(e) });
   }
@@ -190,6 +201,7 @@ export function writeJsonStateNew(file: string, doc: Record<string, unknown>): v
   const tmp = `${file}.tmp-${process.pid}`;
   writeFileSync(tmp, JSON.stringify({ ...doc, rev: 1 }, null, 2) + '\n');
   renameSync(tmp, file);
+  stateGeneration++;
 }
 
 /** mkdir-based lock capability probe used by doctor (docs/17 §8). */

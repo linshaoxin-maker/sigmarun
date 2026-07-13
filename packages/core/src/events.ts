@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { currentStateGeneration } from '@sigmarun/storage';
 
 export interface EventActor {
   type: 'agent' | 'user' | 'policy' | 'sweep';
@@ -17,7 +18,11 @@ export interface EventInput {
 
 export type RevAfter = Record<string, number>;
 
-/** Snapshot mutable JSON state revs under one run after the caller has persisted state. */
+/**
+ * Snapshot mutable JSON state revs under one run — ALWAYS reads fresh from disk. Consumers that
+ * compare against the current on-disk state (AUD-032) must see writes made by OTHER processes,
+ * so this must never be memoized across the process's own generation.
+ */
 export function collectStateRevs(runDir: string): RevAfter {
   const out: RevAfter = {};
   const walk = (dir: string, prefix = ''): void => {
@@ -44,6 +49,23 @@ export function collectStateRevs(runDir: string): RevAfter {
 }
 
 /**
+ * The snapshot stamped into an event's rev_after. Memoized on (runDir, state-write generation):
+ * appendEvent only runs inside the run lock, so while THIS process appends events no other process
+ * can mutate on-disk state, and the generation counter fully reflects this process's own writes.
+ * A transaction writes all state before appending its events (docs/17 §5.3), so a cancel/report/
+ * import that appends N events walks the tree once, not N times (concurrency review Finding 2).
+ * NOT safe for current-state reads outside the lock — those call collectStateRevs directly.
+ */
+let revMemo: { key: string; value: RevAfter } | null = null;
+function collectStateRevsForAppend(runDir: string): RevAfter {
+  const key = `${runDir}#${currentStateGeneration()}`;
+  if (revMemo && revMemo.key === key) return revMemo.value;
+  const value = collectStateRevs(runDir);
+  revMemo = { key, value };
+  return value;
+}
+
+/**
  * Append one audit event; the jsonl append is the transaction commit point.
  * @contract docs/18 §3 team.event.v1 · docs/17 §5.2 seq from events.meta.json (caller holds the lock) · §5.3 events-last write order
  */
@@ -66,7 +88,7 @@ export function appendEvent(runDir: string, evt: EventInput): number {
     run_id: evt.run_id,
     ...(evt.task_id ? { task_id: evt.task_id } : {}),
     ...(evt.claim_id ? { claim_id: evt.claim_id } : {}),
-    payload: { ...payload, rev_after: { ...manualRevAfter, ...collectStateRevs(runDir) } },
+    payload: { ...payload, rev_after: { ...manualRevAfter, ...collectStateRevsForAppend(runDir) } },
   };
   appendFileSync(join(runDir, 'events.jsonl'), JSON.stringify(line) + '\n');
   writeFileSync(metaFile, JSON.stringify({ next_seq: seq + 1 }));
