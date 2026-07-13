@@ -76,8 +76,13 @@ Agents drive this through installed slash commands / skills — `/team-plan`,
 
 The full design corpus (product boundary, domain model, state machine, CLI/MCP
 contract, audit catalog, packaging) lives under [`docs/`](docs/) (numbered
-00–25, currently written in Chinese). Start with
-[`docs/00-user-guide.md`](docs/00-user-guide.md).
+00–25). English is available for the two entry docs, with the rest of the
+corpus in Chinese and translation ongoing:
+
+- **User Guide** — [English](docs/en/00-user-guide.md) · [中文](docs/00-user-guide.md)
+- **CLI / MCP Contract & Error Model** — [English](docs/en/17-cli-mcp-contract-and-error-model.md) · [中文](docs/17-cli-mcp-contract-and-error-model.md)
+
+New to sigmarun? Start with the User Guide.
 
 ## Contributing
 

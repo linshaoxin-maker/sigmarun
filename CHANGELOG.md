@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 文档国际化起步：两篇高频入口文档译成英文（`docs/en/00-user-guide.md` + `docs/en/17-cli-mcp-contract-and-error-model.md`），并行代理翻译后结构化校验通过——行数逐行对齐（358/358、304/304）、零残留中文、所有命令名/标识符/reason code/exit code 逐字节保留（17 号 55 个反引号代码 0 缺失、退出码表 0/2/…/8 原样、133 表行两侧一致）。README 增双语入口 + `docs/en/README.md` 索引（声明实现与测试为规范权威）。其余 01–16/18–25 暂中文。
+
 - 安全跟进（审查 Finding 4，`--from=user` 伪造）：CLI 边界无法认证人类（键盘与 agent 的 shell 调同一二进制），故不删该能力而**如实标注**——user 消息记 `author_unverified: true`、post 时告警、`memory candidates` 透出该标记，让人类晋升进 git 记忆前看得见"网关未验证"；`memory candidates` 顺带改容错读（torn messages.jsonl 不再崩）。SECURITY.md 记入威胁模型。测试 232/232。
 
 - 开源就绪审查轮（4 代理并行 bug 猎捕：并发/锁、状态机/重放、安全围栏、CLI 健壮性）+ 开源脚手架。**修复 12 项（全带回归锁，232/232）**：
