@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 故障降级 Phase 1（收尾）：`worktree prune <RUN> [--dry-run]`。外部删除的 worktree（`git worktree remove` / `rm -rf` / 清空 scratch）会在注册表留下指向已不存在路径的活条目——`worktree list` 能看见却清不掉。prune 把这些死条目标记 `pruned`（`worktree list`/AUD-029 不再当活的算）+ 发 `worktree_pruned` 事件,并指出 worktree 消失后仍卡在 `working` 的任务(提示重建 worktree 或 reclaim);`--dry-run` 只报不改。测试 249/249（+3）。
+
 - 故障降级 Phase 1：`doctor --fix` 引导式自愈。`doctor` 此前只诊断不治疗——用户看到 fail 得自己知道对应命令。现 `--fix` 对可安全自动修复的失败一键治愈并重检：未初始化→`init`、`.gitignore` 缺 `.team/`→追加(D4)、`.team` 被 git 跟踪→`git rm -r --cached`(文件留盘,AUD-030)、locks 目录缺失→创建；不可安全自动修的(node 版本、schema 损坏、memory 被 ignore)保持 fail 并给人工指引,绝不谎报已修。信封 `data.fixed` 列出实修项。测试 246/246（+4）。
 
 - 可观性 Phase 1 首项：`sigmarun events <RUN>` 账本读取命令。`events.jsonl`（append-only、每事务的事实源）此前无一等读取器，排障只能 `cat` 原始 JSONL——现有对齐的时间线（seq · 时间 · 事件 · actor · 任务/claim），支持 `--task` / `--type` / `--since=<seq>`（增量 tail）/ `--limit`（默认 50，0=全部）过滤，`--json` 带完整 payload。复用 `readEventsSafe`：torn 尾行不崩、降级为 `ledger_torn_tail` warning + `corrupt_lines`（账本健康本身即信号）。只读、无锁、无事件。测试 242/242（+4 单元 +2 conformance）。

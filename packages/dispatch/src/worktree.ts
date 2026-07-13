@@ -221,3 +221,70 @@ export function listWorktrees(opts: WorktreeListOptions): Envelope {
     startedAt,
   });
 }
+
+export interface WorktreePruneOptions extends ResolveOptions {
+  runId: string;
+  /** report the stale set without mutating (reconcile check). */
+  dryRun?: boolean;
+}
+
+/**
+ * Reconcile the worktree registry against the filesystem (roadmap Phase 1 fault degradation):
+ * a worktree deleted out-of-band (git worktree remove, rm -rf, a wiped scratch dir) leaves a live
+ * entry pointing at a path that no longer exists. Prune marks those entries `pruned` so `worktree
+ * list` and AUD-029 stop counting them as live, and surfaces the tasks whose worktree vanished so
+ * the owner can re-register or reclaim. --dry-run reports without touching anything.
+ */
+export function pruneWorktrees(opts: WorktreePruneOptions): Envelope {
+  const startedAt = Date.now();
+  return withRunLock(opts, startedAt, (runDir, runId) => {
+    const wt = loadWorktrees(runDir, runId);
+    const PRUNABLE = new Set(['active', 'abandoned']);
+    const live = wt.doc.entries.filter((e) => PRUNABLE.has(e.status));
+    const dead = live.filter((e) => !existsSync(e.path));
+    const summary = dead.map((e) => ({ worktree_id: e.worktree_id, task_id: e.task_id, path: e.path, was: e.status }));
+
+    if (dead.length === 0) {
+      return okEnvelope({
+        message: `No stale worktrees on ${runId}; ${live.length} live worktree(s) all present.`,
+        data: { pruned: [], live: live.length, dry_run: Boolean(opts.dryRun) },
+        startedAt,
+      });
+    }
+
+    if (opts.dryRun) {
+      return okEnvelope({
+        message: `${dead.length} stale worktree(s) would be pruned on ${runId} (dry run).`,
+        data: { pruned: summary, live: live.length, dry_run: true },
+        nextActions: [`Apply: sigmarun worktree prune ${runId}`],
+        startedAt,
+      });
+    }
+
+    for (const e of dead) e.status = 'pruned';
+    saveState(wt.file, wt.doc, wt.rev); // detail write precedes the commit-point event
+    const tasks = [...new Set(summary.map((s) => s.task_id))];
+    appendEvent(runDir, {
+      event: 'worktree_pruned',
+      actor: { type: 'user', id: 'user' },
+      run_id: runId,
+      payload: { pruned: summary.map((s) => s.worktree_id), tasks },
+    });
+
+    // A task still 'working' whose worktree vanished is stuck — point the operator at recovery.
+    const stranded = tasks.filter((taskId) => {
+      const f = join(runDir, 'tasks', taskId, 'task.json');
+      return existsSync(f) && (readJsonState(f).doc as { status: string }).status === 'working';
+    });
+    const nextActions = stranded.length
+      ? stranded.map((taskId) => `Re-establish work for ${taskId}: register a fresh worktree, or sigmarun reclaim ${runId} ${taskId}.`)
+      : [];
+
+    return okEnvelope({
+      message: `Pruned ${dead.length} stale worktree(s) on ${runId}${stranded.length ? ` (${stranded.length} task(s) now need a fresh worktree)` : ''}.`,
+      data: { pruned: summary, live: live.length - dead.length, dry_run: false, stranded_tasks: stranded },
+      nextActions,
+      startedAt,
+    });
+  });
+}

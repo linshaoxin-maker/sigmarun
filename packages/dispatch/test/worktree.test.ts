@@ -126,3 +126,52 @@ describe('reclaim marks the worktree abandoned; adopt transfers ownership (docs/
     expect(env.code).toBe('invalid_transition');
   });
 });
+
+describe('worktree prune — reconcile stale entries (roadmap Phase 1, fault degradation)', () => {
+  it('prunes an entry whose worktree was deleted out-of-band; a live one is kept', async () => {
+    const { pruneWorktrees } = await import('@sigmarun/dispatch');
+    const { rmSync } = await import('node:fs');
+    const path = mkWorktree();
+    registerWorktree({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, path, branch: BRANCH });
+    expect(readJson('worktrees.json').entries[0].status).toBe('active');
+
+    // simulate out-of-band deletion of the working tree directory
+    rmSync(path, { recursive: true, force: true });
+
+    const env = pruneWorktrees({ cwd: repo, runId: 'RUN-0001' });
+    expect(env.ok).toBe(true);
+    const pruned = (env.data as { pruned: Array<{ worktree_id: string; task_id: string }> }).pruned;
+    expect(pruned.map((p) => p.worktree_id)).toEqual(['WT-TASK-0001']);
+    expect(readJson('worktrees.json').entries[0].status).toBe('pruned');
+    const ev = events().find((e) => e.event === 'worktree_pruned');
+    expect(ev).toBeTruthy();
+    expect(ev.payload.pruned).toContain('WT-TASK-0001');
+    expect(ev.payload.tasks).toContain('TASK-0001');
+  });
+
+  it('--dry-run reports the stale set without mutating or emitting an event', async () => {
+    const { pruneWorktrees } = await import('@sigmarun/dispatch');
+    const { rmSync } = await import('node:fs');
+    const path = mkWorktree();
+    registerWorktree({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, path, branch: BRANCH });
+    rmSync(path, { recursive: true, force: true });
+    const before = events().length;
+
+    const env = pruneWorktrees({ cwd: repo, runId: 'RUN-0001', dryRun: true });
+    expect(env.ok).toBe(true);
+    expect((env.data as { dry_run: boolean }).dry_run).toBe(true);
+    expect((env.data as { pruned: unknown[] }).pruned.length).toBe(1);
+    expect(readJson('worktrees.json').entries[0].status).toBe('active'); // untouched
+    expect(events().length).toBe(before); // no event
+  });
+
+  it('a run with only live worktrees prunes nothing', async () => {
+    const { pruneWorktrees } = await import('@sigmarun/dispatch');
+    const path = mkWorktree();
+    registerWorktree({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, path, branch: BRANCH });
+    const env = pruneWorktrees({ cwd: repo, runId: 'RUN-0001' });
+    expect(env.ok).toBe(true);
+    expect((env.data as { pruned: unknown[] }).pruned.length).toBe(0);
+    expect(readJson('worktrees.json').entries[0].status).toBe('active');
+  });
+});

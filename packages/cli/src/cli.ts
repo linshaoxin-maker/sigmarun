@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { initProject, doctorProject, importRun, publishTasks, runShow, readEvents, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, taskAdd, taskCancel, failEnvelope, type Envelope, type DoctorCheck, GATEWAY_VERSION } from '@sigmarun/core';
-import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, verifySubmit, listWorktrees } from '@sigmarun/dispatch';
+import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, verifySubmit, listWorktrees, pruneWorktrees } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, showGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
 import { statusRun, runList, taskShow, evidenceShow, watchOnce } from '@sigmarun/watch';
@@ -104,7 +104,7 @@ const HELP_TEXT = [
   'Tasks:      task add <RUN> --file=<task.json> | task cancel <RUN> <TASK> [--reason=..] | task show <RUN> <TASK> | graph show|validate <RUN>',
   'Dispatch:   agent register <RUN> --tool=<t> [--role=r] [--label=w] | claim-next <RUN> --agent=<A> [--role=r] [--task=T] [--dry-run]',
   '            heartbeat <RUN> <TASK> --agent=<A> | release <RUN> <TASK> --agent=<A> | reclaim <RUN> <TASK> | approve-paths <RUN> <TASK> --paths=g1,g2',
-  'Worktrees:  worktree register <RUN> <TASK> --agent=<A> --path=<p> --branch=<b> | worktree adopt <RUN> <TASK> --agent=<A> | worktree list <RUN>',
+  'Worktrees:  worktree register <RUN> <TASK> --agent=<A> --path=<p> --branch=<b> | worktree adopt <RUN> <TASK> --agent=<A> | worktree list <RUN> | worktree prune <RUN> [--dry-run]',
   'Deliver:    submit <RUN> <TASK> --agent=<A> --evidence=<draft.json> | evidence show <RUN> <TASK>',
   'Gates:      review claim|approve|request-changes|block <RUN> <TASK> --agent=<A> [--review=<r.json>] | resume <RUN> <TASK> --agent=<A> | unblock <RUN> <TASK>',
   '            verify submit <RUN> --agent=<A> --verify=<v.json>   (draft: {target:{kind:task|run,..},checks:[{name,cmd,exit_code,output_file,status}],gates,skip_reasons,verdict,failures_mapped})',
@@ -295,6 +295,11 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     env = !runId
       ? failEnvelope('usage_error', 'Usage: sigmarun worktree list <RUN-ID> [--json]')
       : listWorktrees({ cwd: opts.cwd, env: opts.env, runId });
+  } else if (cmd === 'worktree' && args[1] === 'prune') {
+    const runId = args[2];
+    env = !runId
+      ? failEnvelope('usage_error', 'Usage: sigmarun worktree prune <RUN-ID> [--dry-run] [--json]')
+      : pruneWorktrees({ cwd: opts.cwd, env: opts.env, runId, dryRun: argv.includes('--dry-run') });
   } else if (cmd === 'graph' && args[1] === 'show') {
     const runId = args[2];
     env = !runId
