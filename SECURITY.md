@@ -31,6 +31,13 @@ Two properties are worth understanding when assessing risk:
 - **The gateway never executes agent-supplied commands.** It records evidence,
   arbitrates claims, and validates structure. Agents run their own tools; the
   gateway only reads/writes JSON state and appends the event ledger.
+- **`msg post --from=user` authorship is self-asserted, not authenticated.** A
+  human and an agent's shell invoke the same CLI, so the gateway cannot prove a
+  message really came from the person. Such messages are stored and surfaced with
+  `author_unverified: true` (and a warning on post) so nothing — including the
+  memory-promotion candidate list — treats them as verified human authority.
+  Promotion into git-tracked project memory always requires a deliberate human
+  `memory promote` command; the candidate list is a convenience, not consent.
 
 Secret material is scanned and redacted on submit, message post, memory
 promotion, and export (export aborts with zero writes on a redaction hit).

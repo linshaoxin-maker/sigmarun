@@ -211,12 +211,22 @@ export function memoryCandidates(opts: CandidatesOptions): Envelope {
   if (!existsSync(join(runDir, 'run.json'))) {
     return failEnvelope('run_not_found', `Run ${opts.runId} does not exist under .team/runs/.`, { startedAt });
   }
-  const candidates: Array<{ kind: string; ref: string; body: string }> = [];
+  const candidates: Array<{ kind: string; ref: string; body: string; author_unverified?: boolean }> = [];
   const msgFile = join(runDir, 'context', 'messages.jsonl');
   if (existsSync(msgFile)) {
-    for (const line of readFileSync(msgFile, 'utf8').trim().split('\n').filter(Boolean)) {
-      const m = JSON.parse(line) as { message_id: string; type: string; body: string };
-      if (m.type === 'decision') candidates.push({ kind: 'decision', ref: m.message_id, body: m.body });
+    for (const line of readFileSync(msgFile, 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      let m: { message_id: string; type: string; body: string; author_unverified?: boolean };
+      try {
+        m = JSON.parse(line) as typeof m;
+      } catch {
+        continue; // torn/corrupt line — skip (same discipline as readEventsSafe)
+      }
+      // A decision message may claim to be from the human; carry author_unverified through so the
+      // human sees, before promoting into git-tracked memory, that the gateway did not verify it.
+      if (m.type === 'decision') {
+        candidates.push({ kind: 'decision', ref: m.message_id, body: m.body, ...(m.author_unverified ? { author_unverified: true } : {}) });
+      }
     }
   }
   const reviewsDir = join(runDir, 'reviews');

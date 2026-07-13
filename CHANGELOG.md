@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 安全跟进（审查 Finding 4，`--from=user` 伪造）：CLI 边界无法认证人类（键盘与 agent 的 shell 调同一二进制），故不删该能力而**如实标注**——user 消息记 `author_unverified: true`、post 时告警、`memory candidates` 透出该标记，让人类晋升进 git 记忆前看得见"网关未验证"；`memory candidates` 顺带改容错读（torn messages.jsonl 不再崩）。SECURITY.md 记入威胁模型。测试 232/232。
+
 - 开源就绪审查轮（4 代理并行 bug 猎捕：并发/锁、状态机/重放、安全围栏、CLI 健壮性）+ 开源脚手架。**修复 12 项（全带回归锁，232/232）**：
   - CRITICAL 崩溃：`readJsonState` 的 JSON.parse 未包 try/catch——git 合并冲突的 `run.json` 让 ~11 命令抛原始堆栈（本产品前提就是跨分支共享 .team/）→ 转 GatewayError(io_error/exit8)+ statusRun 补 catch + bin.ts 兜底网。
   - CRITICAL 死锁：`review block → unblock` 永久卡死任务——block 后 owner claim 停在 submitted，unblock 只翻状态不复活 claim → submit/resume/release/reclaim 全失败仅 cancel 可逃，repair 也救不了（缺陷在 claim 面）→ unblock 复活 owner claim 到 active + 新租约（docs/15 line 199+223）。

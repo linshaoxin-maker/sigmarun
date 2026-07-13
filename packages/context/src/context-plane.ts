@@ -72,6 +72,10 @@ interface MessageLine {
   created_at: string;
   status: string;
   refs: string[];
+  /** true when from_agent_id is the self-asserted 'user' — the gateway cannot authenticate a
+   * human at the CLI boundary (the keyboard and an agent's shell invoke the same binary), so
+   * downstream consumers must not treat this as verified human authority. */
+  author_unverified?: boolean;
 }
 
 interface RunCtx {
@@ -147,6 +151,14 @@ export function postMessage(opts: PostMessageOptions): Envelope {
 
   try {
     const warnings: EnvelopeWarning[] = [];
+    if (opts.fromAgentId === 'user') {
+      // Security review Finding 4: `user` authorship is self-asserted, not authenticated. Surface
+      // that so a forged "human said X" is visible rather than silently trusted.
+      warnings.push({
+        code: 'author_unverified',
+        message: 'Posted as "user" — the gateway cannot authenticate a human at the CLI, so this authorship is self-asserted. Consumers must not treat it as verified human authority.',
+      });
+    }
     const hits = scanForSecrets(opts.body);
     if (hits.length > 0) {
       warnings.push({
@@ -169,6 +181,7 @@ export function postMessage(opts: PostMessageOptions): Envelope {
       ...(opts.inReplyTo ? { in_reply_to: opts.inReplyTo } : {}),
       visibility: 'run',
       body: opts.body,
+      ...(opts.fromAgentId === 'user' ? { author_unverified: true } : {}),
       created_at: new Date().toISOString(),
       status: opts.type === 'question' || opts.type === 'blocker' ? 'open' : 'resolved',
       refs: opts.refs ?? [],
