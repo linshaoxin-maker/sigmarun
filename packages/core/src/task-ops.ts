@@ -36,6 +36,16 @@ export interface TaskCancelOptions extends ResolveOptions {
   taskId: string;
 }
 
+export interface TaskDoneOptions extends ResolveOptions {
+  runId: string;
+  taskId: string;
+  agentId: string;
+  note?: string;
+}
+
+/** Lightweight completion: a claimed/in-progress task the completer holds may go straight to done. */
+const DONE_FROM = new Set(['claimed', 'working', 'submitted']);
+
 const id4 = (prefix: string, n: number) => `${prefix}-${String(n).padStart(4, '0')}`;
 
 /** Task states a user may still cancel; integrated/done results are frozen (docs/15 §3.3). */
@@ -233,6 +243,82 @@ export function taskCancel(opts: TaskCancelOptions): Envelope {
     });
     return okEnvelope({
       message: `${opts.taskId} cancelled (was ${status}); ${released.length} claim(s) cascaded.`,
+      data: { task_id: opts.taskId, released_claim_ids: released },
+      startedAt,
+    });
+  });
+}
+
+/**
+ * Lightweight completion (roadmap: lightweight mode). In a lightweight run — no review/verify/
+ * integrate — the agent that claimed a task marks it done directly, trusting the completer (no
+ * evidence gate). Refused in a full run, where `done` is reached through the report/accept path.
+ */
+export function taskDone(opts: TaskDoneOptions): Envelope {
+  const startedAt = Date.now();
+  return openRunTx(opts, startedAt, (runDir) => {
+    const run = readJsonState(join(runDir, 'run.json')).doc as { lightweight?: boolean };
+    if (!run.lightweight) {
+      return failEnvelope('invalid_transition', `Run ${opts.runId} is not lightweight; a task reaches done through review/verify/integrate. Use the pipeline, or create the run with --lightweight.`, { startedAt });
+    }
+    const taskFile = join(runDir, 'tasks', opts.taskId, 'task.json');
+    if (!existsSync(taskFile)) {
+      return failEnvelope('task_not_found', `Task ${opts.taskId} does not exist on ${opts.runId}.`, { startedAt });
+    }
+    const task = readJsonState(taskFile);
+    const status = (task.doc as { status: string }).status;
+    if (!DONE_FROM.has(status)) {
+      return failEnvelope('invalid_transition', `Task ${opts.taskId} is ${status}; done applies to a claimed/in-progress task.`, { startedAt });
+    }
+
+    // Only the claim holder completes it (the anti-collision guarantee extends to completion).
+    const claimsFile = join(runDir, 'claims', 'task-claims.json');
+    const held = existsSync(claimsFile)
+      ? (readJsonState(claimsFile).doc as { claims: Array<{ task_id: string; agent_id: string; status: string; claim_id: string }> }).claims
+          .find((c) => c.task_id === opts.taskId && ['active', 'submitted'].includes(c.status))
+      : undefined;
+    if (held && held.agent_id !== opts.agentId) {
+      return failEnvelope('not_claim_owner', `Task ${opts.taskId} is held by ${held.agent_id}, not ${opts.agentId}.`, { startedAt });
+    }
+
+    (task.doc as { status: string }).status = 'done';
+    writeJsonStateAtomic(taskFile, task.doc as Record<string, unknown>, { expectedRev: task.rev });
+    const listFile = join(runDir, 'team-task-list.json');
+    const list = readJsonState(listFile);
+    const row = (list.doc as { tasks: Array<{ task_id: string; status: string; owner_agent_id: string | null; claim_id: string | null }> }).tasks.find((r) => r.task_id === opts.taskId);
+    if (row) {
+      row.status = 'done';
+      row.owner_agent_id = null;
+      row.claim_id = null;
+    }
+    writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
+
+    // release the claim(s) — the task is finished
+    const released: string[] = [];
+    for (const rel of ['claims/task-claims.json', 'claims/path-claims.json']) {
+      const file = join(runDir, rel);
+      if (!existsSync(file)) continue;
+      const state = readJsonState(file);
+      let dirty = false;
+      for (const c of ((state.doc as { claims?: Array<{ claim_id: string; task_id: string; status: string }> }).claims ?? [])) {
+        if (c.task_id === opts.taskId && ['active', 'submitted'].includes(c.status)) {
+          c.status = rel.includes('task-claims') ? 'completed' : 'released';
+          released.push(c.claim_id);
+          dirty = true;
+        }
+      }
+      if (dirty) writeJsonStateAtomic(file, state.doc as Record<string, unknown>, { expectedRev: state.rev });
+    }
+
+    appendEvent(runDir, {
+      event: 'task_done',
+      actor: { type: 'agent', id: opts.agentId },
+      run_id: opts.runId,
+      task_id: opts.taskId,
+      payload: { via: 'done_command', ...(opts.note ? { note: opts.note } : {}) },
+    });
+    return okEnvelope({
+      message: `${opts.taskId} done (was ${status}).`,
       data: { task_id: opts.taskId, released_claim_ids: released },
       startedAt,
     });

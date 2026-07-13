@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { setVerbose } from '@sigmarun/storage';
-import { initProject, doctorProject, importRun, publishTasks, runShow, readEvents, migrateState, backupList, restoreBackup, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, taskAdd, taskCancel, failEnvelope, type Envelope, type DoctorCheck, GATEWAY_VERSION } from '@sigmarun/core';
+import { initProject, doctorProject, importRun, publishTasks, runShow, readEvents, migrateState, backupList, restoreBackup, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, taskAdd, taskCancel, taskDone, failEnvelope, type Envelope, type DoctorCheck, GATEWAY_VERSION } from '@sigmarun/core';
 import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, verifySubmit, listWorktrees, pruneWorktrees } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, showGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
@@ -100,7 +100,8 @@ const HELP_TEXT = [
   'sigmarun — repo-local multi-agent collaboration gateway (.team/)',
   '',
   'Setup:      init | doctor [--fix] | adapter install --tool=claude-code|codex',
-  'Plan:       run import <payload.json> [--force] | task publish <RUN> [--tasks=..] [--force]',
+  'Lightweight: run import <payload.json> --lightweight  (tasks claimable now; no review/verify/integrate) -> claim-next -> done',
+  'Plan:       run import <payload.json> [--lightweight] [--force] | task publish <RUN> [--tasks=..] [--force]',
   'Runs:       run list | run show <RUN> | run pause|resume|cancel|archive <RUN> | status <RUN> | watch <RUN> [--interval=s]',
   'Observe:    events <RUN> [--task=T] [--type=<event>] [--since=<seq>] [--limit=n] — read the append-only ledger (timeline; --json for full payload)',
   'Tasks:      task add <RUN> --file=<task.json> | task cancel <RUN> <TASK> [--reason=..] | task show <RUN> <TASK> | graph show|validate <RUN>',
@@ -108,6 +109,7 @@ const HELP_TEXT = [
   '            heartbeat <RUN> <TASK> --agent=<A> | release <RUN> <TASK> --agent=<A> | reclaim <RUN> <TASK> | approve-paths <RUN> <TASK> --paths=g1,g2',
   'Worktrees:  worktree register <RUN> <TASK> --agent=<A> --path=<p> --branch=<b> | worktree adopt <RUN> <TASK> --agent=<A> | worktree list <RUN> | worktree prune <RUN> [--dry-run]',
   'Deliver:    submit <RUN> <TASK> --agent=<A> --evidence=<draft.json> | evidence show <RUN> <TASK>',
+  'Done (light): done <RUN> <TASK> --agent=<A> [--note=..] — complete a claimed task directly (lightweight runs)',
   'Gates:      review claim|approve|request-changes|block <RUN> <TASK> --agent=<A> [--review=<r.json>] | resume <RUN> <TASK> --agent=<A> | unblock <RUN> <TASK>',
   '            verify submit <RUN> --agent=<A> --verify=<v.json>   (draft: {target:{kind:task|run,..},checks:[{name,cmd,exit_code,output_file,status}],gates,skip_reasons,verdict,failures_mapped})',
   'Finish:     integrate start <RUN> | integrate record <RUN> <TASK> --merge-commit=<sha> | --failed --reason=".." | report <RUN> | export <RUN> --to=<dir> [--force]',
@@ -148,11 +150,11 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
   } else if (cmd === 'run' && args[1] === 'import') {
     const file = args[2];
     if (!file) {
-      env = failEnvelope('usage_error', 'Usage: sigmarun run import <payload.json> [--force] [--json]');
+      env = failEnvelope('usage_error', 'Usage: sigmarun run import <payload.json> [--lightweight] [--force] [--json]');
     } else {
       try {
         const payload = readJsonFileBom(file);
-        env = importRun({ cwd: opts.cwd, env: opts.env, payload, force });
+        env = importRun({ cwd: opts.cwd, env: opts.env, payload, force, lightweight: argv.includes('--lightweight') });
       } catch (e) {
         env = failEnvelope('schema_invalid', `Payload file is not valid JSON: ${String(e)}`);
       }
@@ -303,6 +305,13 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     env = !runId || !taskId
       ? failEnvelope('usage_error', 'Usage: sigmarun task cancel <RUN-ID> <TASK-ID> [--json]')
       : taskCancel({ cwd: opts.cwd, env: opts.env, runId, taskId });
+  } else if (cmd === 'done') {
+    const runId = args[1];
+    const taskId = args[2];
+    const agentId = flag(argv, 'agent');
+    env = !runId || !taskId || !agentId
+      ? failEnvelope('usage_error', 'Usage: sigmarun done <RUN-ID> <TASK-ID> --agent=<AGENT-ID> [--note=...] [--json]')
+      : taskDone({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, note: flag(argv, 'note') });
   } else if (cmd === 'worktree' && args[1] === 'list') {
     const runId = args[2];
     env = !runId

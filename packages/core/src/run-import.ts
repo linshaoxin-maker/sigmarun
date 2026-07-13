@@ -16,6 +16,8 @@ import { payloadHash, validatePayload, type PlanPayload } from './payload.js';
 export interface ImportOptions extends ResolveOptions {
   payload: unknown;
   force?: boolean;
+  /** lightweight run: tasks immediately claimable, no review/verify/integrate, `done` completes directly */
+  lightweight?: boolean;
 }
 
 const id4 = (prefix: string, n: number) => `${prefix}-${String(n).padStart(4, '0')}`;
@@ -81,6 +83,7 @@ export function importRun(opts: ImportOptions): Envelope {
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   let runDir = '';
+  const lightweight = Boolean(opts.lightweight);
   try {
     // Re-check dedup INSIDE the lock: two identical concurrent imports both passed the pre-lock
     // check, so without this they would each create a run (concurrency review Finding 3).
@@ -130,7 +133,7 @@ export function importRun(opts: ImportOptions): Envelope {
         client_task_key: t.client_task_key,
         title: t.title,
         type: t.type,
-        status: 'draft',
+        status: lightweight ? 'ready' : 'draft',
         objective: t.objective,
         context: t.context ?? [],
         acceptance: t.acceptance,
@@ -153,7 +156,7 @@ export function importRun(opts: ImportOptions): Envelope {
         task_id: keyToId.get(t.client_task_key)!,
         title: t.title,
         type: t.type,
-        status: 'draft',
+        status: lightweight ? 'ready' : 'draft',
         priority: t.priority ?? 50,
         weight: t.weight ?? 1,
         role: t.suggested_role ?? 'implementer',
@@ -187,7 +190,8 @@ export function importRun(opts: ImportOptions): Envelope {
       run_id: runId,
       title: payload.run.title,
       mode: payload.run.mode,
-      status: 'planned',
+      status: lightweight ? 'active' : 'planned',
+      lightweight,
       goal: payload.run.goal,
       created_at: now,
       created_by: { tool: payload.source.tool, agent_id: payload.source.agent_id ?? null },
@@ -197,8 +201,8 @@ export function importRun(opts: ImportOptions): Envelope {
       default_policy: {
         claim_ttl_minutes: 30,
         max_parallel_tasks: 4,
-        require_review: true,
-        require_verification: true,
+        require_review: !lightweight,
+        require_verification: !lightweight,
         path_conflict_policy: 'block',
         reclaim_policy: { auto_after_ttl_multiple: 3 },
         path_release_on_submit: 'hold',
@@ -234,18 +238,30 @@ export function importRun(opts: ImportOptions): Envelope {
     for (const t of payload.tasks) {
       appendEvent(runDir, { event: 'task_created', actor, run_id: runId, task_id: keyToId.get(t.client_task_key)!, payload: {} });
     }
+    if (lightweight) {
+      // tasks are born claimable and the run is active — mirror publish's events so the fold matches
+      for (const t of payload.tasks) {
+        appendEvent(runDir, { event: 'task_published', actor, run_id: runId, task_id: keyToId.get(t.client_task_key)!, payload: { via: 'lightweight_import' } });
+      }
+      appendEvent(runDir, { event: 'run_activated', actor, run_id: runId, payload: { via: 'lightweight_import', published_count: payload.tasks.length } });
+    }
 
     return okEnvelope({
       startedAt,
-      message: `Imported ${runId} with ${payload.tasks.length} task(s) in draft.`,
+      message: lightweight
+        ? `Imported ${runId} with ${payload.tasks.length} task(s), claimable now (lightweight).`
+        : `Imported ${runId} with ${payload.tasks.length} task(s) in draft.`,
       data: {
         run_id: runId,
-        status: 'draft',
+        status: lightweight ? 'active' : 'draft',
+        lightweight,
         task_count: payload.tasks.length,
         task_id_map: payload.tasks.map((t) => ({ client_task_key: t.client_task_key, task_id: keyToId.get(t.client_task_key)!, title: t.title })),
       },
       warnings: moreWarnings,
-      nextActions: [`Review .team/runs/${runId}/plan.md`, `Publish when ready (FEAT-003): sigmarun task publish ${runId}`],
+      nextActions: lightweight
+        ? [`Any tool claims a task: sigmarun claim-next ${runId} --agent=<name>`]
+        : [`Review .team/runs/${runId}/plan.md`, `Publish when ready: sigmarun task publish ${runId}`],
     });
   } catch (e) {
     if (runDir) rmSync(runDir, { recursive: true, force: true });

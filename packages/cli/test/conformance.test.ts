@@ -36,6 +36,7 @@ describe('conformance — one envelope per command, uniform failure classes (M38
       { argv: ['init'], exit: 0 },
       { argv: ['doctor'], exit: 0 },
       { argv: ['run', 'import', payloadFile], exit: 0 },
+      { argv: ['run', 'import', payloadFile, '--lightweight', '--force'], exit: 0 },
       { argv: ['task', 'publish', 'RUN-0001'], exit: 0 },
       { argv: ['run', 'show', 'RUN-0001'], exit: 0 },
       { argv: ['run', 'list'], exit: 0 },

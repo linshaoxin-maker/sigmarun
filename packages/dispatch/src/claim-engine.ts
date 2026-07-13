@@ -495,7 +495,8 @@ export function claimNext(opts: ClaimOptions): Envelope {
   try {
     // Guard #1: run state.
     const run = readJsonState(join(runDir, 'run.json'));
-    const rdoc = run.doc as { status: string; default_policy?: Partial<RunPolicy> };
+    const rdoc = run.doc as { status: string; lightweight?: boolean; default_policy?: Partial<RunPolicy> };
+    const lightweight = Boolean(rdoc.lightweight);
     if (rdoc.status === 'paused') {
       return failEnvelope('run_paused', `Run ${runId} is paused.`, { startedAt });
     }
@@ -515,12 +516,35 @@ export function claimNext(opts: ClaimOptions): Envelope {
       ...(rdoc.default_policy ?? {}),
     };
 
-    // Guard #2: agent registered and active.
+    // Guard #2: agent registered and active. Lightweight runs let any --agent id self-register on
+    // first claim — a tool coming to grab a task shouldn't need a separate register step.
     const agentFile = join(runDir, 'agents', `${opts.agentId}.json`);
     if (!existsSync(agentFile)) {
-      return failEnvelope('agent_not_registered', `Agent ${opts.agentId} is not registered on ${runId}.`, {
-        nextActions: [`Register first: sigmarun agent register ${runId} --tool=<tool> --label=<window>`],
-        startedAt,
+      if (!lightweight) {
+        return failEnvelope('agent_not_registered', `Agent ${opts.agentId} is not registered on ${runId}.`, {
+          nextActions: [`Register first: sigmarun agent register ${runId} --tool=<tool> --label=<window>`],
+          startedAt,
+        });
+      }
+      const nowReg = new Date().toISOString();
+      mkdirSync(join(runDir, 'agents'), { recursive: true });
+      writeJsonStateNew(agentFile, {
+        schema_version: 'team.agent.v1',
+        agent_id: opts.agentId,
+        tool: 'unknown',
+        role: opts.role ?? 'implementer',
+        label: opts.agentId,
+        status: 'active',
+        registered_at: nowReg,
+        last_heartbeat_at: nowReg,
+        capabilities: [],
+        current_task_id: null,
+      });
+      appendEvent(runDir, {
+        event: 'agent_registered',
+        actor: { type: 'agent', id: opts.agentId },
+        run_id: runId,
+        payload: { tool: 'unknown', self_registered: true },
       });
     }
     const agentState = readJsonState(agentFile);
@@ -744,10 +768,15 @@ export function claimNext(opts: ClaimOptions): Envelope {
           },
           swept: swept.reclaimed,
         },
-        nextActions: [
-          `Read the brief: .team/runs/${runId}/tasks/${row.task_id}/task.md`,
-          `Send heartbeats: sigmarun heartbeat ${runId} ${row.task_id} --agent=${opts.agentId}`,
-        ],
+        nextActions: lightweight
+          ? [
+              `Read the brief: .team/runs/${runId}/tasks/${row.task_id}/task.md`,
+              `Do the work, then mark it done: sigmarun done ${runId} ${row.task_id} --agent=${opts.agentId}`,
+            ]
+          : [
+              `Read the brief: .team/runs/${runId}/tasks/${row.task_id}/task.md`,
+              `Send heartbeats: sigmarun heartbeat ${runId} ${row.task_id} --agent=${opts.agentId}`,
+            ],
         startedAt,
       });
     }

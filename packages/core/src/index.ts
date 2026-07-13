@@ -29,5 +29,5 @@ export { exportRun } from './export.js';
 export type { ExportOptions } from './export.js';
 export { runPause, runResume, runCancel, runArchive } from './run-ops.js';
 export type { RunOpOptions } from './run-ops.js';
-export { taskAdd, taskCancel } from './task-ops.js';
+export { taskAdd, taskCancel, taskDone } from './task-ops.js';
 export type { TaskAddOptions, TaskCancelOptions } from './task-ops.js';
