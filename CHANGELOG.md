@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 可观性 Phase 1 收官：全局 `--verbose` 步骤级追踪。事务失败时此前只剩最终信封,看不到 gateway 取了哪些锁、写了哪些文件、append 了哪些事件。`--verbose` 在变更 choke point（锁、原子写、事件 append）埋点,把轨迹写 **stderr**（绝不碰 stdout 信封——`--json` 单行契约不受影响）：`[sigmarun:lock] acquired …` / `[sigmarun:write] <path> rev N→N+1` / `[sigmarun:event] <name> seq N`。写序纪律（详情→索引→claims→派生→events 最后→释放锁）在轨迹里可见。低侵入:一处共享 `vlog` + 三个 choke point,全 gateway 获得追踪。测试 251/251（+2）。**Phase 1 四项全交付**（events / doctor --fix / worktree prune / --verbose）。
+
 - 故障降级 Phase 1（收尾）：`worktree prune <RUN> [--dry-run]`。外部删除的 worktree（`git worktree remove` / `rm -rf` / 清空 scratch）会在注册表留下指向已不存在路径的活条目——`worktree list` 能看见却清不掉。prune 把这些死条目标记 `pruned`（`worktree list`/AUD-029 不再当活的算）+ 发 `worktree_pruned` 事件,并指出 worktree 消失后仍卡在 `working` 的任务(提示重建 worktree 或 reclaim);`--dry-run` 只报不改。测试 249/249（+3）。
 
 - 故障降级 Phase 1：`doctor --fix` 引导式自愈。`doctor` 此前只诊断不治疗——用户看到 fail 得自己知道对应命令。现 `--fix` 对可安全自动修复的失败一键治愈并重检：未初始化→`init`、`.gitignore` 缺 `.team/`→追加(D4)、`.team` 被 git 跟踪→`git rm -r --cached`(文件留盘,AUD-030)、locks 目录缺失→创建；不可安全自动修的(node 版本、schema 损坏、memory 被 ignore)保持 fail 并给人工指引,绝不谎报已修。信封 `data.fixed` 列出实修项。测试 246/246（+4）。

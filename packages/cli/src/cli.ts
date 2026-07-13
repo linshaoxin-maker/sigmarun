@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { setVerbose } from '@sigmarun/storage';
 import { initProject, doctorProject, importRun, publishTasks, runShow, readEvents, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, taskAdd, taskCancel, failEnvelope, type Envelope, type DoctorCheck, GATEWAY_VERSION } from '@sigmarun/core';
 import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, verifySubmit, listWorktrees, pruneWorktrees } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, showGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
@@ -113,7 +114,7 @@ const HELP_TEXT = [
   '            context hydrate <RUN> <TASK> --agent=<A> | memory update <RUN> --file=<md> | memory candidates <RUN> | memory promote <RUN> --entry=".." --section=<S> --from=<refs>',
   'Health:     audit run <RUN> | repair <RUN>',
   '',
-  'Every command accepts --json (single-envelope machine face, team.envelope.v1). Exit codes: docs/17 §2.2.',
+  'Every command accepts --json (single-envelope machine face) and --verbose (step trace to stderr). Exit codes: docs/17 §2.2.',
 ].join('\n');
 
 export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string, string | undefined> } = {}): CliResult {
@@ -123,6 +124,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
   if (argv.includes('--version') || argv.includes('-v') || argv[0] === 'version') {
     return { exitCode: 0, stdout: GATEWAY_VERSION };
   }
+  setVerbose(argv.includes('--verbose'));
   const json = argv.includes('--json');
   const force = argv.includes('--force');
   const args = argv.filter((a) => !a.startsWith('--'));

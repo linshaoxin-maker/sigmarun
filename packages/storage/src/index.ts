@@ -3,12 +3,14 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSyn
 import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path';
 
 export { GatewayError } from './errors.js';
+export { setVerbose, isVerbose, vlog, shortPath } from './log.js';
 export type { ReasonCode } from './errors.js';
 export { acquireLock, tryAcquireLock, runLockPath } from './lock.js';
 export type { LockOptions } from './lock.js';
 export { scanForSecrets, redactText, SECRET_PATTERNS } from './redaction.js';
 export type { SecretHit } from './redaction.js';
 import { GatewayError } from './errors.js';
+import { vlog, shortPath as _shortPath } from './log.js';
 
 export interface TeamRootResolution {
   repoRoot: string;
@@ -188,6 +190,7 @@ export function writeJsonStateAtomic(
     writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
     renameSync(tmp, file);
     stateGeneration++;
+    vlog('write', `${_shortPath(file)} rev ${opts.expectedRev} -> ${opts.expectedRev + 1}`);
   } catch (e) {
     throw new GatewayError('io_error', `Atomic write failed for: ${file}`, { cause: String(e) });
   }
@@ -202,6 +205,7 @@ export function writeJsonStateNew(file: string, doc: Record<string, unknown>): v
   writeFileSync(tmp, JSON.stringify({ ...doc, rev: 1 }, null, 2) + '\n');
   renameSync(tmp, file);
   stateGeneration++;
+  vlog('write', `${_shortPath(file)} created rev 1`);
 }
 
 /** mkdir-based lock capability probe used by doctor (docs/17 §8). */

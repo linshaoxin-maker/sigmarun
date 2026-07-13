@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { GatewayError } from './errors.js';
+import { vlog, shortPath } from './log.js';
 
 export interface LockOptions {
   timeoutMs?: number;
@@ -65,7 +66,8 @@ export function acquireLock(lockDir: string, opts: LockOptions = {}): () => void
         token,
         acquired_at: new Date().toISOString(),
       }));
-      return () => releaseIfMine(lockDir, token);
+      vlog('lock', `acquired ${shortPath(lockDir)}`);
+      return () => { vlog('lock', `released ${shortPath(lockDir)}`); releaseIfMine(lockDir, token); };
     } catch {
       let stale = false;
       try {
@@ -75,6 +77,7 @@ export function acquireLock(lockDir: string, opts: LockOptions = {}): () => void
         // Exclusive takeover: rename is atomic, so only ONE contender wins it — the losers
         // get ENOENT and fall back to the mkdir attempt. (The tokenless version had every
         // contender rmSync+mkdir, so two could both "win".)
+        vlog('lock', `stale takeover of ${shortPath(lockDir)}`);
         const dead = `${lockDir}.dead-${token}`;
         try {
           renameSync(lockDir, dead);
@@ -83,6 +86,7 @@ export function acquireLock(lockDir: string, opts: LockOptions = {}): () => void
         continue;
       }
       if (Date.now() - start >= timeoutMs) {
+        vlog('lock', `timeout on ${shortPath(lockDir)} after ${timeoutMs}ms`);
         throw new GatewayError('lock_timeout', `Could not acquire lock within ${timeoutMs}ms: ${lockDir}`);
       }
       sleepSync(Math.min(wait, 1000));

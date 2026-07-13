@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { currentStateGeneration } from '@sigmarun/storage';
+import { currentStateGeneration, vlog } from '@sigmarun/storage';
 
 export interface EventActor {
   type: 'agent' | 'user' | 'policy' | 'sweep';
@@ -92,6 +92,7 @@ export function appendEvent(runDir: string, evt: EventInput): number {
   };
   appendFileSync(join(runDir, 'events.jsonl'), JSON.stringify(line) + '\n');
   writeFileSync(metaFile, JSON.stringify({ next_seq: seq + 1 }));
+  vlog('event', `${evt.event} seq ${seq}${evt.task_id ? ` (${evt.task_id})` : ''}`);
   return seq;
 }
 

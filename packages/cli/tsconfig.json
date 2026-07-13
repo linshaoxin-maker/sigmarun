@@ -4,6 +4,30 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "include": ["src"],
-  "references": [{ "path": "../core" }, { "path": "../dispatch" }, { "path": "../context" }, { "path": "../adapters" }, { "path": "../watch" }, { "path": "../audit" }]
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../dispatch"
+    },
+    {
+      "path": "../context"
+    },
+    {
+      "path": "../adapters"
+    },
+    {
+      "path": "../watch"
+    },
+    {
+      "path": "../audit"
+    },
+    {
+      "path": "../storage"
+    }
+  ]
 }
