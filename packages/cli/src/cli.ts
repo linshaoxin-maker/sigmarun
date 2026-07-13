@@ -97,7 +97,7 @@ function render(env: Envelope, json: boolean): string {
 const HELP_TEXT = [
   'sigmarun — repo-local multi-agent collaboration gateway (.team/)',
   '',
-  'Setup:      init | doctor | adapter install --tool=claude-code|codex',
+  'Setup:      init | doctor [--fix] | adapter install --tool=claude-code|codex',
   'Plan:       run import <payload.json> [--force] | task publish <RUN> [--tasks=..] [--force]',
   'Runs:       run list | run show <RUN> | run pause|resume|cancel|archive <RUN> | status <RUN> | watch <RUN> [--interval=s]',
   'Observe:    events <RUN> [--task=T] [--type=<event>] [--since=<seq>] [--limit=n] — read the append-only ledger (timeline; --json for full payload)',
@@ -131,7 +131,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
   if (cmd === 'init') {
     env = initProject({ cwd: opts.cwd, env: opts.env });
   } else if (cmd === 'doctor') {
-    env = doctorProject({ cwd: opts.cwd, env: opts.env });
+    env = doctorProject({ cwd: opts.cwd, env: opts.env, fix: argv.includes('--fix') });
   } else if (cmd === 'task' && args[1] === 'publish') {
     const runId = args[2];
     if (!runId) {

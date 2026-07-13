@@ -4,6 +4,7 @@ export { okEnvelope, failEnvelope, GATEWAY_VERSION, ENVELOPE_VERSION } from './e
 export type { Envelope, EnvelopeMeta, EnvelopeWarning } from './envelope.js';
 export { ProjectSchema, CountersSchema, parseSchemaId, SUPPORTED_MAJOR } from './schemas.js';
 export { initProject, doctorProject } from './lifecycle.js';
+export type { DoctorOptions } from './lifecycle.js';
 export type { DoctorCheck } from './lifecycle.js';
 export { acquireLock, scanForSecrets } from '@sigmarun/storage';
 export { appendEvent, collectStateRevs, readEventsSafe } from './events.js';

@@ -102,14 +102,10 @@ export function initProject(opts: ResolveOptions = {}): Envelope {
  * @contract docs/17 §8 doctor · docs/16 §1.4/§2.2 tracked-.team detection (AUD-030) · docs/21 §4.1 version handshake
  * @bdd BDD-001 background · ERR-006 journey
  */
-export function doctorProject(opts: ResolveOptions = {}): Envelope {
-  const startedAt = Date.now();
-  let root;
-  try {
-    root = resolveTeamRoot(opts);
-  } catch (e) {
-    return toFailEnvelope(e, startedAt);
-  }
+type Resolved = ReturnType<typeof resolveTeamRoot>;
+
+/** Run the doctor checks against a resolved team root (pure read). */
+function buildChecks(root: Resolved): DoctorCheck[] {
   const checks: DoctorCheck[] = [];
   const add = (name: string, status: DoctorCheck['status'], detail: string) => checks.push({ name, status, detail });
 
@@ -193,11 +189,77 @@ export function doctorProject(opts: ResolveOptions = {}): Envelope {
     }
   }
 
+  return checks;
+}
+
+/** Safe auto-fixes for the fixable doctor failures. Returns a description if it acted, else null. */
+function tryFixCheck(name: string, root: Resolved, opts: ResolveOptions): string | null {
+  try {
+    switch (name) {
+      case 'team_initialized':
+        initProject(opts);
+        return 'ran init (created .team scaffolding + .gitignore entry)';
+      case 'gitignore_team_entry': {
+        const gi = join(root.repoRoot, '.gitignore');
+        const content = existsSync(gi) ? readFileSync(gi, 'utf8') : '';
+        appendFileSync(gi, `${content.endsWith('\n') || content === '' ? '' : '\n'}.team/\n`);
+        return 'added .team/ to .gitignore (D4)';
+      }
+      case 'tracked_team_dir':
+        execSync('git rm -r --cached .team', { cwd: root.repoRoot, stdio: 'ignore' });
+        return 'untracked .team/ from git (files kept on disk; AUD-030)';
+      case 'lock_capability': {
+        const locksDir = join(root.teamRoot, 'locks');
+        if (!existsSync(locksDir)) {
+          mkdirSync(locksDir, { recursive: true });
+          return 'created the missing .team/locks directory';
+        }
+        return null; // present but unprobeable -> a permission issue, not auto-fixable
+      }
+      default:
+        return null; // node_version, schema corruption, memory-committable: not safely auto-fixable
+    }
+  } catch {
+    return null; // the fix itself failed (permissions, git state) — report the check as still-failed
+  }
+}
+
+export interface DoctorOptions extends ResolveOptions {
+  /** apply safe auto-fixes for fixable failures, then re-check (roadmap Phase 1). */
+  fix?: boolean;
+}
+
+export function doctorProject(opts: DoctorOptions = {}): Envelope {
+  const startedAt = Date.now();
+  let root: Resolved;
+  try {
+    root = resolveTeamRoot(opts);
+  } catch (e) {
+    return toFailEnvelope(e, startedAt);
+  }
+
+  let checks = buildChecks(root);
+  const fixed: string[] = [];
+  if (opts.fix) {
+    for (const c of checks.filter((c) => c.status === 'fail')) {
+      const applied = tryFixCheck(c.name, root, { cwd: opts.cwd, env: opts.env });
+      if (applied) fixed.push(applied);
+    }
+    if (fixed.length > 0) {
+      root = resolveTeamRoot(opts); // init may have created the team root
+      checks = buildChecks(root);
+    }
+  }
+
   const failed = checks.filter((c) => c.status === 'fail');
+  const fixedNote = fixed.length > 0 ? ` Auto-fixed ${fixed.length}: ${fixed.join('; ')}.` : '';
   return okEnvelope({
     startedAt,
-    message: failed.length === 0 ? `Doctor: all ${checks.length} checks passed.` : `Doctor: ${failed.length} of ${checks.length} checks failed.`,
-    data: { checks },
+    message:
+      failed.length === 0
+        ? `Doctor: all ${checks.length} checks passed.${fixedNote}`
+        : `Doctor: ${failed.length} of ${checks.length} checks ${opts.fix ? 'still fail after auto-fix' : 'failed'}.${fixedNote}`,
+    data: { checks, ...(opts.fix ? { fixed } : {}) },
     warnings: failed.map((c) => ({ code: `doctor_${c.name}_failed`, message: c.detail })),
     nextActions: failed.length === 0 ? [] : failed.map((c) => c.detail),
   });

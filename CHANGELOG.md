@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 故障降级 Phase 1：`doctor --fix` 引导式自愈。`doctor` 此前只诊断不治疗——用户看到 fail 得自己知道对应命令。现 `--fix` 对可安全自动修复的失败一键治愈并重检：未初始化→`init`、`.gitignore` 缺 `.team/`→追加(D4)、`.team` 被 git 跟踪→`git rm -r --cached`(文件留盘,AUD-030)、locks 目录缺失→创建；不可安全自动修的(node 版本、schema 损坏、memory 被 ignore)保持 fail 并给人工指引,绝不谎报已修。信封 `data.fixed` 列出实修项。测试 246/246（+4）。
+
 - 可观性 Phase 1 首项：`sigmarun events <RUN>` 账本读取命令。`events.jsonl`（append-only、每事务的事实源）此前无一等读取器，排障只能 `cat` 原始 JSONL——现有对齐的时间线（seq · 时间 · 事件 · actor · 任务/claim），支持 `--task` / `--type` / `--since=<seq>`（增量 tail）/ `--limit`（默认 50，0=全部）过滤，`--json` 带完整 payload。复用 `readEventsSafe`：torn 尾行不崩、降级为 `ledger_torn_tail` warning + `corrupt_lines`（账本健康本身即信号）。只读、无锁、无事件。测试 242/242（+4 单元 +2 conformance）。
 
 - backlog 清库（审查遗留低危项全修，各带回归锁，238/238）：①importRun 查重 TOCTOU——锁内复查 findDuplicateRun（并发同 payload 不再双建 run，Finding 3）；②sweepReviewClaims 崩溃窗——sweep 现也释放"孤儿"活 claim（task 已不在 reviewing 的 review claim / 不在 approved 的 verify claim），崩溃留下的 submitted+active 组合立即自愈而非等满 TTL（Finding 4）；③payload/task/review 文件读容忍 UTF-8 BOM（编辑器加的 BOM 不再报"非法 JSON"）；④adapter install 对无 template_version 标记的手改文件不再静默覆盖——跳过并 `unmanaged_template` 警告（保住本地编辑，--update 强制）；⑤memory promote 的文件 ref 限定 repo/run 内（`../../etc/passwd` 既污染出处又是存在性 oracle，现拒收）。
