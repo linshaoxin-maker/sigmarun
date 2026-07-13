@@ -47,6 +47,7 @@ sigmarun submit RUN-0001 TASK-0001 --agent=<AGENT-ID> --evidence=evidence.json
 # From anywhere:
 sigmarun status RUN-0001         # weight-based progress, risks, "needs you"
 sigmarun audit run RUN-0001      # 40-rule consistency audit, findings are data
+sigmarun events RUN-0001         # read the append-only ledger as a timeline
 sigmarun --help                  # the full command map
 ```
 

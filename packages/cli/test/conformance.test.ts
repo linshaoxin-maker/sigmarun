@@ -44,6 +44,8 @@ describe('conformance — one envelope per command, uniform failure classes (M38
       // BR-001 guard family is conflict-class (17 S2.2 row 6): one live claim per agent by default
       { argv: ['claim-next', 'RUN-0001', '--agent=AGENT-codex-001'], exit: 6 },
       { argv: ['status', 'RUN-0001'], exit: 0 },
+      { argv: ['events', 'RUN-0001'], exit: 0 },
+      { argv: ['events', 'RUN-0001', '--type=task_published', '--limit=5'], exit: 0 },
       { argv: ['task', 'show', 'RUN-0001', 'TASK-0001'], exit: 0 },
       { argv: ['evidence', 'show', 'RUN-0001', 'TASK-0001'], exit: 0 },
       { argv: ['msg', 'post', 'RUN-0001', '--from=AGENT-codex-001', '--type=note', '--body=hi'], exit: 0 },

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { initProject, doctorProject, importRun, publishTasks, runShow, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, taskAdd, taskCancel, failEnvelope, type Envelope, type DoctorCheck, GATEWAY_VERSION } from '@sigmarun/core';
+import { initProject, doctorProject, importRun, publishTasks, runShow, readEvents, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, taskAdd, taskCancel, failEnvelope, type Envelope, type DoctorCheck, GATEWAY_VERSION } from '@sigmarun/core';
 import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, verifySubmit, listWorktrees } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, showGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
@@ -61,11 +61,30 @@ export interface CliResult {
   stdout: string;
 }
 
+interface TimelineEvent { seq: number; ts: string | null; event: string; actor: { id: string }; task_id: string | null; claim_id: string | null; }
+
+/** Compact ledger timeline for human mode; --json carries the full events (incl. payload). */
+function renderTimeline(events: TimelineEvent[]): string[] {
+  const hhmmss = (ts: string | null): string => (ts && /\dT(\d\d:\d\d:\d\d)/.exec(ts)?.[1]) || '--:--:--';
+  const seqW = Math.max(3, ...events.map((e) => String(e.seq).length));
+  const evW = Math.min(22, Math.max(5, ...events.map((e) => e.event.length)));
+  const out: string[] = [];
+  for (const e of events) {
+    const targetCol = [e.task_id, e.claim_id].filter(Boolean).join(' ');
+    out.push(
+      `  ${String(e.seq).padStart(seqW)}  ${hhmmss(e.ts)}  ${e.event.padEnd(evW)}  ${(e.actor?.id ?? '').padEnd(20)}  ${targetCol}`.trimEnd(),
+    );
+  }
+  return out;
+}
+
 function render(env: Envelope, json: boolean): string {
   if (json) return JSON.stringify(env);
   const lines = [env.message];
   const checks = (env.data as { checks?: DoctorCheck[] } | undefined)?.checks;
   if (checks) for (const c of checks) lines.push(`  [${c.status}] ${c.name} — ${c.detail}`);
+  const events = (env.data as { events?: TimelineEvent[] } | undefined)?.events;
+  if (events && Array.isArray(events)) lines.push(...renderTimeline(events));
   for (const w of env.warnings) lines.push(`  warning: ${w.message}`);
   for (const a of env.next_actions) lines.push(`  next: ${a}`);
   return lines.join('\n');
@@ -81,6 +100,7 @@ const HELP_TEXT = [
   'Setup:      init | doctor | adapter install --tool=claude-code|codex',
   'Plan:       run import <payload.json> [--force] | task publish <RUN> [--tasks=..] [--force]',
   'Runs:       run list | run show <RUN> | run pause|resume|cancel|archive <RUN> | status <RUN> | watch <RUN> [--interval=s]',
+  'Observe:    events <RUN> [--task=T] [--type=<event>] [--since=<seq>] [--limit=n] — read the append-only ledger (timeline; --json for full payload)',
   'Tasks:      task add <RUN> --file=<task.json> | task cancel <RUN> <TASK> [--reason=..] | task show <RUN> <TASK> | graph show|validate <RUN>',
   'Dispatch:   agent register <RUN> --tool=<t> [--role=r] [--label=w] | claim-next <RUN> --agent=<A> [--role=r] [--task=T] [--dry-run]',
   '            heartbeat <RUN> <TASK> --agent=<A> | release <RUN> <TASK> --agent=<A> | reclaim <RUN> <TASK> | approve-paths <RUN> <TASK> --paths=g1,g2',
@@ -181,6 +201,25 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     env = !runId
       ? failEnvelope('usage_error', 'Usage: sigmarun status <RUN-ID> [--json]')
       : statusRun({ cwd: opts.cwd, env: opts.env, runId });
+  } else if (cmd === 'events') {
+    const runId = args[1];
+    if (!runId) {
+      env = failEnvelope('usage_error', 'Usage: sigmarun events <RUN-ID> [--task=<TASK-ID>] [--type=<event>] [--since=<seq>] [--limit=<n>] [--json]');
+    } else {
+      const sinceRaw = flag(argv, 'since');
+      const limitRaw = flag(argv, 'limit');
+      const since = sinceRaw !== undefined ? Number(sinceRaw) : undefined;
+      const limit = limitRaw !== undefined ? Number(limitRaw) : undefined;
+      if ((sinceRaw !== undefined && !Number.isFinite(since)) || (limitRaw !== undefined && !Number.isFinite(limit))) {
+        env = failEnvelope('usage_error', '--since and --limit must be numbers (--limit=0 shows all).');
+      } else {
+        env = readEvents({
+          cwd: opts.cwd, env: opts.env, runId,
+          task: flag(argv, 'task'), type: flag(argv, 'type'),
+          since, limit,
+        });
+      }
+    }
   } else if (cmd === 'run' && args[1] === 'list') {
     env = runList({ cwd: opts.cwd, env: opts.env });
   } else if (cmd === 'task' && args[1] === 'show') {
