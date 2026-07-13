@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 发布纪律 Phase 2：release 自动化 + npm provenance。`npm run release:prepare -- <patch|minor|major> [--dry-run]` 一条命令把版本在三处（root package.json / 全部 workspace 包 / `GATEWAY_VERSION`）同步 bump 并把 CHANGELOG 的 Unreleased 切成带日期的版本段(不 commit/tag/publish,打印后续命令)；`.github/workflows/release.yml` 在推 `vX.Y.Z` tag 时构建+测试+装配+**带 provenance 发布**到 npm(先 `next` dist-tag,验证后 `npm dist-tag add ... latest`;需 `NPM_TOKEN` secret;tag 与 package 版本不符即失败)。发布流程入 CONTRIBUTING.md。脚本 dry-run 预览 + 真跑同步三处已验证(未真实 bump,仍 0.1.0)。测试 261/261。
+
 - 故障降级 Phase 2：backup 轮转 + `restore`,补上恢复闭环。repair/migrate 此前各写各的备份、只堆积、无回滚。现统一到一个备份仓（`.team/backups/<kind>-<stamp>/`,镜像 team-root 相对路径 + `backup.json` manifest,保留最近 20 个自动轮转,repair 与 migrate 都改用）+ 两个命令：`backup list`（列出恢复点:kind/时间/文件数/字节,newest first）、`restore <backup-id> [--dry-run]`（把备份文件覆盖回当前态回滚一次 repair/migrate）。**restore 本身可逆**：覆盖前先把当前态快照进一个 `restore-*` 备份,永远能再走回去。真机验证:repair 写备份→backup list→restore dry-run 全链通。测试 261/261（+8）。
 
 - 发布纪律 Phase 2：schema 演进政策落地 + `sigmarun migrate` 命令（产品负责人裁决：**自动读时迁移**）。版本握手此前承诺前向兼容却无迁移路径——现建**迁移注册表**（`registerMigration(object, fromMajor, fn)`）：老 major 在 `readJsonState` 读时于**内存**升级(不在读路径写盘,lock-free audit 安全),盘上文件下次写时收敛;更新版 major 仍 `unsupported_schema_version` 拒读(不降级)。`sigmarun migrate [<RUN>] [--dry-run]` 显式把盘上老 major 重写为当前(先备份,rev 保留);今天全 v1⇒no-op,但机件已就绪、有测试,v2 schema 一落地即生效。政策文档入 CONTRIBUTING.md：新增字段=minor 不变版、破坏性变更 bump major 且必须同带迁移、CLI semver 与 schema major 独立。测试 256/256（+5）。

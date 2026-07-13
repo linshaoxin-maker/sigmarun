@@ -1,0 +1,47 @@
+name: release
+
+# Publishes to npm when a version tag is pushed. Prepare the tag with
+# `node scripts/release-prepare.mjs <bump>` (bumps versions + cuts the CHANGELOG),
+# commit, then `git tag vX.Y.Z && git push --follow-tags`.
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for npm provenance (--provenance)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Guard — tag must match package.json version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag v$TAG does not match package.json version $PKG"
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm run build
+      - run: npx vitest run
+
+      - name: Assemble the publishable package
+        run: npm run release
+
+      # Pre-1.0 discipline (docs/22 §4.1): publish to the `next` dist-tag; promote to `latest`
+      # with `npm dist-tag add sigmarun@X.Y.Z latest` after verifying the published tarball.
+      - name: Publish to npm with provenance
+        run: npm publish --access public --tag next --provenance
+        working-directory: release
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

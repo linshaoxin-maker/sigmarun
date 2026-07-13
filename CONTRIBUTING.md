@@ -80,6 +80,31 @@ CLI semver tracks the code surface (commands, flags, envelope fields); the
 - Describe what changed and why; link the relevant `docs/` section or an issue.
 - Commit messages: imperative summary line; explain the "why" in the body.
 
+## Releasing
+
+The version lives in three synchronized spots — the root `package.json`, every
+`packages/*/package.json`, and `GATEWAY_VERSION` in
+`packages/core/src/envelope.ts`. `release:prepare` keeps them in lockstep and
+cuts the changelog:
+
+```bash
+npm run release:prepare -- minor --dry-run   # preview the bump + changelog cut
+npm run release:prepare -- minor             # apply it
+npm install                                  # refresh the lockfile
+npm run build && npx vitest run              # confirm green
+git commit -am "release: vX.Y.Z" && git tag vX.Y.Z
+git push --follow-tags
+```
+
+Pushing the `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which builds,
+tests, assembles the single publishable package (`npm run release`), and
+publishes to npm **with provenance** on the `next` dist-tag. It requires an
+`NPM_TOKEN` repository secret. After verifying the published tarball, promote it:
+`npm dist-tag add sigmarun@X.Y.Z latest` (pre-1.0 ships `next`-first, docs/22 §4.1).
+
+Publishing manually instead of via CI: `npm run release`, then
+`cd release && npm publish --access public --tag next --provenance` (needs `npm login`).
+
 ## Reporting bugs / requesting features
 
 Open an issue using the templates under `.github/ISSUE_TEMPLATE/`. For anything
