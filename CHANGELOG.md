@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 轻量模式文案清理:`run import --lightweight` 不再报"no required_checks; verification will be unclear"(轻量无验证,该警告是噪音),成功信息改为"claimable now (lightweight)"并直接提示 `claim-next`(不再指向不存在的 publish 步骤)。
+
 - **轻量模式**(用户反馈:核心用例被完整质量流水线埋住了)。`sigmarun run import <plan> --lightweight` 造一个轻量 run——任务立即可领(免 publish)、评审/验证/集成/worktree/证据全部默认关。极简闭环就 5 条命令:`init` → `run import --lightweight` → `claim-next --agent=<随便起名>`(首次即自动注册,不用 `agent register`)→ `done <RUN> <TASK> --agent=<id>`(claimed/working → done 直连,信任领取者,免证据)→ `status`。`done` 仅在轻量 run 生效(完整 run 仍走 report/accept),且只有 claim 持有者能标 done(反撞车延伸到完成)。质量流水线原样保留,想要时不加 `--lightweight` 即完整模式。真机验证:两个工具(codex-1/claude-2)各领一块、各自 done、进度 100%,无一句多余仪式。测试 266/266（+5）。
 
 - 发布纪律 Phase 2：release 自动化 + npm provenance。`npm run release:prepare -- <patch|minor|major> [--dry-run]` 一条命令把版本在三处（root package.json / 全部 workspace 包 / `GATEWAY_VERSION`）同步 bump 并把 CHANGELOG 的 Unreleased 切成带日期的版本段(不 commit/tag/publish,打印后续命令)；`.github/workflows/release.yml` 在推 `vX.Y.Z` tag 时构建+测试+装配+**带 provenance 发布**到 npm(先 `next` dist-tag,验证后 `npm dist-tag add ... latest`;需 `NPM_TOKEN` secret;tag 与 package 版本不符即失败)。发布流程入 CONTRIBUTING.md。脚本 dry-run 预览 + 真跑同步三处已验证(未真实 bump,仍 0.1.0)。测试 261/261。

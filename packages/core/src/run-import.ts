@@ -108,7 +108,9 @@ export function importRun(opts: ImportOptions): Envelope {
 
     const project = readJsonState(join(root.teamRoot, 'project.json')).doc as Record<string, any>;
     const publication = payload.publication ?? {};
-    const moreWarnings: EnvelopeWarning[] = [...warnings];
+    // Lightweight runs have no verification, so "no required_checks; verification will be unclear"
+    // is noise — drop it. Path warnings still matter (claims use paths).
+    const moreWarnings: EnvelopeWarning[] = (lightweight ? warnings.filter((w) => w.code !== 'task_without_checks') : warnings).slice();
     if (publication.initial_status === 'ready') {
       moreWarnings.push({ code: 'publication_downgraded', message: 'initial_status "ready" downgraded to "draft"; publishing is an explicit user action: sigmarun task publish <RUN-ID>.' });
     }
