@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.2.1';
+export const TEMPLATE_VERSION = '0.3.0';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -103,47 +103,74 @@ const DISPATCH_FLOW = (tool: string) => `Required flow:
 const versionHeader = `<!-- template_version: ${TEMPLATE_VERSION} (managed by sigmarun adapter install; do not hand-edit) -->`;
 
 const TEAM_PLAN = `---
-description: Break down a goal into a Team Run and import it into .team
+description: Break a goal into independent pieces any tool can pick up (lightweight)
 allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
-argument-hint: <goal> [--mode feature|debug|review] [--publish]
+argument-hint: <goal>
 ---
 ${versionHeader}
 
 # Team Plan
 
-You are the planning agent. \`$ARGUMENTS\` contains the user's goal and flags.
+\`$ARGUMENTS\` is the user's goal. Break it into independent pieces so this
+window and other AI windows can each grab one and work in parallel.
 
-${RULES_BLOCK}
+RULES: every \`sigmarun\` call uses \`--json\`; branch only on \`ok\` /
+\`code\` / \`next_actions\`. Never edit files under \`.team/\` by hand.
 
-Required flow:
-1. Run \`sigmarun doctor --json\`; abort with its \`next_actions\` if not ok.
-2. Read the repository (structure, conventions, tests) and understand
-   the goal. If \`docs/team/MEMORY.md\` (project memory) exists, read it
-   FIRST — prior decisions constrain your plan and belong in task
-   context. Choose mode: feature / debug / review (see MODE NOTES).
-3. Produce a plan payload per \`team.plan_payload.v1\`
-   (docs/09 schema): tasks with objective, acceptance (>=1, testable),
-   paths.allow, required_checks, depends_on via client_task_key.
-   Do NOT invent run_id / task_id / status / owner fields.
-4. Write the payload to a temp file, run
-   \`sigmarun run import <file> --json\`.
-5. If \`ok=false\`, fix the payload per \`data\` errors and retry once;
-   otherwise report errors verbatim.
-6. Report to the user (in the user's language): RUN-ID, task table
-   (TASK-ID, title, deps), warnings, and next commands:
-   \`/team-publish RUN-ID\`, then \`/team-dispatch RUN-ID\`.
-7. Do NOT publish unless \`--publish\` was given. Do NOT claim or
-   implement anything.
+Flow:
+1. \`sigmarun doctor --json\`; if not ok, report its \`next_actions\` and stop.
+2. Read enough of the repo to split the goal into 2–6 INDEPENDENT tasks
+   (pieces with no ordering dependency, so different tools can do them at
+   once). Each task needs: a title, a one-line objective, at least one
+   testable acceptance line, and \`paths.allow\` (the files it may touch).
+3. Write a \`team.plan_payload.v1\` JSON to a temp file — do NOT invent
+   run_id / task_id / status. Minimal shape:
+   \`{ "schema_version":"team.plan_payload.v1",
+       "source":{"tool":"claude-code","command":"/team-plan","prompt":"<goal>","agent_id":"planner"},
+       "run":{"title":"<short>","mode":"feature","goal":"<goal>"},
+       "plan":{"summary":"<one line>"},
+       "tasks":[{"client_task_key":"<key>","title":"<title>","type":"implementation",
+                 "objective":"<one line>","acceptance":["<testable>"],"paths":{"allow":["<glob>"]}}] }\`
+4. \`sigmarun run import <file> --lightweight --json\`. Lightweight means the
+   pieces are claimable immediately — no review / verify / integrate ceremony.
+5. Tell the user, in their language and in plain words, what the pieces are,
+   and that they can now run \`/team-do\` (here or in another window) to have
+   a tool pick one up. You may mention the RUN-ID once; they won't need it.
 
-MODE NOTES:
-- feature: slice by module/layer/test-surface; every implementation
-  task needs focused checks.
-- debug: first task must be a reproduction task whose acceptance is a
-  failing check; fix tasks depend on it; final task re-runs the repro
-  (red -> green evidence).
-- review: tasks are review slices over an existing branch/diff
-  (correctness / tests / architecture / security); paths may be empty;
-  required_checks may be empty, acceptance = checklist items.
+If the user asks for review / verification / integration (a quality-gated
+pipeline), omit \`--lightweight\` and set up the fuller flow with
+\`/team-dispatch\`, \`/team-review\`, \`/team-verify\`, \`/team-integrate\` instead.
+`;
+
+const TEAM_DO = `---
+description: Pick up one task from a lightweight run, do it, mark it done
+allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
+argument-hint: [<RUN-ID>] [--as <name>]
+---
+${versionHeader}
+
+# Team Do
+
+Grab the next available piece of work, do it, mark it done.
+
+RULES: every \`sigmarun\` call uses \`--json\`; branch only on \`ok\` /
+\`code\` / \`next_actions\`. Never edit \`.team/\` by hand. Work ONLY inside
+the task's \`paths.allow\`.
+
+Flow:
+1. Find the run: if \`$ARGUMENTS\` names a RUN-ID, use it. Otherwise
+   \`sigmarun run list --json\` and take the most recent run whose status is
+   \`active\` — that's the one \`/team-plan\` just created.
+2. Claim a piece: \`sigmarun claim-next <RUN> --agent=<name> --json\`
+   (name = the \`--as\` value, or a short window name like \`win-1\`; a fresh
+   name self-registers). If \`code\` is \`no_claimable_task\`, everything is
+   taken or done — tell the user and stop.
+3. Read the brief (\`.team/runs/<RUN>/tasks/<TASK>/task.md\`) and do the actual
+   work in the repo, only inside the task's allowed paths. Run the project's
+   tests if it has them.
+4. Mark it done: \`sigmarun done <RUN> <TASK> --agent=<name> --json\`.
+5. Report what you built and the new progress (\`sigmarun status <RUN>\`).
+   Stop after ONE task unless the user asks for more.
 `;
 
 const TEAM_DISPATCH = `---
@@ -424,10 +451,39 @@ ${versionHeader}
 
 ${RULES_BLOCK}
 
-Follow the /team-plan flow: doctor -> read repo + docs/team/MEMORY.md ->
-build a team.plan_payload.v1 (client_task_key deps, testable acceptance,
-paths.allow, required_checks) -> \`sigmarun run import <file> --json\` ->
-report RUN-ID and task table. Do NOT publish or claim (tool: codex).
+Break the goal into 2-6 INDEPENDENT pieces any tool can pick up. Flow:
+doctor -> read the repo (and docs/team/MEMORY.md if present) -> build a
+team.plan_payload.v1 (each task: title, one-line objective, >=1 testable
+acceptance line, paths.allow; do not invent run_id/task_id/status) ->
+\`sigmarun run import <file> --lightweight --json\` (lightweight = claimable
+now, no review/verify/integrate) -> tell the user in plain words what the
+pieces are and that they can run /team-do to pick one up. Do NOT claim.
+If the user wants review/verification/integration, omit --lightweight and
+use the /team-dispatch pipeline instead. (tool: codex)
+`;
+
+const CODEX_DO_SKILL = `---
+name: team-run-do
+description: Use when the user types \`/team-do\` or asks Codex to pick up a
+  piece of a lightweight Team Run, do it, and mark it done. Trigger phrases:
+  "team-do", "pick up a task", "领一块", "干一个任务".
+---
+${versionHeader}
+
+# Team Run Do
+
+${RULES_BLOCK}
+
+Grab one piece, do it, mark it done. Flow:
+1. Find the run (\`sigmarun run list --json\`, newest \`active\` one) unless the
+   user named a RUN-ID.
+2. \`sigmarun claim-next <RUN> --agent=<name> --json\` (fresh name self-registers;
+   code=no_claimable_task means everything's taken/done -> report and stop).
+3. Read \`.team/runs/<RUN>/tasks/<TASK>/task.md\` and do the real work ONLY inside
+   the task's paths.allow; run the project's tests if any.
+4. \`sigmarun done <RUN> <TASK> --agent=<name> --json\`.
+5. Report what you built + progress (\`sigmarun status <RUN>\`). Stop after ONE
+   task unless the user asks for more. (tool: codex)
 `;
 
 const CODEX_REVIEW_SKILL = `---
@@ -531,6 +587,7 @@ This repository uses the Team Run Protocol for multi-agent collaboration.
 export const TEMPLATES: Record<string, Record<string, string>> = {
   'claude-code': {
     '.claude/commands/team-plan.md': TEAM_PLAN,
+    '.claude/commands/team-do.md': TEAM_DO,
     '.claude/commands/team-dispatch.md': TEAM_DISPATCH,
     '.claude/commands/team-publish.md': TEAM_PUBLISH,
     '.claude/commands/team-review.md': TEAM_REVIEW,
@@ -546,6 +603,7 @@ export const TEMPLATES: Record<string, Record<string, string>> = {
   codex: {
     '.codex/skills/team-run-dispatch/SKILL.md': CODEX_DISPATCH_SKILL,
     '.codex/skills/team-run-plan/SKILL.md': CODEX_PLAN_SKILL,
+    '.codex/skills/team-run-do/SKILL.md': CODEX_DO_SKILL,
     '.codex/skills/team-run-review/SKILL.md': CODEX_REVIEW_SKILL,
     '.codex/skills/team-run-status/SKILL.md': CODEX_STATUS_SKILL,
     '.codex/skills/team-run-verify/SKILL.md': CODEX_VERIFY_SKILL,

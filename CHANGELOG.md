@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 轻量斜杠命令(用户反馈:人不该手写 plan.json / 敲 CLI,该在 Claude Code 里一句话)。adapter 模板 v0.3.0:`/team-plan <目标>` 重写为**轻量默认**——AI 把目标拆成 2–6 个独立块、自产 payload、`run import --lightweight`,用大白话回报(人看不到 plan.json/run 编号);新增 **`/team-do`**——找到最新 active run、领一块、在仓库里真干、`done` 标记完成(默认隐藏 RUN-ID)。Codex 侧对应 `team-run-plan`(轻量化)+ 新 `team-run-do` skill。完整质量流水线命令(dispatch/review/verify/integrate)原样保留,想要时用。测试 266/266。
+
 - 轻量模式文案清理:`run import --lightweight` 不再报"no required_checks; verification will be unclear"(轻量无验证,该警告是噪音),成功信息改为"claimable now (lightweight)"并直接提示 `claim-next`(不再指向不存在的 publish 步骤)。
 
 - **轻量模式**(用户反馈:核心用例被完整质量流水线埋住了)。`sigmarun run import <plan> --lightweight` 造一个轻量 run——任务立即可领(免 publish)、评审/验证/集成/worktree/证据全部默认关。极简闭环就 5 条命令:`init` → `run import --lightweight` → `claim-next --agent=<随便起名>`(首次即自动注册,不用 `agent register`)→ `done <RUN> <TASK> --agent=<id>`(claimed/working → done 直连,信任领取者,免证据)→ `status`。`done` 仅在轻量 run 生效(完整 run 仍走 report/accept),且只有 claim 持有者能标 done(反撞车延伸到完成)。质量流水线原样保留,想要时不加 `--lightweight` 即完整模式。真机验证:两个工具(codex-1/claude-2)各领一块、各自 done、进度 100%,无一句多余仪式。测试 266/266（+5）。
