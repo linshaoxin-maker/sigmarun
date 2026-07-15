@@ -15,6 +15,11 @@ export default defineConfig({
   },
   test: {
     include: ['packages/*/test/**/*.test.ts'],
+    // Windows CI runners spend 5-10x longer on this suite's shape (a fresh git repo per test,
+    // thousands of fsync'd atomic writes, real child processes); the defaults (5s/10s) produced
+    // 20 pure-timeout failures with zero assertion failures on the first real matrix run.
+    testTimeout: 120_000,
+    hookTimeout: 120_000,
     coverage: {
       provider: 'v8',
       include: ['packages/*/src/**'],

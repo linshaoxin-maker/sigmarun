@@ -27,7 +27,7 @@ beforeEach(async () => {
   await driveToVerified(repo, 'TASK-0001', 'a', owner, reviewer, verifier);
   await driveToVerified(repo, 'TASK-0002', 'b', owner, reviewer, verifier);
   await driveToVerified(repo, 'TASK-0003', 'c', owner, reviewer, verifier);
-}, 30_000);
+}, 120_000);
 afterEach(() => cleanup(repo));
 
 const runDir = () => join(repo, '.team', 'runs', 'RUN-0001');

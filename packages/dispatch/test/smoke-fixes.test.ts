@@ -16,7 +16,7 @@ beforeEach(async () => {
   owner = registerDefault(repo, 'w-owner');
   await setupWorking(repo, owner);
   submitEvidence({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: owner, evidencePath: validDraft(repo) });
-}, 30_000);
+}, 120_000);
 afterEach(() => cleanup(repo));
 
 const events = () => readFileSync(join(repo, '.team', 'runs', 'RUN-0001', 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
@@ -81,5 +81,5 @@ describe('smoke-test round fixes (L9/L13): gate leases', () => {
     const rc = JSON.parse(readFileSync(join(repo, '.team', 'runs', 'RUN-0001', 'claims', 'review-claims.json'), 'utf8'));
     const mine = rc.claims.filter((c: { kind?: string }) => (c.kind ?? 'review') === 'verify');
     expect(mine.every((c: { status: string }) => c.status !== 'active')).toBe(true);
-  }, 30_000);
+  }, 120_000);
 });

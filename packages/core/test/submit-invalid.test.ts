@@ -167,7 +167,7 @@ describe('smoke-test L6: changed_files entry shape', () => {
     } finally {
       cleanup(repo);
     }
-  }, 30_000);
+  }, 120_000);
 });
 
 describe('OSS security review: cmd_id is confined to a bare identifier', () => {
@@ -190,5 +190,5 @@ describe('OSS security review: cmd_id is confined to a bare identifier', () => {
     } finally {
       cleanup(repo);
     }
-  }, 30_000);
+  }, 120_000);
 });

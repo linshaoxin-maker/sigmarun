@@ -78,5 +78,5 @@ describe('conformance — one envelope per command, uniform failure classes (M38
       expect(env.ok).toBe(step.exit === 0);
       if (!env.ok) expect((env.next_actions as string[]).length).toBeGreaterThan(0); // failures must be actionable
     }
-  }, 30_000);
+  }, 120_000);
 });

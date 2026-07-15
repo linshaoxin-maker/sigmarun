@@ -54,7 +54,7 @@ describe('repair replay knows the verified/integrated tail (fix #2)', () => {
     env = repairRun({ cwd: repo, runId: 'RUN-0001' });
     expect((env.data as { repaired: unknown[] }).repaired).toEqual([]);
     expect(readJson('tasks/TASK-0001/task.json').status).toBe('integrated');
-  }, 30_000);
+  }, 120_000);
 });
 
 describe('torn events.jsonl degrades to findings instead of crashes (fix #9)', () => {
@@ -102,7 +102,7 @@ describe('small confirmed fixes', () => {
     const leaseMs = Date.parse(claim.lease_until) - Date.now();
     expect(leaseMs).toBeLessThan(6 * 60_000); // 5-min policy, not the old hard-coded 30
     expect(leaseMs).toBeGreaterThan(3 * 60_000);
-  }, 30_000);
+  }, 120_000);
 
   it('watch rejects a non-numeric --interval instead of hanging (fix #10)', () => {
     repo = mkClaimRepo([{ key: 'a' }]);
