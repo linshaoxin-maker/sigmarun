@@ -165,6 +165,31 @@ describe('worktree prune — reconcile stale entries (roadmap Phase 1, fault deg
     expect(events().length).toBe(before); // no event
   });
 
+  it('after a prune the owner re-registers a fresh worktree on the WORKING task (S13 recovery)', async () => {
+    const { pruneWorktrees } = await import('@sigmarun/dispatch');
+    const { rmSync } = await import('node:fs');
+    const path = mkWorktree();
+    registerWorktree({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, path, branch: BRANCH });
+    rmSync(path, { recursive: true, force: true });
+    pruneWorktrees({ cwd: repo, runId: 'RUN-0001' });
+    expect(readJson('tasks/TASK-0001/task.json').status).toBe('working'); // stranded
+
+    // the prune guidance's first suggestion must be a live path now, not a dead one
+    const RETRY_BRANCH = 'team/RUN-0001/TASK-0001-retry';
+    const fresh = mkWorktree('wt2', RETRY_BRANCH);
+    const env = registerWorktree({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, path: fresh, branch: RETRY_BRANCH });
+    expect(env.ok).toBe(true);
+    const entries = readJson('worktrees.json').entries;
+    expect(entries.length).toBe(2);
+    expect(entries[1].status).toBe('active');
+    expect(entries[1].worktree_id).not.toBe(entries[0].worktree_id); // no id collision with the pruned entry
+    expect(readJson('tasks/TASK-0001/task.json').status).toBe('working');
+    // and a live tree still refuses double-registration
+    const third = mkWorktree('wt3', 'team/RUN-0001/TASK-0001-x');
+    const dup = registerWorktree({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, path: third, branch: 'team/RUN-0001/TASK-0001-x' });
+    expect(dup.code).toBe('invalid_transition');
+  });
+
   it('a run with only live worktrees prunes nothing', async () => {
     const { pruneWorktrees } = await import('@sigmarun/dispatch');
     const path = mkWorktree();

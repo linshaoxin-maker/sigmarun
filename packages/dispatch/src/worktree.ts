@@ -66,8 +66,17 @@ export function registerWorktree(opts: WorktreeRegisterOptions): Envelope {
     const taskFile = join(runDir, 'tasks', opts.taskId, 'task.json');
     const task = readJsonState(taskFile);
     const status = (task.doc as { status: string }).status;
-    if (status !== 'claimed') {
-      return failEnvelope('invalid_transition', `Task ${opts.taskId} is ${status}; worktree register needs claimed.`, { startedAt });
+    // claimed is the normal entry. working is allowed ONLY when no live worktree entry exists —
+    // the prune-recovery path (S13): a working task whose tree vanished out-of-band had no way
+    // back in (register wanted claimed, adopt only sees abandoned, prune marks pruned).
+    const preWt = loadWorktrees(runDir, runId);
+    const hasLiveTree = preWt.doc.entries.some((e) => e.task_id === opts.taskId && ['active', 'abandoned'].includes(e.status));
+    if (!(status === 'claimed' || (status === 'working' && !hasLiveTree))) {
+      return failEnvelope('invalid_transition',
+        status === 'working'
+          ? `Task ${opts.taskId} is working with a live worktree entry; adopt it or prune first.`
+          : `Task ${opts.taskId} is ${status}; worktree register needs claimed (or working after a prune).`,
+        { startedAt });
     }
 
     const branchPattern = new RegExp(`^team/${runId}/${opts.taskId}(-[a-z0-9-]+)?$`);
@@ -102,9 +111,10 @@ export function registerWorktree(opts: WorktreeRegisterOptions): Envelope {
       }
     })();
 
-    const wt = loadWorktrees(runDir, runId);
+    const wt = preWt;
     const now = new Date().toISOString();
-    const worktreeId = `WT-${opts.taskId}`;
+    const priorTrees = wt.doc.entries.filter((e) => e.task_id === opts.taskId).length;
+    const worktreeId = priorTrees === 0 ? `WT-${opts.taskId}` : `WT-${opts.taskId}-${priorTrees + 1}`;
     wt.doc.entries.push({
       worktree_id: worktreeId,
       task_id: opts.taskId,
@@ -119,24 +129,29 @@ export function registerWorktree(opts: WorktreeRegisterOptions): Envelope {
     });
     saveState(wt.file, wt.doc, wt.rev);
 
-    const started = startTask(runDir, opts.taskId);
-    started.commit();
+    // claimed -> working only on the normal entry; the prune-recovery path is already working.
+    if (status === 'claimed') {
+      const started = startTask(runDir, opts.taskId);
+      started.commit();
+    }
 
     appendEvent(runDir, {
       event: 'worktree_created',
       actor: { type: 'agent', id: opts.agentId },
       run_id: runId,
       task_id: opts.taskId,
-      payload: { worktree_id: worktreeId, branch: opts.branch, base_commit: baseCommit },
+      payload: { worktree_id: worktreeId, branch: opts.branch, base_commit: baseCommit, ...(status === 'working' ? { reregistered: true } : {}) },
     });
-    appendEvent(runDir, {
-      event: 'task_started',
-      actor: { type: 'agent', id: opts.agentId },
-      run_id: runId,
-      task_id: opts.taskId,
-      claim_id: found.claim.claim_id,
-      payload: {},
-    });
+    if (status === 'claimed') {
+      appendEvent(runDir, {
+        event: 'task_started',
+        actor: { type: 'agent', id: opts.agentId },
+        run_id: runId,
+        task_id: opts.taskId,
+        claim_id: found.claim.claim_id,
+        payload: {},
+      });
+    }
     return okEnvelope({
       message: `Worktree ${worktreeId} registered on ${opts.branch}; ${opts.taskId} is working.`,
       data: { worktree_id: worktreeId, task_id: opts.taskId, branch: opts.branch, base_commit: baseCommit },
@@ -277,7 +292,8 @@ export function pruneWorktrees(opts: WorktreePruneOptions): Envelope {
       return existsSync(f) && (readJsonState(f).doc as { status: string }).status === 'working';
     });
     const nextActions = stranded.length
-      ? stranded.map((taskId) => `Re-establish work for ${taskId}: register a fresh worktree, or sigmarun reclaim ${runId} ${taskId}.`)
+      ? stranded.map((taskId) =>
+          `Re-establish ${taskId}: owner registers a fresh worktree (sigmarun worktree register ${runId} ${taskId} --agent=<owner> --path=.. --branch=..), or take it over: sigmarun reclaim ${runId} ${taskId} (--force --agent=user while the lease is live).`)
       : [];
 
     return okEnvelope({

@@ -127,6 +127,23 @@ describe('lightweight mode — decompose → claim → done (no review/verify/in
     expect(readJson(repo, 'run.json').status).toBe('archived');
   });
 
+  it('claim-next on a closed run says so instead of kicking to publish (S9)', async () => {
+    const repo = lightweightRun();
+    const { reportRun } = await import('@sigmarun/core');
+    for (;;) {
+      const c = claimNext({ cwd: repo, runId: 'RUN-0001', agentId: 'win-1' });
+      if (!c.ok) break;
+      taskDone({ cwd: repo, runId: 'RUN-0001', taskId: (c.data as { task_id: string }).task_id, agentId: 'win-1' });
+    }
+    reportRun({ cwd: repo, runId: 'RUN-0001' });
+    const env = claimNext({ cwd: repo, runId: 'RUN-0001', agentId: 'win-2' });
+    expect(env.ok).toBe(false);
+    expect(env.code).toBe('run_not_active');
+    expect(env.message).toContain('closed');
+    expect(env.next_actions.join(' ')).not.toContain('task publish'); // the old kick loop
+    expect(env.next_actions.join(' ')).toContain('run import');
+  });
+
   it('done is refused on a full (non-lightweight) run', () => {
     const repo = mkTmpGitRepo(); dirs.push(repo);
     initProject({ cwd: repo });

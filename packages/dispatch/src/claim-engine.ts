@@ -521,8 +521,16 @@ export function claimNext(opts: ClaimOptions): Envelope {
     }
     const integrating = rdoc.status === 'integrating';
     if (rdoc.status !== 'active' && !integrating) {
-      return failEnvelope('run_not_active', `Run ${runId} is ${rdoc.status}; tasks must be published first.`, {
-        nextActions: [`Publish tasks: sigmarun task publish ${runId}`],
+      // S9: one reason code, two different worlds. planned means "publish first"; a terminal run
+      // means the work here is OVER — telling the claimer to publish sent it into publish's own
+      // refusal and back here: a two-command kick loop with no exit.
+      const closed = ['reported', 'archived', 'cancelled'].includes(rdoc.status);
+      return failEnvelope('run_not_active', closed
+        ? `Run ${runId} is ${rdoc.status} — this run is closed; remaining work must move to a new run.`
+        : `Run ${runId} is ${rdoc.status}; tasks must be published first.`, {
+        nextActions: closed
+          ? [`Start a new run for the leftover work: sigmarun run import <plan.json>`, `See what was left behind: sigmarun run show ${runId}`]
+          : [`Publish tasks: sigmarun task publish ${runId}`],
         startedAt,
       });
     }
