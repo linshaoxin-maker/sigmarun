@@ -358,16 +358,32 @@ const RULES: Rule[] = [
     check: (ctx) => {
       const out: Finding[] = [];
       for (const row of ctx.rows) {
-        const owners = new Set(ctx.taskClaims.filter((c) => c.task_id === row.task_id).map((c) => c.agent_id));
-        const attempts = (ctx.taskDetail(row.task_id)?.previous_attempts as Array<{ agent_id?: string }> | undefined) ?? [];
-        for (const a of attempts) if (a.agent_id) owners.add(a.agent_id);
-        if (owners.size === 0) continue;
+        // D22 substantive-contribution criterion — mirror of dispatch's accountableAuthors:
+        // evidence submitters (all revisions) + the current claim holder. Pure past holders
+        // who never submitted are not authors.
+        const authors = new Set(
+          ctx.taskClaims.filter((c) => c.task_id === row.task_id && ['active', 'submitted'].includes(c.status)).map((c) => c.agent_id),
+        );
+        const ev = ctx.evidence(row.task_id);
+        if (ev && typeof ev.agent_id === 'string') authors.add(ev.agent_id);
+        const histDir = join(ctx.runDir, 'evidence', row.task_id, 'history');
+        if (existsSync(histDir)) {
+          for (const f of readdirSync(histDir).filter((f) => f.endsWith('.json'))) {
+            try {
+              const by = (readJsonState(join(histDir, f)).doc as { agent_id?: string }).agent_id;
+              if (by) authors.add(by);
+            } catch {
+              // torn history revision — skip
+            }
+          }
+        }
+        if (authors.size === 0) continue;
         for (const review of ctx.reviews(row.task_id)) {
           const reviewer = review.reviewer_agent_id as string | null | undefined;
-          if (!reviewer || !owners.has(reviewer)) continue;
+          if (!reviewer || !authors.has(reviewer)) continue;
           out.push(
             finding('AUD-015', 'error',
-              `${review.review_id as string} reviewer ${reviewer} is a historical owner of ${row.task_id} (INV-008).`,
+              `${review.review_id as string} reviewer ${reviewer} is an accountable author of ${row.task_id} (INV-008, D22 criterion).`,
               `Void ${review.review_id as string}; another reviewer must claim and decide again.`, [String(review.review_id ?? row.task_id)]),
           );
         }

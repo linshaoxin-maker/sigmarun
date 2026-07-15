@@ -84,8 +84,9 @@ describe('review claim + D15 synthesis (BDD-006-01/02/05; INV-008)', () => {
     expect(synth.code).toBe('no_claimable_task'); // filtered out, not crashed
   });
 
-  it('previous_attempts owners are also barred (INV-008 covers reclaim history)', async () => {
-    // release TASK-0001 rework fixture: fresh repo where owner released and another agent finished the task
+  it('a past holder who never submitted MAY review; the submitter may not (D22 substantive contribution)', async () => {
+    // D22 rewrote this expectation: the old "ever held a claim" surface barred `first` here,
+    // which combined with takeover into the S1 permanent review deadlock.
     const repo2 = mkClaimRepo([{ key: 'z' }]);
     try {
       const first = registerDefault(repo2, 'w1');
@@ -94,11 +95,49 @@ describe('review claim + D15 synthesis (BDD-006-01/02/05; INV-008)', () => {
       const second = registerDefault(repo2, 'w2', 'codex');
       await setupWorking(repo2, second, 'TASK-0001', 'task-z');
       submitEvidence({ cwd: repo2, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: second, evidencePath: validDraft(repo2, { acceptance: [{ item: 'z done.', status: 'met' }] }) });
-      const env = reviewClaim({ cwd: repo2, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: first });
-      expect(env.code).toBe('self_approval_forbidden');
+      const bySubmitter = reviewClaim({ cwd: repo2, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: second });
+      expect(bySubmitter.code).toBe('self_approval_forbidden');
+      const byPastHolder = reviewClaim({ cwd: repo2, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: first });
+      expect(byPastHolder.ok).toBe(true);
     } finally {
       cleanup(repo2);
     }
+  });
+
+  it('a reclaim takeover no longer deadlocks the review gate (S1/D22)', async () => {
+    const repo2 = mkClaimRepo([{ key: 's1' }]);
+    try {
+      const a = registerDefault(repo2, 'w-a');
+      claimNext({ cwd: repo2, runId: 'RUN-0001', agentId: a, taskId: 'TASK-0001' });
+      // A dies: lease expires, the human reclaims
+      const f = join(repo2, '.team', 'runs', 'RUN-0001', 'claims', 'task-claims.json');
+      const { doc, rev } = readJsonState(f);
+      (doc as { claims: Array<{ lease_until: string }> }).claims[0]!.lease_until = new Date(Date.now() - 60_000).toISOString();
+      writeJsonStateAtomic(f, doc as Record<string, unknown>, { expectedRev: rev });
+      const { reclaimTask } = await import('@sigmarun/dispatch');
+      expect(reclaimTask({ cwd: repo2, runId: 'RUN-0001', taskId: 'TASK-0001' }).ok).toBe(true);
+      // B takes over, does the work, submits
+      const b = registerDefault(repo2, 'w-b', 'codex');
+      await setupWorking(repo2, b, 'TASK-0001', 'task-s1');
+      submitEvidence({ cwd: repo2, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: b, evidencePath: validDraft(repo2, { acceptance: [{ item: 's1 done.', status: 'met' }] }) });
+      // OLD world: A and B were BOTH "owners" -> nobody present could ever review. NEW: A never
+      // submitted evidence, so A reviews B's submission; the run breathes again.
+      const synth = claimNext({ cwd: repo2, runId: 'RUN-0001', agentId: a, role: 'reviewer' });
+      expect(synth.ok).toBe(true);
+      expect((synth.data as { task_id: string }).task_id).toBe('TASK-0001');
+      const decide = reviewDecide({ cwd: repo2, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: a, decision: 'approve', review: { findings: [] } });
+      expect(decide.ok).toBe(true);
+    } finally {
+      cleanup(repo2);
+    }
+  });
+
+  it('synthesis names the tasks filtered by independence instead of claiming the queue is empty', () => {
+    const env = claimNext({ cwd: repo, runId: 'RUN-0001', agentId: owner, role: 'reviewer' });
+    expect(env.ok).toBe(false);
+    expect(env.code).toBe('no_claimable_task');
+    expect((env.data as { filtered_by_independence: string[] }).filtered_by_independence).toContain('TASK-0001');
+    expect(env.message).toContain('accountable author');
   });
 
   it('a second reviewer cannot double-claim; an expired review lease is swept back to submitted (BDD-006-05)', () => {

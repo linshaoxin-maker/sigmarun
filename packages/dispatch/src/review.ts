@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, appendFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, appendFileSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJsonState, writeJsonStateAtomic, writeJsonStateNew, type ResolveOptions } from '@sigmarun/storage';
 import { appendEvent, failEnvelope, okEnvelope, resolveRunMode, type Envelope } from '@sigmarun/core';
@@ -43,7 +43,8 @@ function loadReviewClaims(runDir: string, runId: string) {
   return { file, doc: state.doc as { claims: ReviewClaim[] } & Record<string, unknown>, rev: state.rev };
 }
 
-/** All agents that ever owned the task: current/former claims + previous_attempts (INV-008 surface). */
+/** All agents that ever held the task's claim (current/former + previous_attempts). Used for
+ * OWNERSHIP permissions (unblock) — NOT for review independence, which uses accountableAuthors. */
 export function historicalOwners(runDir: string, taskId: string, stores: ClaimStores): Set<string> {
   const owners = new Set<string>();
   for (const c of stores.taskClaims.doc.claims.filter((c) => c.task_id === taskId)) owners.add(c.agent_id);
@@ -53,6 +54,41 @@ export function historicalOwners(runDir: string, taskId: string, stores: ClaimSt
     for (const a of attempts) owners.add(a.agent_id);
   }
   return owners;
+}
+
+/**
+ * INV-008 exclusion set under D22's substantive-contribution criterion: the agents ACCOUNTABLE
+ * for the work under review — everyone who submitted an evidence revision, plus the current
+ * claim holder. A past holder who never submitted (claimed then died; pure takeover) is NOT an
+ * author: the old "ever held a claim" surface let one reclaim poison the review gate for every
+ * identity present (S1) and nudged users toward third-identity laundering. Residual risk — A
+ * wrote uncommitted code, B adopted and submitted it, A reviews their own surviving lines — is
+ * accepted and recorded in docs/18: reviews are on permanent record and AUD-015 rechecks with
+ * this same criterion.
+ */
+export function accountableAuthors(runDir: string, taskId: string, stores: ClaimStores): Set<string> {
+  const authors = new Set<string>();
+  const evDir = join(runDir, 'evidence', taskId);
+  const evFile = join(evDir, 'evidence.json');
+  if (existsSync(evFile)) {
+    const by = (readJsonState(evFile).doc as { agent_id?: string }).agent_id;
+    if (by) authors.add(by);
+  }
+  const histDir = join(evDir, 'history');
+  if (existsSync(histDir)) {
+    for (const f of readdirSync(histDir).filter((f) => f.endsWith('.json'))) {
+      try {
+        const by = (readJsonState(join(histDir, f)).doc as { agent_id?: string }).agent_id;
+        if (by) authors.add(by);
+      } catch {
+        // torn/corrupt history revision — never blocks the gate
+      }
+    }
+  }
+  for (const c of stores.taskClaims.doc.claims) {
+    if (c.task_id === taskId && ['active', 'submitted'].includes(c.status)) authors.add(c.agent_id);
+  }
+  return authors;
 }
 
 function evidenceRevision(runDir: string, taskId: string): number {
@@ -139,10 +175,10 @@ function grantReviewClaim(
   if (status !== 'submitted') {
     return { code: 'no_claimable_task', message: `Task ${taskId} is ${status}; review claims need submitted.` };
   }
-  if (historicalOwners(runDir, taskId, stores).has(agentId)) {
+  if (accountableAuthors(runDir, taskId, stores).has(agentId)) {
     return {
       code: 'self_approval_forbidden',
-      message: `Agent ${agentId} owned ${taskId} at some point; INV-008 forbids reviewing your own work.`,
+      message: `Agent ${agentId} is an accountable author of ${taskId} (submitted evidence or holds its claim); INV-008 forbids reviewing your own work.`,
     };
   }
 
@@ -231,32 +267,39 @@ export function synthesizeReview(runDir: string, runId: string, agentId: string,
   const listFile = join(runDir, 'team-task-list.json');
   const rows = (readJsonState(listFile).doc as { tasks: TaskRow[] }).tasks;
   const stores = loadClaims(runDir, runId);
-  // One pass over claims instead of rows x claims scans (review round: efficiency candidate).
-  const claimOwners = new Map<string, Set<string>>();
-  for (const c of stores.taskClaims.doc.claims) {
-    if (!claimOwners.has(c.task_id)) claimOwners.set(c.task_id, new Set());
-    claimOwners.get(c.task_id)!.add(c.agent_id);
-  }
   const activeReview = new Set(rc.doc.claims.filter((c) => c.status === 'active').map((c) => c.task_id));
-  const ownedByAgent = (taskId: string): boolean => {
-    if (claimOwners.get(taskId)?.has(agentId)) return true;
-    const f = join(runDir, 'tasks', taskId, 'task.json');
-    if (!existsSync(f)) return false;
-    const attempts = (readJsonState(f).doc as { previous_attempts?: Array<{ agent_id: string }> }).previous_attempts ?? [];
-    return attempts.some((a) => a.agent_id === agentId);
-  };
+  // D22: independence excludes accountable authors, not everyone who ever held the claim.
+  const excludedByIndependence: string[] = [];
   const candidates = rows
     .filter((r) => r.status === 'submitted')
     .filter((r) => !activeReview.has(r.task_id))
-    .filter((r) => !ownedByAgent(r.task_id))
+    .filter((r) => {
+      if (accountableAuthors(runDir, r.task_id, stores).has(agentId)) {
+        excludedByIndependence.push(r.task_id);
+        return false;
+      }
+      return true;
+    })
     .map((r) => ({ row: r, submittedAt: evidenceSubmittedAt(runDir, r.task_id) }))
     .sort((a, b) => a.submittedAt.localeCompare(b.submittedAt) || a.row.task_id.localeCompare(b.row.task_id));
   const picked = candidates[0];
   if (!picked) {
-    return failEnvelope('no_claimable_task', `No task is waiting for review on ${runId}.`, {
-      nextActions: [`Check the queue: sigmarun status ${runId}`],
-      startedAt,
-    });
+    // Tell the truth about WHY nothing is offered — "no task waiting" while your own submission
+    // sits in the queue reads as a healthy idle and hides the hang (S1's second wound).
+    const filtered = excludedByIndependence.length > 0;
+    return failEnvelope(
+      'no_claimable_task',
+      filtered
+        ? `${excludedByIndependence.length} task(s) await review on ${runId}, but you are an accountable author (INV-008): ${excludedByIndependence.join(', ')}. Another identity must review.`
+        : `No task is waiting for review on ${runId}.`,
+      {
+        data: { filtered_by_independence: excludedByIndependence },
+        nextActions: filtered
+          ? [`Have a different window claim it: sigmarun claim-next ${runId} --agent=<other> --role=reviewer`]
+          : [`Check the queue: sigmarun status ${runId}`],
+        startedAt,
+      },
+    );
   }
   const result = grantReviewClaim(runDir, runId, picked.row.task_id, agentId);
   if (!('claim' in result)) return failEnvelope(result.code, result.message, { startedAt });
@@ -296,8 +339,8 @@ export function reviewDecide(opts: ReviewDecideOptions): Envelope {
     }
     // AUD-015 inline recheck at the record boundary (defense in depth over the claim guard).
     const stores = loadClaims(runDir, runId);
-    if (historicalOwners(runDir, opts.taskId, stores).has(opts.agentId)) {
-      return failEnvelope('self_approval_forbidden', `Agent ${opts.agentId} owned ${opts.taskId}; the review is void (INV-008).`, { startedAt });
+    if (accountableAuthors(runDir, opts.taskId, stores).has(opts.agentId)) {
+      return failEnvelope('self_approval_forbidden', `Agent ${opts.agentId} is an accountable author of ${opts.taskId}; the review is void (INV-008).`, { startedAt });
     }
 
     const findings = opts.review.findings ?? [];

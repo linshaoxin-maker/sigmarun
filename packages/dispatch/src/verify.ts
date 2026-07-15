@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { readJsonState, redactText, writeJsonStateAtomic, writeJsonStateNew, type ResolveOptions } from '@sigmarun/storage';
 import { appendEvent, failEnvelope, okEnvelope, resolveRunMode, truncateOutput, type Envelope } from '@sigmarun/core';
 import { loadClaims, withRunLock, type ClaimStores, type TaskRow } from './claim-engine.js';
-import { activeVerifyClaim, completeVerifyClaim, grantVerifyClaim, historicalOwners } from './review.js';
+import { accountableAuthors, activeVerifyClaim, completeVerifyClaim, grantVerifyClaim } from './review.js';
 
 export interface VerifyOptions extends ResolveOptions {
   runId: string;
@@ -137,10 +137,10 @@ export function verifySubmit(opts: VerifyOptions): Envelope {
       if (status !== 'approved') {
         return failEnvelope('invalid_transition', `Task ${taskId} is ${status}; verification targets approved tasks.`, { startedAt });
       }
-      if (historicalOwners(runDir, taskId!, stores).has(opts.agentId)) {
+      if (accountableAuthors(runDir, taskId!, stores).has(opts.agentId)) {
         return failEnvelope(
           'self_approval_forbidden',
-          `Agent ${opts.agentId} owned ${taskId} at some point; independent verification forbids verifying your own work (INV-008).`,
+          `Agent ${opts.agentId} is an accountable author of ${taskId}; independent verification forbids verifying your own work (INV-008).`,
           { startedAt },
         );
       }
@@ -258,7 +258,7 @@ export function synthesizeVerify(runDir: string, runId: string, agentId: string,
   const stores = loadClaims(runDir, runId);
   const candidate = rows
     .filter((r) => r.status === 'approved')
-    .filter((r) => !historicalOwners(runDir, r.task_id, stores).has(agentId))
+    .filter((r) => !accountableAuthors(runDir, r.task_id, stores).has(agentId))
     .filter((r) => {
       const held = activeVerifyClaim(runDir, runId, r.task_id);
       return !held || held.reviewer_agent_id === agentId; // L13: leased verify work is not re-offered
