@@ -119,6 +119,38 @@ describe('integrate + report (16 §4; BDD-008-01/02/03)', () => {
   });
 });
 
+describe('run reopen — integrating is no longer a one-way street (docs/15 §2.2; S7)', () => {
+  it('reopen -> active; task add + publish work again; integrate start re-enters', async () => {
+    const { runReopen, taskAdd, publishTasks } = await import('@sigmarun/core');
+    integrateStart({ cwd: repo, runId: 'RUN-0001' });
+    expect(JSON.parse(readFileSync(join(runDir(), 'run.json'), 'utf8')).status).toBe('integrating');
+
+    // mid-integration you find a missing piece — previously every door was welded shut
+    const blockedAdd = taskAdd({ cwd: repo, runId: 'RUN-0001', task: { title: 'Hotfix', objective: 'Patch the gap.', acceptance: ['patched'] } });
+    expect(blockedAdd.code).toBe('invalid_transition');
+
+    const reopened = runReopen({ cwd: repo, runId: 'RUN-0001' });
+    expect(reopened.ok).toBe(true);
+    expect(events().some((e) => e.event === 'integration_reopened')).toBe(true);
+
+    const added = taskAdd({ cwd: repo, runId: 'RUN-0001', task: { title: 'Hotfix', objective: 'Patch the gap.', acceptance: ['patched'] } });
+    expect(added.ok).toBe(true);
+    const published = publishTasks({ cwd: repo, runId: 'RUN-0001', taskIds: [(added.data as { task_id: string }).task_id] });
+    expect(published.ok).toBe(true);
+
+    const again = integrateStart({ cwd: repo, runId: 'RUN-0001' });
+    expect(again.ok).toBe(true);
+    expect(JSON.parse(readFileSync(join(runDir(), 'run.json'), 'utf8')).status).toBe('integrating');
+  });
+
+  it('reopen refuses outside integrating', async () => {
+    const { runReopen } = await import('@sigmarun/core');
+    const env = runReopen({ cwd: repo, runId: 'RUN-0001' }); // run is active here
+    expect(env.ok).toBe(false);
+    expect(env.code).toBe('invalid_transition');
+  });
+});
+
 describe('require_verification=false — the D6-symmetric verify-gate knob (docs/15 §10; remediation R0-9)', () => {
   let lite: string;
   afterEach(() => cleanup(lite));

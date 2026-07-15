@@ -91,6 +91,34 @@ export function runResume(opts: RunOpOptions): Envelope {
 }
 
 /**
+ * integrating -> active (docs/15 §2.2 integration_reopened — spec'd from day one, unbuilt until
+ * remediation S7). Mid-integration you discover a missing piece: without this edge the run was a
+ * one-way street — task add wanted planned/active, publish wanted active, pause refused — and the
+ * only exits were cancelling the whole run or reporting around the hole. Reopen returns the run
+ * to active so tasks can be added/published/claimed; integrate start re-enters when ready
+ * (already-integrated tasks keep their status, the merge order simply recomputes).
+ */
+export function runReopen(opts: RunOpOptions): Envelope {
+  const startedAt = Date.now();
+  return withRunTransaction(opts, startedAt, (runDir) => {
+    const flip = flipRun(runDir, ['integrating'], 'active');
+    if (!flip.ok) {
+      return failEnvelope('invalid_transition', `Run ${opts.runId} is ${flip.was}; reopen applies to integrating runs.`, { startedAt });
+    }
+    appendEvent(runDir, { event: 'integration_reopened', actor: { type: 'user', id: 'user' }, run_id: opts.runId, payload: {} });
+    return okEnvelope({
+      message: `Run ${opts.runId} reopened: back to active. Add/publish the missing work, then integrate start again.`,
+      data: { run_status: 'active' },
+      nextActions: [
+        `Add the missing task: sigmarun task add ${opts.runId} --file=<task.json>`,
+        `Re-enter integration when ready: sigmarun integrate start ${opts.runId}`,
+      ],
+      startedAt,
+    });
+  });
+}
+
+/**
  * Cancel a run (docs/15 §2.3): planned/active/paused/integrating only — reported results are frozen
  * and can only be archived (2026-07-10 adjudication). Cascades every live claim and non-terminal task
  * (BDD-007-09); the integration branch, if any, is left for manual handling.
