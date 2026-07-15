@@ -494,6 +494,74 @@ export function reviewDecide(opts: ReviewDecideOptions): Envelope {
   });
 }
 
+export interface BlockOptions extends ReviewClaimOptions {
+  msgId: string;
+}
+
+/**
+ * 15 §3.3 working -> blocked — the OWNER's entry (review-block covers the reviewer's). A working
+ * task's lease keeps burning while its owner waits on a posted blocker, so following the protocol
+ * (ask, then wait) ended in a stale sweep reclaiming a live agent (S2). blocked is sweep-exempt
+ * (claim-engine sweepExpired), so this flip IS the lease freeze. The blocker message is mandatory:
+ * AUD-024 requires every blocked task to carry one, and unblock is what lifts it.
+ */
+export function blockTask(opts: BlockOptions): Envelope {
+  const startedAt = Date.now();
+  return withRunLock(opts, startedAt, (runDir, runId) => {
+    const taskFile = join(runDir, 'tasks', opts.taskId, 'task.json');
+    if (!existsSync(taskFile)) {
+      return failEnvelope('task_not_found', `Task ${opts.taskId} does not exist on ${runId}.`, { startedAt });
+    }
+    const stores = loadClaims(runDir, runId);
+    const found = findActiveClaim(stores, opts.taskId, opts.agentId);
+    if (!('claim' in found)) return failEnvelope(found.code, found.message, { startedAt });
+    const task = readJsonState(taskFile);
+    const status = (task.doc as { status: string }).status;
+    if (status !== 'working') {
+      return failEnvelope('invalid_transition', `Task ${opts.taskId} is ${status}; block applies to working.`, { startedAt });
+    }
+    const msgFile = join(runDir, 'context', 'messages.jsonl');
+    const lines = existsSync(msgFile)
+      ? readFileSync(msgFile, 'utf8').split('\n').filter(Boolean).map((l) => {
+          try { return JSON.parse(l) as { message_id?: string; type?: string; task_id?: string | null }; } catch { return null; }
+        }).filter((m): m is { message_id?: string; type?: string; task_id?: string | null } => m !== null)
+      : [];
+    const blocker = lines.find((m) => m.message_id === opts.msgId);
+    if (!blocker || blocker.type !== 'blocker' || blocker.task_id !== opts.taskId) {
+      return failEnvelope('schema_invalid',
+        `--msg must name a blocker message on ${opts.taskId}; ${opts.msgId} ${!blocker ? 'does not exist' : blocker.type !== 'blocker' ? `is a ${blocker.type}` : 'targets a different task'}.`, {
+        nextActions: [`Post it first: sigmarun msg post ${runId} --from=${opts.agentId} --type=blocker --task=${opts.taskId} --body="..."`],
+        startedAt,
+      });
+    }
+
+    (task.doc as { status: string }).status = 'blocked';
+    writeJsonStateAtomic(taskFile, task.doc as Record<string, unknown>, { expectedRev: task.rev });
+    const listFile = join(runDir, 'team-task-list.json');
+    const list = readJsonState(listFile);
+    const row = (list.doc as { tasks: TaskRow[] }).tasks.find((r) => r.task_id === opts.taskId);
+    if (row) row.status = 'blocked';
+    writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
+    appendEvent(runDir, {
+      event: 'task_blocked',
+      actor: { type: 'agent', id: opts.agentId },
+      run_id: runId,
+      task_id: opts.taskId,
+      claim_id: found.claim.claim_id,
+      payload: { message_id: opts.msgId },
+    });
+    return okEnvelope({
+      message: `${opts.taskId} blocked on ${opts.msgId}; the lease is frozen until unblock.`,
+      data: { task_id: opts.taskId, message_id: opts.msgId },
+      nextActions: [
+        `Answer the blocker: sigmarun msg post ${runId} --from=user --type=answer --reply-to=${opts.msgId} --body="..."`,
+        `Then resume: sigmarun unblock ${runId} ${opts.taskId} --agent=${opts.agentId}`,
+      ],
+      startedAt,
+    });
+  });
+}
+
 /** 15 §3.3 blocked -> working (unblock; owner or user; event #15). */
 export function unblockTask(opts: ResumeOptions & { reason?: string }): Envelope {
   const startedAt = Date.now();
@@ -518,21 +586,23 @@ export function unblockTask(opts: ResumeOptions & { reason?: string }): Envelope
         return failEnvelope('not_claim_owner', `Only a task owner or the user may unblock ${opts.taskId}; pass --agent=user for a human override.`, { startedAt });
       }
     }
-    (task.doc as { status: string }).status = 'working';
-    writeJsonStateAtomic(taskFile, task.doc as Record<string, unknown>, { expectedRev: task.rev });
-    const listFile = join(runDir, 'team-task-list.json');
-    const list = readJsonState(listFile);
-    const row = (list.doc as { tasks: TaskRow[] }).tasks.find((r) => r.task_id === opts.taskId);
-    if (row) row.status = 'working';
-    writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
     // docs/15 line 199 + §5.1 line 223: a working task holds exactly one ACTIVE claim, and the
     // lease is reset on blocked -> working. review-block inherited a 'submitted' owner claim and
     // never revived it, so without this the task became permanently unclaimable (state-machine
-    // review Finding 1: submit/resume/release/reclaim all fail; only `task cancel` escaped).
+    // review Finding 1). A task RECLAIMED while blocked (docs/10 §10 parking) has no revivable
+    // claim at all — it goes back to ready (claimable), never to working-without-a-claim.
     const stores = loadClaims(runDir, runId);
     const owner = stores.taskClaims.doc.claims.find(
       (c) => c.task_id === opts.taskId && ['submitted', 'completed', 'active'].includes(c.status),
     );
+    const nextStatus = owner ? 'working' : 'ready';
+    (task.doc as { status: string }).status = nextStatus;
+    writeJsonStateAtomic(taskFile, task.doc as Record<string, unknown>, { expectedRev: task.rev });
+    const listFile = join(runDir, 'team-task-list.json');
+    const list = readJsonState(listFile);
+    const row = (list.doc as { tasks: TaskRow[] }).tasks.find((r) => r.task_id === opts.taskId);
+    if (row) row.status = nextStatus;
+    writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
     if (owner) {
       const run = readJsonState(join(runDir, 'run.json')).doc as { default_policy?: { claim_ttl_minutes?: number } };
       const ttl = (run.default_policy?.claim_ttl_minutes ?? 30) * 60_000;
@@ -546,11 +616,11 @@ export function unblockTask(opts: ResumeOptions & { reason?: string }): Envelope
       run_id: runId,
       task_id: opts.taskId,
       claim_id: owner?.claim_id,
-      payload: { reason: opts.reason ?? null, claim_revived: Boolean(owner) },
+      payload: { reason: opts.reason ?? null, claim_revived: Boolean(owner), to: nextStatus },
     });
     return okEnvelope({
-      message: `${opts.taskId} unblocked; back to working.`,
-      data: { task_id: opts.taskId },
+      message: owner ? `${opts.taskId} unblocked; back to working.` : `${opts.taskId} unblocked; no live claim to revive — back to ready (claimable).`,
+      data: { task_id: opts.taskId, to: nextStatus },
       startedAt,
     });
   });

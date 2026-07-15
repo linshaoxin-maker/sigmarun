@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { setVerbose } from '@sigmarun/storage';
 import { initProject, doctorProject, importRun, publishTasks, runShow, readEvents, migrateState, backupList, restoreBackup, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, taskAdd, taskCancel, taskDone, failEnvelope, type Envelope, type DoctorCheck, GATEWAY_VERSION } from '@sigmarun/core';
-import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, verifySubmit, listWorktrees, pruneWorktrees } from '@sigmarun/dispatch';
+import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, blockTask, verifySubmit, listWorktrees, pruneWorktrees } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, showGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
 import { statusRun, runList, taskShow, evidenceShow, watchOnce } from '@sigmarun/watch';
@@ -64,7 +64,7 @@ function flag(argv: string[], name: string): string | undefined {
 const VALUE_FLAGS = new Set([
   'agent', 'task', 'role', 'tool', 'label', 'paths', 'evidence', 'review', 'verify', 'path', 'branch',
   'from', 'type', 'body', 'to', 'reply-to', 'refs', 'file', 'entry', 'section', 'supersedes', 'tasks',
-  'merge-commit', 'reason', 'interval', 'since', 'limit', 'note', 'team-root',
+  'merge-commit', 'reason', 'interval', 'since', 'limit', 'note', 'team-root', 'msg',
 ]);
 
 /** Command groups and their subcommands — used to answer `task lst` with the task menu, not "Unknown command: task". */
@@ -142,7 +142,8 @@ const HELP_TEXT = [
   'Worktrees:  worktree register <RUN> <TASK> --agent=<A> --path=<p> --branch=<b> | worktree adopt <RUN> <TASK> --agent=<A> | worktree list <RUN> | worktree prune <RUN> [--dry-run]',
   'Deliver:    submit <RUN> <TASK> --agent=<A> --evidence=<draft.json> | evidence show <RUN> <TASK>',
   'Done (light): done <RUN> <TASK> --agent=<A> [--note=..] — complete a claimed task directly (lightweight runs)',
-  'Gates:      review claim|approve|request-changes|block <RUN> <TASK> --agent=<A> [--review=<r.json>] | resume <RUN> <TASK> --agent=<A> | unblock <RUN> <TASK>',
+  'Gates:      review claim|approve|request-changes|block <RUN> <TASK> --agent=<A> [--review=<r.json>] | resume <RUN> <TASK> --agent=<A>',
+  'Blocking:   block <RUN> <TASK> --agent=<A> --msg=<MSG-ID> (freeze the lease while a blocker awaits its answer) | unblock <RUN> <TASK> --agent=<A|user>',
   '            verify submit <RUN> --agent=<A> --verify=<v.json>   (draft: {target:{kind:task|run,..},checks:[{name,cmd,exit_code,output_file,status}],gates,skip_reasons,verdict,failures_mapped})',
   'Finish:     integrate start <RUN> | integrate record <RUN> <TASK> --merge-commit=<sha> | --failed --reason=".." | report <RUN> | export <RUN> --to=<dir> [--force]',
   'Context:    msg post <RUN> --from=<A|user> --type=<t> --body=".." [--task=T] [--reply-to=MSG] | msg list <RUN> [--open] [--type=t]',
@@ -449,6 +450,14 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
         }
       }
     }
+  } else if (cmd === 'block') {
+    const runId = args[1];
+    const taskId = args[2];
+    const agentId = flag(argv, 'agent');
+    const msgId = flag(argv, 'msg');
+    env = !runId || !taskId || !agentId || !msgId
+      ? failEnvelope('usage_error', 'Usage: sigmarun block <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --msg=<MSG-ID> (post the blocker first via msg post --type=blocker)')
+      : blockTask({ ...base, runId, taskId, agentId, msgId });
   } else if (cmd === 'resume' || cmd === 'unblock') {
     const runId = args[1];
     const taskId = args[2];

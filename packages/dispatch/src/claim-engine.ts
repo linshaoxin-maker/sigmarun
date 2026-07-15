@@ -147,6 +147,17 @@ export function saveState(file: string, doc: Record<string, unknown>, rev: numbe
 
 export const ACTIVE = (c: { status: string }) => c.status === 'active';
 
+/** An unanswered blocker message on the task (open question the run is waiting on). */
+function hasOpenBlocker(runDir: string, taskId: string): boolean {
+  const f = join(runDir, 'context', 'messages.jsonl');
+  if (!existsSync(f)) return false;
+  const msgs = readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => {
+    try { return JSON.parse(l) as { message_id?: string; type?: string; task_id?: string | null; in_reply_to?: string }; } catch { return null; }
+  }).filter((m): m is NonNullable<typeof m> => m !== null);
+  const answered = new Set(msgs.filter((m) => m.type === 'answer' && m.in_reply_to).map((m) => m.in_reply_to as string));
+  return msgs.some((m) => m.type === 'blocker' && m.task_id === taskId && !answered.has(m.message_id ?? ''));
+}
+
 function slugify(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'task';
 }
@@ -327,8 +338,12 @@ function applyReclaim(
       writeJsonStateAtomic(wtFile, wt.doc as Record<string, unknown>, { expectedRev: wt.rev });
     }
   }
+  // docs/10 §10: a reclaimed task with an UNANSWERED blocker parks at blocked, not ready —
+  // re-offering it to the queue would run the next claimer into the same wall. unblock (after
+  // the answer) sends it back to ready.
+  const parkedStatus = hasOpenBlocker(runDir, claim.task_id) ? 'blocked' : 'ready';
   const tdoc = task.doc as Record<string, unknown>;
-  tdoc.status = 'ready';
+  tdoc.status = parkedStatus;
   const attempts = (tdoc.previous_attempts as Array<Record<string, unknown>> | undefined) ?? [];
   attempts.push({
     attempt: claim.attempt,
@@ -342,7 +357,7 @@ function applyReclaim(
   tdoc.previous_attempts = attempts;
   writeJsonStateAtomic(join(runDir, 'tasks', claim.task_id, 'task.json'), tdoc, { expectedRev: task.rev });
   if (row) {
-    row.status = 'ready';
+    row.status = parkedStatus;
     row.owner_agent_id = null;
     row.claim_id = null;
   }
@@ -356,7 +371,7 @@ function applyReclaim(
     payload:
       terminal === 'released'
         ? { attempt: claim.attempt, released_claim_ids: [claim.claim_id, ...releasedPathIds], reason: how.reason }
-        : { reclaim_reason: how.reason, triggered_by: how.triggeredBy ?? null },
+        : { reclaim_reason: how.reason, triggered_by: how.triggeredBy ?? null, ...(parkedStatus === 'blocked' ? { parked: 'blocked' } : {}) },
   };
 }
 
