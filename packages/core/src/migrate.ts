@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import {
   GatewayError, resolveTeamRoot, readJsonState, parseSchemaVersion, currentSchemaMajor, writeBackup,
   type ResolveOptions,
@@ -93,8 +93,8 @@ export function migrateState(opts: MigrateOptions): Envelope {
     const byRun = new Map<string, typeof pending>();
     const projectFiles: typeof pending = [];
     for (const p of pending) {
-      if (p.file.startsWith(runsRoot + '/')) {
-        const runId = p.file.slice(runsRoot.length + 1).split('/')[0]!;
+      if (p.file.startsWith(runsRoot + sep)) {
+        const runId = p.file.slice(runsRoot.length + 1).split(sep)[0]!;
         byRun.set(runId, [...(byRun.get(runId) ?? []), p]);
       } else {
         projectFiles.push(p);

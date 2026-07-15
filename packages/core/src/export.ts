@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { GatewayError, resolveRepoRelativeInside, resolveTeamRoot, scanForSecrets, type ResolveOptions } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope } from './envelope.js';
 
@@ -126,7 +126,7 @@ export function exportRun(opts: ExportOptions): Envelope {
   }
   const targetRealBase = realpathSync(nearestExistingPath(target));
   const teamReal = realpathSync(teamRoot);
-  if (target === teamRoot || target.startsWith(teamRoot + '/') || targetRealBase === teamReal || targetRealBase.startsWith(teamReal + '/')) {
+  if (target === teamRoot || target.startsWith(teamRoot + sep) || targetRealBase === teamReal || targetRealBase.startsWith(teamReal + sep)) {
     return failEnvelope('export_target_invalid', 'Target must not be inside .team/ (the export exists to leave it).', { startedAt });
   }
   const ignored = (() => {

@@ -9,6 +9,7 @@ import { join } from 'node:path';
  */
 
 const ROOT = join(__dirname, '..', '..');
+const posix = (p: string): string => p.split('\\').join('/'); // Windows CI runs this too
 const PKGS = ['storage', 'core', 'dispatch', 'context', 'adapters', 'watch', 'audit', 'cli'];
 
 /** Allowed @sigmarun/* imports per package (docs/20 §5, amended per D23 + R3 reality). */
@@ -45,7 +46,7 @@ describe('architecture reconciliation (docs/20 §5 dependency matrix; E1 single 
         const text = readFileSync(file, 'utf8');
         for (const m of text.matchAll(/from '@sigmarun\/([a-z-]+)'/g)) {
           const dep = m[1]!;
-          if (!ALLOWED[pkg]!.includes(dep)) offenses.push(`${pkg} -> ${dep} (${file.slice(ROOT.length + 1)})`);
+          if (!ALLOWED[pkg]!.includes(dep)) offenses.push(`${pkg} -> ${dep} (${posix(file.slice(ROOT.length + 1))})`);
         }
       }
     }
@@ -70,7 +71,7 @@ describe('architecture reconciliation (docs/20 §5 dependency matrix; E1 single 
     for (const pkg of PKGS) {
       for (const file of srcFiles(pkg)) {
         const text = readFileSync(file, 'utf8');
-        if (/tryAcquireLock\(runLockPath\(/.test(text)) holders.push(file.slice(ROOT.length + 1));
+        if (/tryAcquireLock\(runLockPath\(/.test(text)) holders.push(posix(file.slice(ROOT.length + 1)));
       }
     }
     expect(holders).toEqual(['core/src/tx.ts']);
@@ -83,7 +84,7 @@ describe('architecture reconciliation (docs/20 §5 dependency matrix; E1 single 
     for (const pkg of PKGS) {
       for (const file of srcFiles(pkg)) {
         const text = readFileSync(file, 'utf8');
-        if (/tryAcquireLock\(join\(/.test(text)) holders.push(file.slice(ROOT.length + 1));
+        if (/tryAcquireLock\(join\(/.test(text)) holders.push(posix(file.slice(ROOT.length + 1)));
       }
     }
     expect(holders.sort()).toEqual(['context/src/memory-promote.ts', 'core/src/run-import.ts']);
@@ -95,7 +96,7 @@ describe('architecture reconciliation (docs/20 §5 dependency matrix; E1 single 
       for (const file of srcFiles(pkg)) {
         const text = readFileSync(file, 'utf8');
         if (/export const EVENT_STATUS\s*[:=]/.test(text) || /const EVENT_STATUS\s*:\s*Record/.test(text)) {
-          definers.push(file.slice(ROOT.length + 1));
+          definers.push(posix(file.slice(ROOT.length + 1)));
         }
       }
     }

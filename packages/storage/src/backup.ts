@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 
 /**
  * Unified backup store (roadmap Phase 2 — close the recovery loop). repair and migrate both snapshot
@@ -30,7 +30,9 @@ export function writeBackup(teamRoot: string, kind: string, absFiles: string[]):
   const files: string[] = [];
   for (const abs of absFiles) {
     if (!existsSync(abs)) continue;
-    const rel = abs.slice(teamRoot.length + 1);
+    // manifest paths are PORTABLE (forward slashes) like every other protocol ref —
+    // a backup written on Windows must restore anywhere (first real Windows CI finding).
+    const rel = abs.slice(teamRoot.length + 1).split(sep).join('/');
     const dest = join(root, rel);
     mkdirSync(dirname(dest), { recursive: true });
     copyFileSync(abs, dest);
