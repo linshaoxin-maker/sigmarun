@@ -43,6 +43,39 @@ describe('msg post (docs/12 §6; INV-011 no event mirror)', () => {
     expect(eventCount()).toBe(before);
   });
 
+  it('a claim owner posting piggyback-renews their lease with a heartbeat event (RULE 7 / docs/15 §8; S2)', async () => {
+    const { claimNext } = await import('@sigmarun/dispatch');
+    const { readJsonState, writeJsonStateAtomic } = await import('@sigmarun/storage');
+    claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent });
+    // age the lease down to one minute — the sweep horizon is approaching
+    const f = join(runDir(), 'claims', 'task-claims.json');
+    const { doc, rev } = readJsonState(f);
+    (doc as { claims: Array<{ lease_until: string }> }).claims[0]!.lease_until = new Date(Date.now() + 60_000).toISOString();
+    writeJsonStateAtomic(f, doc as Record<string, unknown>, { expectedRev: rev });
+
+    const env = postMessage({
+      cwd: repo, runId: 'RUN-0001', fromAgentId: agent, type: 'blocker', taskId: 'TASK-0001',
+      body: 'Waiting on a human decision about the schema.',
+    });
+    expect(env.ok).toBe(true);
+    const claim = JSON.parse(readFileSync(f, 'utf8')).claims[0];
+    expect(Date.parse(claim.lease_until)).toBeGreaterThan(Date.now() + 20 * 60_000); // fresh TTL, not 1 min
+    const pathClaim = JSON.parse(readFileSync(join(runDir(), 'claims', 'path-claims.json'), 'utf8')).claims[0];
+    expect(pathClaim.lease_until).toBe(claim.lease_until);
+    expect((env.data as { lease_extended: unknown[] }).lease_extended.length).toBe(1);
+    // the lease change is real state, so it IS evented (message stays unmirrored per INV-011)
+    const events = readFileSync(join(runDir(), 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const hb = events[events.length - 1];
+    expect(hb.event).toBe('heartbeat');
+    expect(hb.payload.piggyback).toBe('msg_post');
+
+    // posting as user never touches leases — no false liveness on someone else's claim
+    const before = events.length;
+    postMessage({ cwd: repo, runId: 'RUN-0001', fromAgentId: 'user', type: 'answer', body: 'Decision: keep v1.' });
+    const after = readFileSync(join(runDir(), 'events.jsonl'), 'utf8').trim().split('\n').length;
+    expect(after).toBe(before);
+  });
+
   it('rejects unknown type and empty body as schema_invalid', () => {
     const bad = postMessage({ cwd: repo, runId: 'RUN-0001', fromAgentId: agent, type: 'gossip', body: 'hi' });
     expect(bad.ok).toBe(false);

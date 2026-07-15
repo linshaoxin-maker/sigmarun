@@ -190,9 +190,81 @@ export function postMessage(opts: PostMessageOptions): Envelope {
     appendFileSync(join(runDir, 'context', 'messages.jsonl'), JSON.stringify(line) + '\n', 'utf8');
     writeJsonStateAtomic(countersFile, { ...cdoc, next_msg: n + 1 }, { expectedRev: counters.rev });
     // INV-011: messages are collaboration context, not audit events — no events.jsonl mirror.
+
+    // docs/15 §8 + adapter RULE 7: an owner's write primitives piggyback-renew their leases.
+    // An agent posting a blocker/question while waiting for an answer must not decay into a
+    // stale claim and get swept (remediation S2). Unlike the message itself, the lease change
+    // is real claim state, so it IS evented — one heartbeat per renewed claim keeps AUD-032's
+    // rev_after snapshot honest. 'user' posts never touch leases (no false liveness).
+    const renewed: Array<{ claim_id: string; task_id: string | null; lease_until: string }> = [];
+    if (opts.fromAgentId !== 'user') {
+      const policy =
+        (readJsonState(join(runDir, 'run.json')).doc as { default_policy?: { claim_ttl_minutes?: number; review_ttl_minutes?: number } })
+          .default_policy ?? {};
+      const nowMs = Date.now();
+      const tcFile = join(runDir, 'claims', 'task-claims.json');
+      if (existsSync(tcFile)) {
+        const lease = new Date(nowMs + (policy.claim_ttl_minutes ?? 30) * 60_000).toISOString();
+        const tc = readJsonState(tcFile);
+        const tdoc = tc.doc as { claims: Array<{ claim_id: string; task_id: string; agent_id: string; status: string; lease_until: string; last_heartbeat_at: string }> };
+        const mine = tdoc.claims.filter((c) => c.agent_id === opts.fromAgentId && c.status === 'active');
+        if (mine.length > 0) {
+          for (const c of mine) {
+            c.lease_until = lease;
+            c.last_heartbeat_at = new Date(nowMs).toISOString();
+            renewed.push({ claim_id: c.claim_id, task_id: c.task_id, lease_until: lease });
+          }
+          writeJsonStateAtomic(tcFile, tc.doc as Record<string, unknown>, { expectedRev: tc.rev });
+          const pcFile = join(runDir, 'claims', 'path-claims.json');
+          if (existsSync(pcFile)) {
+            const owned = new Set(mine.map((c) => c.task_id));
+            const pc = readJsonState(pcFile);
+            const pdoc = pc.doc as { claims: Array<{ task_id: string; status: string; lease_until: string }> };
+            let touched = false;
+            for (const p of pdoc.claims) {
+              if (p.status === 'active' && owned.has(p.task_id)) {
+                p.lease_until = lease;
+                touched = true;
+              }
+            }
+            if (touched) writeJsonStateAtomic(pcFile, pc.doc as Record<string, unknown>, { expectedRev: pc.rev });
+          }
+        }
+      }
+      const rcFile = join(runDir, 'claims', 'review-claims.json');
+      if (existsSync(rcFile)) {
+        const gateLease = new Date(nowMs + (policy.review_ttl_minutes ?? 20) * 60_000).toISOString();
+        const rc = readJsonState(rcFile);
+        const rdoc = rc.doc as { claims: Array<{ claim_id: string; task_id: string; reviewer_agent_id: string; status: string; lease_until: string }> };
+        const gates = rdoc.claims.filter((c) => c.reviewer_agent_id === opts.fromAgentId && c.status === 'active');
+        if (gates.length > 0) {
+          for (const g of gates) {
+            g.lease_until = gateLease;
+            renewed.push({ claim_id: g.claim_id, task_id: g.task_id, lease_until: gateLease });
+          }
+          writeJsonStateAtomic(rcFile, rc.doc as Record<string, unknown>, { expectedRev: rc.rev });
+        }
+      }
+      for (const r of renewed) {
+        appendEvent(runDir, {
+          event: 'heartbeat',
+          actor: { type: 'agent', id: opts.fromAgentId },
+          run_id: runId,
+          ...(r.task_id ? { task_id: r.task_id } : {}),
+          claim_id: r.claim_id,
+          payload: { lease_until: r.lease_until, piggyback: 'msg_post', message_id: messageId },
+        });
+      }
+    }
+
     return okEnvelope({
       message: `Posted ${messageId} (${opts.type}) to ${line.to}.`,
-      data: { message_id: messageId, to: line.to, type: opts.type },
+      data: {
+        message_id: messageId,
+        to: line.to,
+        type: opts.type,
+        lease_extended: renewed.map((r) => ({ claim_id: r.claim_id, lease_until: r.lease_until })),
+      },
       warnings,
       startedAt,
     });
