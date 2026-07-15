@@ -1,39 +1,25 @@
-# Current State — sigmarun / Team Run Protocol
+# 当前状态（current-state）
 
-> 更新：2026-07-10 ｜ Mode: Full ｜ Layout: workspace-grouped
-> 本目录是方法论工作区；设计语料库是同级的编号文档 00–25（保持原位，不迁移）。
+> 最后刷新：2026-07-15（整改 R4 收官）。上一版停在 2026-07-10「P5 未开始」，中间 P5 全量交付、多轮真机验证、roadmap 两阶段、轻量模式与整改 R0–R4 均未刷新——该文件的失鲜本身是 2026-07-15 审查的发现之一。
 
-## 项目是什么
+## 一句话
 
-面向 AI4Coding 的 repo-local 多智能体协作协议 + gateway（CLI 名 `sigmarun`，D12）。Claude Code / Codex 出智能，gateway 出秩序，`.team/` 是事实源。北极星验收见 [../README.md](../README.md)。
+sigmarun 0.1.0：八包 monorepo（storage/core/dispatch/context/adapters/watch/audit/cli），全特性 + 轻量模式 + 整改 R0–R4 完毕；311 测试全绿（含真进程并发、13 个卡点场景回归、四张机器对账）；npm 发布仅差用户侧动作（填 repository OWNER、`npm publish`）。
 
-## 现在有什么（2026-07-10 快照）
+## 里程碑（倒序）
 
-| 资产 | 状态 | 位置 |
-|---|---|---|
-| 设计语料库 27 份（用户手册 00 + 设计 01–12 + 审计决策 13 + 合同 14–25） | **全部定稿**，经三轮 review + reconciliation 回写 | `../00-*.md` … `../25-*.md` |
-| 决策账本 D1–D19 | 已定 | [../13 §2.1](../13-design-audit-and-next-breakdown.md) |
-| 缺口台账 M1–M43 + 失败模式 F1–F5 | 全部裁决/登记 | 13 附录 B/C |
-| Codex 触发实测（两轮，跨 0.142.5/0.144） | 全判据通过 | [../19 §8](../19-agent-adapter-pack-claude-codex.md) + `../testkit-codex-trigger/` |
-| 代码 | **尚无一行**（实现仓库未创建） | — |
-| 本方法论工作区 | 本轮建立 | `01-current-state/` `02-phases/` `03-architecture/` `04-decisions/` `05-features/` |
+- 2026-07-15 整改 R0–R4（全面审查 → remediation-design v1.0，D21–D24 裁决）：P0 worktree 修复、13 个复现卡点全关、模式墙+轻量终局+审计轻量档、INV-008 实质贡献判据、block/reopen/--force、TxKernel（版本闸门+lock_takeover+五骨架归一）、needs_user 全流水线、agent 视图、人面渲染、watch 心跳、guidance 注册表、语料库机器对账。
+- 2026-07-13/14 roadmap Phase 1/2 + 轻量模式（events/doctor --fix/prune/--verbose；migrate/backup+restore/release 自动化；lightweight + /team-plan(light) + /team-do）。
+- 2026-07-11 P5 全特性（FEAT-001…011）+ P1 面 + 真机 dogfood ×3 + 发包功能测试 + 开源就绪审查（12 修）+ 英译起步。
 
-## 阶段完成度（详见各 phase 文档的 gate 表）
+## 打开的事
 
-| 阶段 | 状态 | 一句话 |
-|---|---|---|
-| P0 Idea | ✅ G0 全绿 | 定位/边界/旅途/风险/glossary（2026-07-10） |
-| P1 Requirement | ✅ G1 全绿 | R-001…013、UC-001…009、NFR×9、UX×5、ASM×6、安全合规 |
-| P2 Spec | ✅ G2 全绿 | Functional Spec + BR-001 + ERR-001…006 + 17 §3 全量错误码映射 + **BDD 55 场景** |
-| P3 Design | ✅ G3 全绿 | 4+1/C4/合同/ADR/STRIDE/impact matrix（G3-17 SKIPPED 留痕） |
-| P4 Feature | ✅ G4 全绿 | FEAT-001…011 + 依赖 DAG + Impact Matrix（G4-7 N/A） |
-| P5 MVP | 未开始 | **唯一剩余**：commit 基线 → TS monorepo → FEAT-001 |
+- 发布：填 GitHub OWNER、`npm publish --access public --tag next`、推 tag 走 release workflow（用户侧）。
+- P1/P2 挂账：`deinit`；`memory show`；audit 子命令族；完整 RunTx 写句柄类型化；MCP serve（形态 C）；docs 全量英译；docs/23 dashboard。
+- 已知限制（记档非缺陷）：锁 stale=30s 无续期（超长事务理论接管窗，CLI 体量概率极低）；appendEvent 两步非原子（AUD-033 检出 + repair 前滚闭环）。
 
-## 下一步（按序）
+## 权威指针
 
-1. `git commit` 设计基线（待用户发令；worktree 目前全部为本项目新增文件，无无关改动）。
-2. P5 开工：仓库根按 [../20](../20-c4-l2-l3-component-contracts.md) 九包建 TS monorepo，从 FEAT-001 起逐个走 `05-features/FEAT-XXX/`（失败测试先行）。
-
-## project-knowledge
-
-见 [project-knowledge/README.md](project-knowledge/README.md)（随首批条目启用）。
+- 阶段与验收：docs/02-phases/remediation-design-2026-07-15.md（P-1…P-4）
+- 决策：docs/13 D1–D24 + docs/04-decisions/ADR-020…024
+- 轻量模式：docs/26；命令面：docs/17 §1（机器对账）

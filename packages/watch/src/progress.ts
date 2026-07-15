@@ -477,3 +477,38 @@ export function agentList(opts: AgentListOptions): Envelope {
     startedAt,
   });
 }
+
+export interface TaskListOptions extends ResolveOptions {
+  runId: string;
+  status?: string;
+  owner?: string;
+  type?: string;
+}
+
+/** Filterable task index (docs/17 §1 `team task list`, promised MVP — implemented in R4). */
+export function taskList(opts: TaskListOptions): Envelope {
+  const startedAt = Date.now();
+  const ctx = openRun(opts);
+  if (ctx instanceof GatewayError) return failEnvelope(ctx.code, ctx.message, { startedAt });
+  const rows = (readJsonState(join(ctx.runDir, 'team-task-list.json')).doc as { tasks: Array<Row & { type?: string }> }).tasks;
+  const tasks = rows
+    .filter((r) => !opts.status || r.status === opts.status)
+    .filter((r) => !opts.owner || r.owner_agent_id === opts.owner)
+    .filter((r) => !opts.type || (r as { type?: string }).type === opts.type)
+    .map((r) => ({
+      task_id: r.task_id,
+      title: r.title,
+      type: (r as { type?: string }).type,
+      status: r.status,
+      owner_agent_id: r.owner_agent_id,
+      depends_on: r.depends_on ?? [],
+    }));
+  const filters = [opts.status && `status=${opts.status}`, opts.owner && `owner=${opts.owner}`, opts.type && `type=${opts.type}`]
+    .filter(Boolean)
+    .join(', ');
+  return okEnvelope({
+    message: `${tasks.length} task(s) on ${ctx.runId}${filters ? ` (${filters})` : ''}.`,
+    data: { tasks },
+    startedAt,
+  });
+}

@@ -1,5 +1,8 @@
 # 00. 用户使用手册（User Guide）
 
+> **修订注（2026-07-15，整改 R0–R4 回写）**：命令面以 [17](17-cli-mcp-contract-and-error-model.md) §1（机器对账表）为准——新增 `run reopen`、`block`、`agent list`、`task list`、`done`、`events`、`reclaim --force --agent=user`、`init --example`、`migrate`、`backup list`/`restore`、`worktree prune`、全局 `--verbose`/`--team-root`。**轻量模式**（5 命令闭环，推荐首次接触）见 [26](26-lightweight-mode.md)；本文主体描述 full 流水线。`status` 的 Needs-user 现覆盖全部流水线等待态并给可执行命令；`watch` 循环逐 tick 输出。
+
+
 > 日期：2026-07-11
 > 状态：v0.2（随实现迭代；本文是未来实现仓库 README 的底稿）
 > 读者：**使用者**，不是协议设计者。只讲如何使用，以及人、coding agent、gateway 各自负责什么。

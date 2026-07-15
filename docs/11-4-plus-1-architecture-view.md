@@ -1,5 +1,8 @@
 # 11. 4+1 Architecture View
 
+> **修订注（2026-07-15，整改 R3 回写）**：①实况为**八包**——`mcp-server` 仍为 contract-only；`read-model` 职责由 **watch** 包承担（status/progress/task 查询面），文中九包图按此解读。②run 锁物理路径为 `runs/<RUN>/run.lock`（`locks/` 子目录仅 watch.lock）。③事务骨架已归一至 `core/tx.ts::withRunTx`（版本闸门+锁+接管留证一处实现），写序契约收敛为「**events 最后 = 提交点**」+推荐序（详情→索引→claims→派生）。④状态词汇与 EVENT_STATUS 单源于 `core/state-machine.ts`。⑤依赖矩阵由 `packages/core/test/architecture.test.ts` 机器对账。轻量模式见 [26](26-lightweight-mode.md)。
+
+
 > 目标：从 4+1 视图重新组织 Team Run Protocol 的架构。前面的文档按用户旅途和能力拆；这一篇按软件工程架构视角拆，回答“这个系统由什么组成、怎么运行、怎么开发、跑在哪里、用哪些场景验证自洽”。
 
 ---

@@ -4,7 +4,7 @@ import { initProject, doctorProject, importRun, publishTasks, runShow, readEvent
 import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, blockTask, verifySubmit, listWorktrees, pruneWorktrees } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, showGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
-import { statusRun, runList, taskShow, evidenceShow, agentList, watchOnce } from '@sigmarun/watch';
+import { statusRun, runList, taskShow, taskList, evidenceShow, agentList, watchOnce } from '@sigmarun/watch';
 import { auditRun, repairRun } from '@sigmarun/audit';
 
 const EXIT_BY_CODE: Record<string, number> = {
@@ -62,14 +62,34 @@ function flag(argv: string[], name: string): string | undefined {
 
 /** Flags that carry a value (everything else is boolean). Drives the `--flag value` misuse diagnosis. */
 const VALUE_FLAGS = new Set([
-  'agent', 'task', 'role', 'tool', 'label', 'paths', 'evidence', 'review', 'verify', 'path', 'branch',
+  'agent', 'task', 'role', 'tool', 'label', 'paths', 'evidence', 'review', 'verify', 'path', 'branch', 'status', 'owner',
   'from', 'type', 'body', 'to', 'reply-to', 'refs', 'file', 'entry', 'section', 'supersedes', 'tasks',
   'merge-commit', 'reason', 'interval', 'since', 'limit', 'note', 'team-root', 'msg',
 ]);
 
+/**
+ * The complete command surface, machine-reconciled against docs/17 §1 (D24): a command added
+ * here without a docs row — or promised in docs without an entry here — is a red test, not a
+ * drift discovered two audits later. Keep alphabetical within groups.
+ */
+export const COMMAND_SURFACE: string[] = [
+  'init', 'doctor', 'adapter install',
+  'run import', 'run list', 'run show', 'run pause', 'run resume', 'run cancel', 'run archive', 'run reopen',
+  'task publish', 'task add', 'task list', 'task cancel', 'task show',
+  'agent register', 'agent list',
+  'claim-next', 'heartbeat', 'release', 'reclaim', 'approve-paths',
+  'worktree register', 'worktree adopt', 'worktree list', 'worktree prune',
+  'submit', 'done', 'block', 'unblock', 'resume', 'evidence show',
+  'review claim', 'review approve', 'review request-changes', 'review block',
+  'verify submit', 'integrate start', 'integrate record', 'report', 'export',
+  'msg post', 'msg list', 'context hydrate', 'graph show', 'graph validate',
+  'memory update', 'memory candidates', 'memory promote',
+  'status', 'events', 'watch', 'audit run', 'repair', 'migrate', 'backup list', 'restore',
+];
+
 /** Command groups and their subcommands — used to answer `task lst` with the task menu, not "Unknown command: task". */
 const GROUP_SUBCOMMANDS: Record<string, string> = {
-  task: 'publish | add | cancel | show',
+  task: 'publish | add | list | cancel | show',
   run: 'import | list | show | pause | resume | cancel | archive | reopen',
   msg: 'post | list',
   worktree: 'register | adopt | list | prune',
@@ -205,7 +225,7 @@ const HELP_TEXT = [
   'Plan:       run import <payload.json> [--lightweight] [--force] | task publish <RUN> [--tasks=..] [--force]',
   'Runs:       run list | run show <RUN> | run pause|resume|cancel|archive|reopen <RUN> | status <RUN> | watch <RUN> [--interval=s]',
   'Observe:    events <RUN> [--task=T] [--type=<event>] [--since=<seq>] [--limit=n] — read the append-only ledger (timeline; --json for full payload)',
-  'Tasks:      task add <RUN> --file=<task.json> | task cancel <RUN> <TASK> [--reason=..] | task show <RUN> <TASK> | graph show|validate <RUN>',
+  'Tasks:      task add <RUN> --file=<task.json> | task list <RUN> [--status --owner --type] | task cancel <RUN> <TASK> [--reason=..] | task show <RUN> <TASK> | graph show|validate <RUN>',
   'Dispatch:   agent register <RUN> --tool=<t> [--role=r] [--label=w] | agent list <RUN> | claim-next <RUN> --agent=<A> [--role=r] [--task=T] [--dry-run]',
   '            heartbeat <RUN> <TASK> --agent=<A> | release <RUN> <TASK> --agent=<A> | reclaim <RUN> <TASK> | approve-paths <RUN> <TASK> --paths=g1,g2',
   'Worktrees:  worktree register <RUN> <TASK> --agent=<A> --path=<p> --branch=<b> | worktree adopt <RUN> <TASK> --agent=<A> | worktree list <RUN> | worktree prune <RUN> [--dry-run]',
@@ -347,6 +367,11 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     }
   } else if (cmd === 'run' && args[1] === 'list') {
     env = runList({ ...base });
+  } else if (cmd === 'task' && args[1] === 'list') {
+    const runId = args[2];
+    env = !runId
+      ? failEnvelope('usage_error', 'Usage: sigmarun task list <RUN-ID> [--status=<s>] [--owner=<AGENT-ID>] [--type=<t>] [--json]')
+      : taskList({ ...base, runId, status: flag(argv, 'status'), owner: flag(argv, 'owner'), type: flag(argv, 'type') });
   } else if (cmd === 'task' && args[1] === 'show') {
     const runId = args[2];
     const taskId = args[3];

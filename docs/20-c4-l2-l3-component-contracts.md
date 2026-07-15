@@ -1,5 +1,8 @@
 # 20. C4 L2/L3 and Component Contracts
 
+> **修订注（2026-07-15，D23 + 整改 R3 回写）**：①§4.6 的「audit 只读」契约修订为 **audit=«规则+重放+修复»**——`repair` 与检测共用 foldLedger 单真值源而留在 audit 包，其约束为「audit 的唯一写路径是 repair，且必须经 TxKernel（acquireRunWriteLock）+ 备份」。②§4.2/§4.5 的 `RunTx` 类型强制持锁按 R3 实况落地为：唯一事务骨架 `core/tx.ts::withRunTx` + 架构对账测试断言全仓仅一处 `tryAcquireLock(runLockPath())`（副本长不回来）；完整写句柄类型化列为 P2。③§5 依赖矩阵以 `architecture.test.ts` 为机检权威：watch 不再依赖 audit（EVENT_STATUS 下沉 core/state-machine）；adapters 是 cli 的运行时依赖（仅写模板文件，不触 .team）。④R4 的 withSweep 全量前置改判为按命令语义选择性开启（claim/watch/gate 侧已内联）。
+
+
 > 日期：2026-07-09
 > 状态：v0.1 设计草案
 > 依据：[13](13-design-audit-and-next-breakdown.md) §6.1（20 号章节要求）与 §5.1 裁决（memory-builder → memory-store）、决策 D1（形态 C 与 CLI 同核）/ D3（TypeScript/Node，glob 用 minimatch）/ D14（被动 CLI 唯一权威 + `team watch`）；[11](11-4-plus-1-architecture-view.md) §5 Development View；[17](17-cli-mcp-contract-and-error-model.md) §1/§3/§4/§5/§7/§9；[15](15-run-task-state-machine-and-lifecycle.md)（状态机归 core）；[14](14-evidence-review-verification-contract.md) / [16](16-git-worktree-and-team-root.md) 引入的记录与命令

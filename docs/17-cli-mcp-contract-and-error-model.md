@@ -10,51 +10,52 @@
 ## 1. 命令总表
 
 > **记号约定（D12 终裁）**：正式 npm 包名与 bin 均为 **`sigmarun`**；本文档集沿用 `team <cmd>` 简记，一律等价于 `sigmarun <cmd>`。协议目录名 `.team/` 不随 CLI 名变化。
+>
+> **修订（2026-07-15，整改 R4 / D24）**：本表已按实现全量对齐，并被 `packages/cli/test/docs-reconciliation.test.ts` **机器对账**——表中 MVP=✓ 的每条命令必须存在于 CLI 命令面（`COMMAND_SURFACE`），反之亦然；漂移即测试红。原表四条未实现的 MVP 承诺处置：`task list` 已实装；`question list` 降级（`msg list --type=question --open` 已覆盖）；`memory show` 降级 P1（`docs/team/MEMORY.md` 本身可读）；`audit` 子命令族降级 P2（`audit run` 覆盖全部 40 规则）。
 
-图例：写 = 需要锁的状态变更；读 = 无锁只读；MVP 列空白 = P1。
+图例：写 = 需要锁的状态变更；读 = 无锁只读；MVP 列空白 = P1/P2 后续。
 
 | 命令 | 读/写 | 锁 | MVP | 归属能力 |
 |---|---|---|---|---|
-| `team init` | 写 | project | ✓ | Record |
-| `team doctor` | 读 | — | ✓ | 运维 |
-| `team run import <payload>` | 写 | project + run | ✓ | Record |
-| `team run show <RUN>` | 读 | — | ✓ | Record |
-| `team run list` | 读 | — | ✓ | Record |
-| `team run pause / resume <RUN>` | 写 | run | ✓ | Dispatch |
-| `team run cancel <RUN>` | 写 | run | ✓ | Dispatch |
-| `team run archive <RUN>` | 写 | run | ✓ | Record |
-| `team task list <RUN> [--status --owner --type]` | 读 | — | ✓ | Record |
-| `team task show <RUN> <TASK>` | 读 | — | ✓ | Record |
-| `team evidence show <RUN> <TASK>` | 读 | — | ✓ | Record（[03](03-team-task-list-and-task-schema.md) §10 既有，正式收编；`/team-evidence` 的底层） |
-| `team task publish <RUN> [--tasks --all]` | 写 | run | ✓ | Record |
-| `team task cancel <RUN> <TASK>` | 写 | run | ✓ | Record |
-| `team agent register <RUN> [--label <窗口名>]` | 写 | run | ✓ | Dispatch（**label 幂等**：同 run 同名 active 注册返回同一 AGENT-ID，D17） |
-| `team claim-next <RUN> [--role --capability --task --dry-run]` | 写 | run | ✓ | Dispatch |
-| `team heartbeat <RUN> <TASK>` | 写 | run | ✓ | Dispatch |
-| `team release <RUN> <TASK>` | 写 | run | ✓ | Dispatch |
-| `team reclaim <RUN> <TASK>` | 写 | run | ✓ | Dispatch |
-| `team block / unblock <RUN> <TASK>` | 写 | run | ✓ | Dispatch |
-| `team worktree register / adopt / list <RUN>` | 写/读 | run | ✓ | Record |
-| `team submit <RUN> <TASK> --evidence <file>` | 写 | run | ✓ | Record/Audit |
+| `team init [--example]` | 写 | project | ✓ | Record（--example 产可直接 import 的示例 payload，R2） |
+| `team doctor [--fix]` | 读（--fix 写） | — | ✓ | 运维 |
+| `team adapter install --tool=claude-code\|codex [--update]` | 写 repo 文件 | — | ✓ | 分发（[22](22-packaging-installation-and-evolution.md)） |
+| `team run import <payload> [--lightweight] [--force]` | 写 | project + run | ✓ | Record（[26](26-lightweight-mode.md)） |
+| `team run show / list` | 读 | — | ✓ | Record（list 含 lightweight+progress_pct，R2） |
+| `team run pause / resume / cancel / archive / reopen <RUN>` | 写 | run | ✓ | Dispatch（reopen=integrating→active，R1/S7） |
+| `team task list / show / publish / cancel / add <RUN>` | 读/写 | 写者 run | ✓ | Record（cancel 带 --reason；add 用 --file） |
+| `team evidence show <RUN> <TASK>` | 读 | — | ✓ | Record |
+| `team agent register / list <RUN>` | 写/读 | run（register） | ✓ | Dispatch（label 幂等 D17；list=谁在干什么，R2） |
+| `team claim-next <RUN> --agent=<A> [--role --task --dry-run]` | 写 | run | ✓ | Dispatch |
+| `team heartbeat <RUN> <TASK> --agent=<A>` | 写 | run | ✓ | Dispatch |
+| `team release <RUN> <TASK> --agent=<A> [--reason]` | 写 | run | ✓ | Dispatch |
+| `team reclaim <RUN> <TASK> [--force --agent=user]` | 写 | run | ✓ | Dispatch（--force=人类接管活租约，R1/S4） |
+| `team block / unblock <RUN> <TASK> --agent=<A>` | 写 | run | ✓ | Dispatch（block 须 --msg=<blocker MSG-ID>，租约冻结，R1/S2） |
+| `team worktree register / adopt / list / prune <RUN>` | 写/读 | 写者 run | ✓ | Record（register 亦收 working-无活树=prune 恢复路，R2/S13） |
+| `team submit <RUN> <TASK> --agent=<A> --evidence=<file>` | 写 | run | ✓ | Record/Audit（轻量 run 返回 mode_mismatch） |
+| `team done <RUN> <TASK> --agent=<A> [--note]` | 写 | run | ✓ | Record（仅轻量 run；[26](26-lightweight-mode.md)） |
 | `team review claim / approve / request-changes / block <RUN> <TASK>` | 写 | run | ✓ | Audit |
-| `team verify <RUN> [--task <TASK>] --record <file>` | 写 | run | ✓ | Audit |
+| `team resume <RUN> <TASK> --agent=<owner>` | 写 | run | ✓ | Dispatch（changes_requested→working） |
+| `team verify submit <RUN> --agent=<A> --verify=<file>` | 写 | run | ✓ | Audit（task/run 双目标；原 `verify --record` 记法废止） |
 | `team approve-paths <RUN> <TASK> --paths` | 写 | run | ✓ | Dispatch |
-| `team integrate start <RUN>` / `team report <RUN>` | 写 | run | ✓ | Record |
-| `team message post / list`、`team question list` | 写/读 | run（post） | ✓ | Context |
+| `team integrate start / record <RUN>` | 写 | run | ✓ | Record |
+| `team report <RUN>` | 写 | run | ✓ | Record（轻量 run 全终态时可自 active 收口，D21） |
+| `team msg post / list <RUN>` | 写/读 | run（post） | ✓ | Context（post 捎带续租 15 §8；question 面由 `msg list --type=question --open` 覆盖） |
 | `team graph show / validate <RUN>` | 读 | — | ✓ | Context |
 | `team context hydrate <RUN> <TASK>` | 写（事件） | run | ✓ | Context |
-| `team memory update / show <RUN> [--task]` | 写/读 | run | ✓ | Context |
-| `team memory promote --run <RUN> --from <ref> --entry ...` | 写 | project + 目标文件 | | Context（L4 晋升，需用户确认；[25](25-project-memory-and-knowledge-promotion.md) §4，P1/Slice 10） |
-| `team progress <RUN>` | 写（派生文件） | run | ✓ | Progress |
-| `team audit run / task / claims / paths / evidence / progress` | 读 | — | ✓ | Audit |
+| `team memory update / candidates / promote <RUN>` | 写 | run / project | ✓ | Context（promote=L4 晋升 [25](25-project-memory-and-knowledge-promotion.md)；update 发 memory_updated 事件，R3） |
+| `team status <RUN>`（别名 `progress`） | 写（派生文件） | — | ✓ | Progress（needs_user 全流水线八类，R2） |
+| `team events <RUN> [--task --type --since --limit]` | 读 | — | ✓ | 运维（账本读取器） |
+| `team audit run <RUN>` | 读 | — | ✓ | Audit（40 规则；轻量 run 用 lightweight profile，[26](26-lightweight-mode.md) §4） |
 | `team repair <RUN>` | 写 | run + 备份 | ✓ | 运维（§5.3，M30） |
 | `team export <RUN> [--to --full --force]` | 读（写 repo 目录） | — | ✓ | Record |
-| `team watch <RUN> [--interval]` | 读 + 周期触发 sweep | 触发时 run | ✓（D14） | Progress |
-| `team task add`（import 后增补任务） | 写 | run | | Record |
-| `team migrate` | 写 | project + run | | 运维（[21](21-schema-versioning-and-migration.md)） |
-| `team backup [--to <dir>]`（支持 repo 外目录，M37） | 读（写备份目录） | — | | 运维（[22](22-packaging-installation-and-evolution.md)） |
-| `team deinit`（零删除：只给清理清单与确认，M43） | 读 | — | | 运维（[22](22-packaging-installation-and-evolution.md)） |
-| `team adapter install`（形态 B 装模板） | 写 repo 文件 | — | | 分发（[22](22-packaging-installation-and-evolution.md)） |
+| `team watch <RUN> [--interval --once --force]` | 读 + 周期 sweep | 触发时 run | ✓（D14） | Progress（循环模式逐 tick 输出；--json=NDJSON，R2） |
+| `team migrate [<RUN>] [--dry-run]` | 写 | run（逐 run） | ✓ | 运维（[21](21-schema-versioning-and-migration.md)；发 run_migrated，R3） |
+| `team backup list` | 读 | — | ✓ | 运维（[22](22-packaging-installation-and-evolution.md)） |
+| `team restore <backup-id> [--dry-run]` | 写 | — | ✓ | 运维（可逆：覆盖前自快照） |
+| `team deinit`（零删除：只给清理清单与确认，M43） | 读 | — | | 运维（P1） |
+
+全局 flag：每条命令支持 `--json`（单信封机器面）、`--verbose`（stderr 步骤追踪）、`--team-root=<dir>`（[16](16-git-worktree-and-team-root.md) §2 最高优先级根覆盖）。
 
 约定：所有 task 级命令**必须同时给 RUN 与 TASK**（E6 裁决，TASK-ID 是 run-scoped）。
 
@@ -103,8 +104,21 @@
 
 ### 2.2 Exit code
 
-| exit | 含义 | 对应 code 类 |
+> 本表被 `docs-reconciliation.test.ts` 机器对账：CLI 的 EXIT_BY_CODE 中每个 code 必须出现在其 exit 行。
+
+| exit | 含义 | 对应 code |
 |---|---|---|
+| 0 | 成功（含 dry-run） | `OK` |
+| 2 | 用法错误（参数缺失/格式错） | `usage_error` |
+| 3 | 锁超时 | `lock_timeout` |
+| 4 | 校验失败 | `schema_invalid` `evidence_invalid` `export_redaction_hit` `export_target_invalid` `path_escape_detected` `memory_entry_invalid` |
+| 5 | 目标不存在 | `run_not_found` `task_not_found` `agent_not_registered` `claim_not_found` `backup_not_found` |
+| 6 | 冲突（BR-001 守卫族统一 6，2026-07-11 回填） | `task_already_claimed` `path_conflict` `rev_conflict` `requires_approval` `no_claimable_task` `deps_blocked` `capability_mismatch` `parallel_limit_reached` `agent_claim_limit` `not_claim_owner` `self_approval_forbidden` `duplicate_payload` `cross_run_conflict` |
+| 7 | 状态机拒绝 | `invalid_transition` `run_paused` `run_not_active` `mode_mismatch` |
+| 8 | 存储/环境错误 | `io_error` `not_a_git_repo` `bare_repo_unsupported` `team_root_not_found` `unsupported_schema_version` `gateway_too_old` |
+| 1 | 其他失败 | 兜底 |
+
+---|---|---|
 | 0 | 成功（含 dry-run） | OK |
 | 2 | 用法错误（参数缺失/格式错） | usage_error |
 | 3 | 锁超时 | lock_timeout |

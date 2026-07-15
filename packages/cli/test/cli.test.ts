@@ -170,7 +170,7 @@ describe('remediation R0-7: CLI experience group (docs/16 §2; docs/17 §1)', ()
     expect(r.exitCode).toBe(2);
     const env = JSON.parse(r.stdout);
     expect(env.message).toContain('Unknown subcommand');
-    expect(env.next_actions.join(' ')).toContain('publish | add | cancel | show');
+    expect(env.next_actions.join(' ')).toContain('publish | add | list | cancel | show');
   });
 
   it('--flag with a space instead of "=" gets a targeted diagnosis', () => {

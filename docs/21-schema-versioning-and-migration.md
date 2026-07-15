@@ -98,7 +98,9 @@
 
 ## 4. 读写兼容规则
 
-### 4.1 读路径判定
+### 4.1 读写路径判定（修订：2026-07-15 落账 2026-07-13 产品负责人改判「自动读时迁移」）
+
+> 原设计（写命令拦截 `migration_required` + N-1 读窗口 + `data.kind` 三分）已由产品负责人改判并在 roadmap Phase 2 落地为**自动读时迁移**；本节此前未随裁决修订，是 2026-07-15 审查确认的 spec-实现正面冲突，现以实现为准回写。
 
 ```mermaid
 flowchart TD
@@ -106,12 +108,12 @@ flowchart TD
   B -- 否 --> E["schema_invalid<br/>exit 4"]
   B -- 是 --> C{"major 与当前比较"}
   C -- "== 当前" --> OK["正常读<br/>未知字段保留（R2）"]
-  C -- "> 当前（更新）" --> F["unsupported_schema_version<br/>data.kind = gateway_too_old<br/>next: 升级 gateway"]
-  C -- "< 当前，在读窗口内（N-1）" --> G{"命令类型"}
-  G -- 读命令 --> H["透明升级读取：<br/>内存中过迁移链，不回写"]
-  G -- 写命令 --> I["unsupported_schema_version<br/>data.kind = migration_required<br/>next: team migrate --run RUN"]
-  C -- "< N-1（超窗）" --> J["unsupported_schema_version<br/>data.kind = migration_required<br/>读写均拒，next: team migrate"]
+  C -- "> 当前（更新）" --> F["unsupported_schema_version<br/>next: 升级 gateway"]
+  C -- "< 当前（更旧）" --> G["透明升级：内存过迁移链读取<br/>（读路径不写盘，lock-free audit 安全）"]
+  G --> H["写命令顺手落新 major（写时收敛）<br/>或 team migrate 显式重写（先备份，rev 保留，发 run_migrated）"]
 ```
+
+写方向的防线是 **min_gateway_version 写闸门**（§8；整改 R1 实装于 TxKernel 咽喉点）：项目要求的 major 高于本 gateway 时一切写命令拒绝 `gateway_too_old`（exit 8），读不拦。迁移链无窗口上限（v1→v2→…按注册表逐级），备份 + `restore` 提供回滚。
 
 | 规则 | 内容 |
 |---|---|

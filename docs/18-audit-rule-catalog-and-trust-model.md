@@ -70,18 +70,18 @@ flowchart LR
 | 15 | `task_unblocked` | task | agent（owner）/ user | task_id、payload.message_ref 或 payload.reason | [15](15-run-task-state-machine-and-lifecycle.md) |
 | 16 | `task_released` | task | agent（owner）/ user | task_id、claim_id、payload.attempt、payload.released_claim_ids[] | [15](15-run-task-state-machine-and-lifecycle.md) |
 | 17 | `task_reclaimed` | task | sweep / user | task_id、claim_id、payload.reclaim_reason、payload.triggered_by | [15](15-run-task-state-machine-and-lifecycle.md) |
-| 18 | `task_rework_started` | task | agent（owner） | task_id、claim_id | [15](15-run-task-state-machine-and-lifecycle.md) |
+| 18 | `task_rework_started`（**已取代**：实现以 `task_started`+payload.resumed 表达返工重启，D-3 裁决 2026-07-15） | task | agent（owner） | task_id、claim_id | [15](15-run-task-state-machine-and-lifecycle.md) |
 | 19 | `task_cancelled` | task | user | task_id、payload.released_claim_ids[] | [15](15-run-task-state-machine-and-lifecycle.md) |
 | 20 | `task_integrated` | task | agent（integrator） | task_id、payload.merge_commit、payload.released_claim_ids[] | [04](04-command-workflows.md) |
 | 21 | `task_done` | task | user / agent（integrator） | task_id | [15](15-run-task-state-machine-and-lifecycle.md) |
 | 22 | `path_claimed` | claim | agent | task_id、claim_id、payload.paths | [04](04-command-workflows.md) / [10](10-claim-next-lock-and-conflict-rules.md) |
-| 23 | `path_approval_requested` | claim | agent | task_id、payload.paths、payload.message_ref | [14](14-evidence-review-verification-contract.md) |
+| 23 | `path_approval_requested`（**P2 未实装**：approve-paths 仅 grant 半边） | claim | agent | task_id、payload.paths、payload.message_ref | [14](14-evidence-review-verification-contract.md) |
 | 24 | `path_approval_granted` | claim | user / agent（integrator） | task_id、payload.approval_id、payload.paths、payload.granted_by | [14](14-evidence-review-verification-contract.md) |
-| 25 | `path_approval_denied` | claim | user / agent（integrator） | task_id、payload.paths | [14](14-evidence-review-verification-contract.md) |
+| 25 | `path_approval_denied`（**P2 未实装**：approve-paths 仅 grant 半边） | claim | user / agent（integrator） | task_id、payload.paths | [14](14-evidence-review-verification-contract.md) |
 | 26 | `heartbeat` | claim | agent（owner） | task_id、claim_id、payload.lease_until（按 [10](10-claim-next-lock-and-conflict-rules.md) §9 采样写入） | [04](04-command-workflows.md) |
 | 27 | `evidence_submitted` | evidence | agent（owner） | task_id、claim_id、payload.revision、payload.checks_pass_count、payload.out_of_scope_count | [04](04-command-workflows.md) / [14](14-evidence-review-verification-contract.md) |
 | 28 | `evidence_invalid` | evidence | agent（owner） | task_id、payload.error_codes[]（可采样） | [14](14-evidence-review-verification-contract.md) |
-| 29 | `review_requested` | review | agent（owner） | task_id | [04](04-command-workflows.md)（建议废弃并入 `evidence_submitted`，见 §8） |
+| 29 | `review_requested`（**已废弃**：review 走 D15 gate 合成，无请求事件） | review | agent（owner） | task_id | [04](04-command-workflows.md)（建议废弃并入 `evidence_submitted`，见 §8） |
 | 30 | `review_claimed` | review | agent（reviewer） | task_id、claim_id、payload.round | [04](04-command-workflows.md) / [14](14-evidence-review-verification-contract.md) |
 | 31 | `review_released` | review | agent（reviewer）/ sweep | task_id、claim_id | [14](14-evidence-review-verification-contract.md) |
 | 32 | `review_approved` | review | agent（reviewer） | task_id、payload.review_id、payload.round | [04](04-command-workflows.md) |
@@ -102,6 +102,9 @@ flowchart LR
 | 47 | `memory_promoted` | context | user / agent（user 确认后落盘） | payload.mem_id、payload.from_ref、payload.supersedes? | [25](25-project-memory-and-knowledge-promotion.md)（D19） |
 | 48 | `memory_superseded` | context | user / agent | payload.old_mem_id、payload.new_mem_id | [25](25-project-memory-and-knowledge-promotion.md) |
 | 49 | `run_migrated` | infra | user | payload.from_major、payload.to_major、payload.backup_ref | [21](21-schema-versioning-and-migration.md) §5 |
+| 50 | `verify_claimed` | verification | agent（verifier） | payload.round | [15](15-run-task-state-machine-and-lifecycle.md) §8（L9/L13 回写） |
+| 51 | `verify_released` | verification | sweep | — | [15](15-run-task-state-machine-and-lifecycle.md) §8 |
+| 52 | `worktree_pruned` | worktree | user | payload.pruned[]、payload.tasks[] | 整改 R0（roadmap Phase 1 收编，2026-07-15） |
 
 **目录外声明：不存在 `message_posted` 事件。** message 写入 `messages.jsonl`（自带 MSG-ID 与行内 seq），不重复镜像进 events——events 是审计账本、messages 是协作上下文（INV-011，[12](12-context-plane-task-dag-message-pool-memory.md) §9）。需要留审计痕迹的消息动作（如 block）通过携带 `message_ref` 的状态事件（#14）关联。
 
