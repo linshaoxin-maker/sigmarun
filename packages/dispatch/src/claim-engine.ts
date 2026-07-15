@@ -495,7 +495,7 @@ export function claimNext(opts: ClaimOptions): Envelope {
   try {
     // Guard #1: run state.
     const run = readJsonState(join(runDir, 'run.json'));
-    const rdoc = run.doc as { status: string; lightweight?: boolean; default_policy?: Partial<RunPolicy> };
+    const rdoc = run.doc as { status: string; lightweight?: boolean; worktree_root?: string; default_policy?: Partial<RunPolicy> };
     const lightweight = Boolean(rdoc.lightweight);
     if (rdoc.status === 'paused') {
       return failEnvelope('run_paused', `Run ${runId} is paused.`, { startedAt });
@@ -764,7 +764,9 @@ export function claimNext(opts: ClaimOptions): Envelope {
           lease_until: lease,
           worktree: {
             suggested_branch: `team/${runId}/${row.task_id}-${slug}`,
-            suggested_path: `../.team-worktrees/${runId}/${row.task_id}`,
+            // derived from run.worktree_root (same fallback as worktree register) so the suggestion
+            // always passes the register containment check — adapters create it "exactly as suggested"
+            suggested_path: `${rdoc.worktree_root ?? `../.team-worktrees/${runId}`}/${row.task_id}`,
           },
           swept: swept.reclaimed,
         },

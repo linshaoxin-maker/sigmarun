@@ -48,6 +48,29 @@ describe('claim-next happy path (BDD-003-01; docs/10 §2.2)', () => {
     expect(tail[0].actor).toEqual({ type: 'agent', id: agent });
   });
 
+  it('worktree suggestion derives from run.worktree_root and passes register (remediation A1; smoke L17 regression)', async () => {
+    repo = mkClaimRepo([{ key: 'a' }]);
+    const agent = registerDefault(repo);
+    const env = claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent });
+    expect(env.ok).toBe(true);
+    const wt = (env.data as { worktree: { suggested_branch: string; suggested_path: string } }).worktree;
+    const wtRoot = readJson('run.json').worktree_root as string;
+    expect(wt.suggested_path).toBe(`${wtRoot}/TASK-0001`);
+
+    // the gateway's own suggestion must pass the gateway's own register containment check
+    const { execFileSync } = await import('node:child_process');
+    const { mkdirSync } = await import('node:fs');
+    const { dirname } = await import('node:path');
+    const { registerWorktree } = await import('@sigmarun/dispatch');
+    execFileSync('git', ['-C', repo, 'commit', '--allow-empty', '-m', 'base', '--no-gpg-sign'], { stdio: 'ignore' });
+    const abs = join(repo, wt.suggested_path);
+    mkdirSync(dirname(abs), { recursive: true });
+    execFileSync('git', ['-C', repo, 'worktree', 'add', abs, '-b', wt.suggested_branch, 'HEAD'], { stdio: 'ignore' });
+    const reg = registerWorktree({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, path: abs, branch: wt.suggested_branch });
+    expect(reg.ok).toBe(true);
+    expect(readJson('tasks/TASK-0001/task.json').status).toBe('working');
+  });
+
   it('picks the higher-priority task first (docs/10 §7 ordering)', () => {
     repo = mkClaimRepo([{ key: 'low', priority: 40 }, { key: 'high', priority: 90 }]);
     const agent = registerDefault(repo);
