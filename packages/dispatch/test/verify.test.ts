@@ -74,6 +74,22 @@ describe('verify submit — task target (14 §4; BDD-006-07 positive gate)', () 
     expect(readJson('tasks/TASK-0001/task.json').status).toBe('approved'); // untouched
   });
 
+  it('an all-skipped verification cannot carry verdict=pass (vacuous truth; remediation B5)', () => {
+    const env = verifySubmit({
+      cwd: repo, runId: 'RUN-0001', agentId: verifier,
+      verifyPath: verifyDraft({
+        checks: [],
+        gates: { build: 'skipped', focused_tests: 'skipped', regression_tests: 'skipped', scope_check: 'skipped', evidence_complete: 'skipped' },
+        skip_reasons: { build: 'n/a', focused_tests: 'n/a', regression_tests: 'n/a', scope_check: 'n/a', evidence_complete: 'n/a' },
+        verdict: 'pass',
+      }),
+    });
+    expect(env.ok).toBe(false);
+    expect(env.code).toBe('schema_invalid');
+    expect((env.data as { errors: string[] }).errors.some((e) => e.includes('at least one executed'))).toBe(true);
+    expect(readJson('tasks/TASK-0001/task.json').status).toBe('approved'); // untouched
+  });
+
   it('fail verdict maps the task back to changes_requested and revives the owner claim', () => {
     const env = verifySubmit({
       cwd: repo, runId: 'RUN-0001', agentId: verifier,

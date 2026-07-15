@@ -96,6 +96,12 @@ export function verifySubmit(opts: VerifyOptions): Envelope {
     if (verdict !== 'pass' && verdict !== 'fail') errors.push('verdict must be pass or fail');
     const nonSkippedAllPass = GATE_KEYS.every((k) => gates[k] === 'skipped' || gates[k] === 'pass');
     if (verdict === 'pass' && !nonSkippedAllPass) errors.push('verdict pass requires every non-skipped gate to pass (14 §4 rule 4)');
+    // Rule 4 is vacuously true over an all-skipped gate set — a verification that executed
+    // nothing must not mint a pass verdict (it was the escape hatch around the verify gate).
+    const executedGates = GATE_KEYS.filter((k) => gates[k] === 'pass' || gates[k] === 'fail');
+    if (verdict === 'pass' && executedGates.length === 0) {
+      errors.push('verdict pass requires at least one executed (non-skipped) gate — an all-skipped verification verifies nothing (14 §4 rule 4)');
+    }
 
     const stores = loadClaims(runDir, runId);
     // Run-level failure mapping is validated BEFORE any write: mapped ids must exist and be in a
