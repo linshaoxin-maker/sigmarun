@@ -319,9 +319,14 @@ export function taskDone(opts: TaskDoneOptions): Envelope {
       task_id: opts.taskId,
       payload: { via: 'done_command', ...(opts.note ? { note: opts.note } : {}) },
     });
+    // D21: when this was the last open task, hand the closer the terminal command — the run
+    // does not close itself (explicit ledger over implicit transitions).
+    const rows = (list.doc as { tasks: Array<{ status: string }> }).tasks;
+    const open = rows.filter((r) => !['done', 'cancelled'].includes(r.status)).length;
     return okEnvelope({
-      message: `${opts.taskId} done (was ${status}).`,
-      data: { task_id: opts.taskId, released_claim_ids: released },
+      message: `${opts.taskId} done (was ${status})${open === 0 ? '; every task is now closed' : ''}.`,
+      data: { task_id: opts.taskId, released_claim_ids: released, open_tasks: open },
+      nextActions: open === 0 ? [`Close the run: sigmarun report ${opts.runId}`] : [],
       startedAt,
     });
   });

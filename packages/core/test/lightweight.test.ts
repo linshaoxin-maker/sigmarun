@@ -98,6 +98,35 @@ describe('lightweight mode — decompose → claim → done (no review/verify/in
     expect(typeof runs[0]!.progress_pct).toBe('number');
   });
 
+  it('a lightweight run closes: done-all -> report -> reported -> archive; watch sees terminal (S8/D21)', async () => {
+    const repo = lightweightRun();
+    const { reportRun, runArchive } = await import('@sigmarun/core');
+
+    // report refuses while tasks remain open
+    const t1 = (claimNext({ cwd: repo, runId: 'RUN-0001', agentId: 'win-1' }).data as { task_id: string }).task_id;
+    taskDone({ cwd: repo, runId: 'RUN-0001', taskId: t1, agentId: 'win-1' });
+    const early = reportRun({ cwd: repo, runId: 'RUN-0001' });
+    expect(early.ok).toBe(false);
+    expect(early.code).toBe('invalid_transition');
+
+    // the LAST done points at report
+    const t2 = (claimNext({ cwd: repo, runId: 'RUN-0001', agentId: 'win-1' }).data as { task_id: string }).task_id;
+    const last = taskDone({ cwd: repo, runId: 'RUN-0001', taskId: t2, agentId: 'win-1' });
+    expect(last.next_actions.join(' ')).toContain(`sigmarun report RUN-0001`);
+
+    const rep = reportRun({ cwd: repo, runId: 'RUN-0001' });
+    expect(rep.ok).toBe(true);
+    expect(readJson(repo, 'run.json').status).toBe('reported');
+    const { existsSync } = await import('node:fs');
+    expect(existsSync(join(repo, '.team', 'runs', 'RUN-0001', 'report.md'))).toBe(true);
+    expect(existsSync(join(repo, '.team', 'runs', 'RUN-0001', 'integration.md'))).toBe(false);
+
+    const { watchOnce } = await import('@sigmarun/watch');
+    expect((watchOnce({ cwd: repo, runId: 'RUN-0001' }).data as { terminal: boolean }).terminal).toBe(true);
+    expect(runArchive({ cwd: repo, runId: 'RUN-0001' }).ok).toBe(true);
+    expect(readJson(repo, 'run.json').status).toBe('archived');
+  });
+
   it('done is refused on a full (non-lightweight) run', () => {
     const repo = mkTmpGitRepo(); dirs.push(repo);
     initProject({ cwd: repo });

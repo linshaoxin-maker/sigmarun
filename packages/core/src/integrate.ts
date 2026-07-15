@@ -295,7 +295,54 @@ export function reportRun(opts: IntegrateStartOptions): Envelope {
   return withLock(opts, startedAt, (runDir) => {
     const runFile = join(runDir, 'run.json');
     const run = readJsonState(runFile);
-    const rdoc = run.doc as { status: string; title?: string; goal?: string; default_policy?: { require_verification?: boolean } };
+    const rdoc = run.doc as { status: string; title?: string; goal?: string; lightweight?: boolean; default_policy?: { require_verification?: boolean } };
+
+    // D21 lightweight terminal: report closes an active lightweight run once every task is
+    // terminal — reusing the existing reported->archived tail, no new run state. Without this
+    // a finished lightweight run stayed active forever (S8): report/integrate/archive all
+    // refused and `watch` looped in silence; the only exit was a semantically wrong cancel.
+    if (resolveRunMode(rdoc).can.reportWhenAllDone && rdoc.status === 'active') {
+      const listState = readJsonState(join(runDir, 'team-task-list.json'));
+      const rows = (listState.doc as { tasks: Array<{ task_id: string; title: string; status: string }> }).tasks;
+      const open = rows.filter((r) => !['done', 'cancelled'].includes(r.status));
+      if (open.length > 0) {
+        return failEnvelope('invalid_transition', `${open.length} task(s) still open on ${opts.runId}: ${open.map((r) => r.task_id).join(', ')}.`, {
+          nextActions: [`Finish them first: sigmarun claim-next ${opts.runId} --agent=<A>, then sigmarun done ...`],
+          startedAt,
+        });
+      }
+      const counts: Record<string, number> = {};
+      for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
+      const reportMd = [
+        `# Run report — ${opts.runId} (lightweight)`,
+        '',
+        `Goal: ${rdoc.goal ?? rdoc.title ?? ''}`,
+        '',
+        `Tasks: ${rows.length} — ${Object.entries(counts).map(([s, n]) => `${n} ${s}`).join(', ')}`,
+        '',
+        '## Task outcomes',
+        ...rows.map((r) => `- ${r.task_id} ${r.title}: ${r.status}`),
+        '',
+        '> Lightweight run: tasks were completed directly by their claim holders (no evidence/review/verification records).',
+        '',
+      ].join('\n');
+      writeFileSync(join(runDir, 'report.md'), reportMd, 'utf8');
+      rdoc.status = 'reported';
+      writeJsonStateAtomic(runFile, run.doc as Record<string, unknown>, { expectedRev: run.rev });
+      appendEvent(runDir, {
+        event: 'run_reported',
+        actor: { type: 'user', id: 'user' },
+        run_id: opts.runId,
+        payload: { report_ref: 'report.md', mode: 'lightweight' },
+      });
+      return okEnvelope({
+        message: `Run ${opts.runId} reported (lightweight): ${counts.done ?? 0} done, ${counts.cancelled ?? 0} cancelled. Report at .team/runs/${opts.runId}/report.md.`,
+        data: { report_ref: 'report.md', done: counts.done ?? 0, cancelled: counts.cancelled ?? 0 },
+        nextActions: [`Archive the run: sigmarun run archive ${opts.runId}`],
+        startedAt,
+      });
+    }
+
     if (rdoc.status !== 'integrating') {
       return failEnvelope('invalid_transition', `Run ${opts.runId} is ${rdoc.status}; report follows integration.`, { startedAt });
     }
