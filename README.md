@@ -19,18 +19,52 @@ deterministic primitives to coordinate through — task claims with leases,
 evidence gates, independent review/verify, topological integration — while the
 agents keep doing the thinking.
 
+## Demo — a 60-second lightweight run
+
+Two agent windows split one goal, each claims a piece and marks it done, the run
+closes itself, and the audit comes back clean. This is the whole loop:
+
+```console
+$ sigmarun init --example
+Initialized .team coordination directory.
+
+$ sigmarun run import sigmarun-plan.example.json --lightweight
+Imported RUN-0001 with 2 task(s), claimable now (lightweight).
+
+$ sigmarun claim-next RUN-0001 --agent=win-1        # window 1 grabs a piece
+Claimed TASK-0001 ("First piece") ...
+  next: Do the work, then mark it done: sigmarun done RUN-0001 TASK-0001 --agent=win-1
+
+$ sigmarun done RUN-0001 TASK-0001 --agent=win-1
+TASK-0001 done (was claimed).
+
+$ sigmarun claim-next RUN-0001 --agent=win-2        # window 2 grabs the other
+Claimed TASK-0002 ("Second piece") ...
+
+$ sigmarun done RUN-0001 TASK-0002 --agent=win-2
+TASK-0002 done (was claimed); every task is now closed.
+  next: Close the run: sigmarun report RUN-0001
+
+$ sigmarun report RUN-0001
+Run RUN-0001 reported (lightweight): 2 done, 0 cancelled.
+
+$ sigmarun audit run RUN-0001
+Audit of RUN-0001: 0 error, 0 warn, 6 info; 40 rule(s) run.    # clean — the 6 info are lightweight waivers
+```
+
+▶ **Dynamic replay:** the real recording is [`docs/demo.cast`](docs/demo.cast) —
+`npm i -g asciinema && asciinema play docs/demo.cast`, or `asciinema upload docs/demo.cast`
+to get an embeddable player. Full pipeline (evidence → review → verify → integrate) is below.
+
 ## Install
 
 ```bash
-# From npm (once published):
-npm i -g sigmarun     # Node >= 20
-
-# From source (works today):
-git clone <this-repo> && cd sigmarun
-npm install && npm run release
-npm i -g ./release/*.tgz
-
+npm i -g sigmarun          # Node >= 20
 sigmarun --version
+
+# or build from source:
+# git clone https://github.com/linshaoxin-maker/sigmarun && cd sigmarun
+# npm install && npm run release && npm i -g ./release/*.tgz
 ```
 
 ## Quick start (lightweight — the 5-command loop)
