@@ -30,6 +30,81 @@ function expireLease(minutes: number): void {
 }
 
 describe('status (Slice 7 acceptance; M32 Needs-user; INV-006 derived progress)', () => {
+  it('pipeline waits get needs_user items with executable commands (remediation C1)', async () => {
+    await setupWorking(repo, agent);
+    const { submitEvidence } = await import('@sigmarun/core');
+    submitEvidence({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, evidencePath: validDraft(repo) });
+
+    // submitted, no review claim -> awaiting_review with the reviewer claim command
+    let needs = (statusRun({ cwd: repo, runId: 'RUN-0001' }).data as { needs_user: Array<{ kind: string; task_id?: string; command: string }> }).needs_user;
+    const review = needs.find((n) => n.kind === 'awaiting_review');
+    expect(review?.task_id).toBe('TASK-0001');
+    expect(review?.command).toContain('--role=reviewer');
+
+    // approved (policy skip), no verify claim -> awaiting_verify
+    const runFile = join(runDir(), 'run.json');
+    const rf = readJsonState(runFile);
+    ((rf.doc as { default_policy: Record<string, unknown> }).default_policy).require_review = false;
+    writeJsonStateAtomic(runFile, rf.doc as Record<string, unknown>, { expectedRev: rf.rev });
+    const tf = readJsonState(join(runDir(), 'tasks', 'TASK-0001', 'task.json'));
+    (tf.doc as { status: string }).status = 'approved';
+    writeJsonStateAtomic(join(runDir(), 'tasks', 'TASK-0001', 'task.json'), tf.doc as Record<string, unknown>, { expectedRev: tf.rev });
+    const lf = readJsonState(join(runDir(), 'team-task-list.json'));
+    (lf.doc as { tasks: Array<{ status: string }> }).tasks[0]!.status = 'approved';
+    writeJsonStateAtomic(join(runDir(), 'team-task-list.json'), lf.doc as Record<string, unknown>, { expectedRev: lf.rev });
+    needs = (statusRun({ cwd: repo, runId: 'RUN-0001' }).data as { needs_user: Array<{ kind: string; command: string }> }).needs_user;
+    expect(needs.some((n) => n.kind === 'awaiting_verify' && n.command.includes('--role=verifier'))).toBe(true);
+  });
+
+  it('changes_requested splits: fresh owner -> awaiting_rework(resume); silent owner -> stale_owner(force) (B4)', () => {
+    claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent });
+    // hand-shape: task changes_requested with an ACTIVE claim (the request-changes revival shape)
+    for (const [rel, fn] of [
+      ['tasks/TASK-0001/task.json', (d) => { d.status = 'changes_requested'; }],
+      ['team-task-list.json', (d) => { d.tasks[0].status = 'changes_requested'; }],
+    ]) {
+      const st = readJsonState(join(runDir(), rel));
+      fn(st.doc);
+      writeJsonStateAtomic(join(runDir(), rel), st.doc, { expectedRev: st.rev });
+    }
+    let needs = (statusRun({ cwd: repo, runId: 'RUN-0001' }).data as { needs_user: Array<{ kind: string; command: string }> }).needs_user;
+    expect(needs.some((n) => n.kind === 'awaiting_rework' && n.command.includes('sigmarun resume'))).toBe(true);
+
+    // age the heartbeat past 1x TTL while keeping the lease alive -> stale_owner with the human override
+    const cf = readJsonState(join(runDir(), 'claims', 'task-claims.json'));
+    const claim = (cf.doc as { claims: Array<{ last_heartbeat_at: string; lease_until: string }> }).claims[0]!;
+    claim.last_heartbeat_at = new Date(Date.now() - 40 * 60_000).toISOString();
+    claim.lease_until = new Date(Date.now() + 20 * 60_000).toISOString();
+    writeJsonStateAtomic(join(runDir(), 'claims', 'task-claims.json'), cf.doc as Record<string, unknown>, { expectedRev: cf.rev });
+    needs = (statusRun({ cwd: repo, runId: 'RUN-0001' }).data as { needs_user: Array<{ kind: string; command: string }> }).needs_user;
+    const stale = needs.find((n) => n.kind === 'stale_owner');
+    expect(stale?.command).toContain('--force --agent=user');
+    expect(needs.some((n) => n.kind === 'awaiting_rework')).toBe(false);
+  });
+
+  it('a ready task with a cancelled upstream surfaces deps_dead (B6/S6); blocker command is the ANSWER (S11)', async () => {
+    // TASK-0002 depends on TASK-0001? fixture has no deps here — rebuild locally
+    const repo2 = mkClaimRepo([{ key: 'x' }, { key: 'y', deps: ['x'] }]);
+    try {
+      const { taskCancel } = await import('@sigmarun/core');
+      taskCancel({ cwd: repo2, runId: 'RUN-0001', taskId: 'TASK-0001', reason: 'descoped' });
+      const needs = (statusRun({ cwd: repo2, runId: 'RUN-0001' }).data as { needs_user: Array<{ kind: string; task_id?: string; command: string }> }).needs_user;
+      const dead = needs.find((n) => n.kind === 'deps_dead');
+      expect(dead?.task_id).toBe('TASK-0002');
+      expect(dead?.command).toContain('task cancel');
+    } finally {
+      cleanup(repo2);
+    }
+
+    // blocker item must carry the clearing command, not a read-only listing
+    const a2 = registerDefault(repo, 'win-s11', 'codex');
+    claimNext({ cwd: repo, runId: 'RUN-0001', agentId: a2 });
+    postMessage({ cwd: repo, runId: 'RUN-0001', fromAgentId: a2, type: 'blocker', taskId: 'TASK-0001', body: 'need input' });
+    const needs = (statusRun({ cwd: repo, runId: 'RUN-0001' }).data as { needs_user: Array<{ kind: string; command: string }> }).needs_user;
+    const blocker = needs.find((n) => n.kind === 'blocker');
+    expect(blocker?.command).toContain('--type=answer --reply-to=MSG-');
+  });
+
   it('reports status counts, weight-based progress, and writes progress.json', () => {
     claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent });
     const env = statusRun({ cwd: repo, runId: 'RUN-0001' });

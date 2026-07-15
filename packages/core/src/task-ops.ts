@@ -244,9 +244,16 @@ export function taskCancel(opts: TaskCancelOptions): Envelope {
       task_id: opts.taskId,
       payload: { released_claim_ids: released, reason: opts.reason ?? null },
     });
+    // B6/S6: cancelled never satisfies any deps gate — name the tasks this cancel just orphaned.
+    const orphaned = (list.doc as { tasks: Array<{ task_id: string; status: string; depends_on?: string[] }> }).tasks
+      .filter((r) => !['done', 'cancelled', 'integrated'].includes(r.status) && (r.depends_on ?? []).includes(opts.taskId))
+      .map((r) => r.task_id);
     return okEnvelope({
       message: `${opts.taskId} cancelled (was ${status}${opts.reason ? `; reason: ${opts.reason}` : ''}); ${released.length} claim(s) cascaded.`,
-      data: { task_id: opts.taskId, released_claim_ids: released, reason: opts.reason ?? null },
+      data: { task_id: opts.taskId, released_claim_ids: released, reason: opts.reason ?? null, orphaned_dependents: orphaned },
+      warnings: orphaned.length
+        ? [{ code: 'deps_dead', message: `${orphaned.join(', ')} depend(s) on the cancelled task and can never unblock — cancel and re-add them without the dead dependency.` }]
+        : [],
       startedAt,
     });
   });

@@ -21,6 +21,7 @@ interface Row {
   weight: number;
   owner_agent_id: string | null;
   claim_id: string | null;
+  depends_on?: string[];
   paths?: { requires_approval?: string[] };
 }
 
@@ -71,7 +72,13 @@ export function computeProgress(runDir: string): Record<string, unknown> {
   const run = readJsonState(join(runDir, 'run.json')).doc as {
     run_id: string;
     status: string;
-    default_policy?: { claim_ttl_minutes?: number; reclaim_policy?: { auto_after_ttl_multiple?: number } };
+    lightweight?: boolean;
+    default_policy?: {
+      claim_ttl_minutes?: number;
+      reclaim_policy?: { auto_after_ttl_multiple?: number };
+      require_review?: boolean;
+      require_verification?: boolean;
+    };
   };
   const rows = (readJsonState(join(runDir, 'team-task-list.json')).doc as { tasks: Row[] }).tasks;
   const counts: Record<string, number> = {};
@@ -107,7 +114,7 @@ export function computeProgress(runDir: string): Record<string, unknown> {
 
   const claimsFile = join(runDir, 'claims', 'task-claims.json');
   const taskClaims = existsSync(claimsFile)
-    ? (readJsonState(claimsFile).doc as { claims: Array<{ task_id: string; agent_id: string; status: string; lease_until: string }> }).claims
+    ? (readJsonState(claimsFile).doc as { claims: Array<{ task_id: string; agent_id: string; status: string; lease_until: string; last_heartbeat_at?: string }> }).claims
     : [];
   const detailStatus = (taskId: string): string => {
     const f = join(runDir, 'tasks', taskId, 'task.json');
@@ -137,7 +144,9 @@ export function computeProgress(runDir: string): Record<string, unknown> {
       kind: 'blocker',
       task_id: b.task_id ?? undefined,
       detail: `${b.message_id}: ${b.body.slice(0, 120)}`,
-      command: `sigmarun msg list ${run.run_id} --type=blocker`,
+      // S11: the command must be the one that CLEARS the item — the old read-only `msg list`
+      // left "1 item needs you" standing forever and trained users to ignore the panel.
+      command: `sigmarun msg post ${run.run_id} --from=user --type=answer --reply-to=${b.message_id} --body="<answer>"`,
     });
   }
   const openQuestions = messages.filter((m) => m.type === 'question' && !answered.has(m.message_id)).length;
@@ -158,6 +167,94 @@ export function computeProgress(runDir: string): Record<string, unknown> {
         detail: `${r.task_id} needs approval for: ${missing.join(', ')}`,
         command: `sigmarun approve-paths ${run.run_id} ${r.task_id} --paths=${missing.join(',')}`,
       });
+    }
+  }
+
+  // ——— pipeline waits (remediation C1): every waiting state answers "what now". ———
+  // The old taxonomy had three kinds; submitted/approved/changes_requested/verified/integrating
+  // all read "0 items need you" — the exact silence that dressed S1/S5-class hangs as idle.
+  const gateFile = join(runDir, 'claims', 'review-claims.json');
+  const gateClaims = existsSync(gateFile)
+    ? (readJsonState(gateFile).doc as { claims: Array<{ task_id: string; status: string; kind?: string }> }).claims
+    : [];
+  const activeGate = (taskId: string, kind: 'review' | 'verify'): boolean =>
+    gateClaims.some((c) => c.task_id === taskId && c.status === 'active' && (c.kind ?? 'review') === kind);
+  const lightweight = run.lightweight === true;
+  if (lightweight) {
+    // docs/26 §5: the run does not close itself — hand the closer the terminal command.
+    const open = rows.filter((r) => !['done', 'cancelled'].includes(r.status)).length;
+    if (run.status === 'active' && rows.length > 0 && open === 0) {
+      needsUser.push({ kind: 'ready_to_report', detail: 'Every task is closed.', command: `sigmarun report ${run.run_id}` });
+    }
+  } else {
+    const reviewOn = run.default_policy?.require_review !== false;
+    const verifyOn = run.default_policy?.require_verification !== false;
+    for (const r of rows) {
+      if (r.status === 'submitted' && reviewOn && !activeGate(r.task_id, 'review')) {
+        needsUser.push({
+          kind: 'awaiting_review',
+          task_id: r.task_id,
+          detail: `${r.task_id} awaits an independent review.`,
+          command: `sigmarun claim-next ${run.run_id} --agent=<other-window> --role=reviewer`,
+        });
+      }
+      if (r.status === 'approved' && verifyOn && !activeGate(r.task_id, 'verify')) {
+        needsUser.push({
+          kind: 'awaiting_verify',
+          task_id: r.task_id,
+          detail: `${r.task_id} awaits independent verification.`,
+          command: `sigmarun claim-next ${run.run_id} --agent=<other-window> --role=verifier`,
+        });
+      }
+      if (r.status === 'changes_requested') {
+        const owner = taskClaims.find((c) => c.task_id === r.task_id && c.status === 'active');
+        if (!owner) continue; // no live claim: the stale-lease path already covers the takeover
+        const hbAge = now - Date.parse(owner.last_heartbeat_at ?? owner.lease_until);
+        if (hbAge > ttlMs) {
+          // B4/S4: request-changes hands a dead owner a FULL fresh lease — the heartbeat age is
+          // the tell. Point the human at the override instead of at the corpse.
+          needsUser.push({
+            kind: 'stale_owner',
+            task_id: r.task_id,
+            detail: `${r.task_id} needs rework but owner ${owner.agent_id} has been silent ${Math.round(hbAge / 60_000)} min (lease still live).`,
+            command: `sigmarun reclaim ${run.run_id} ${r.task_id} --force --agent=user`,
+          });
+        } else {
+          needsUser.push({
+            kind: 'awaiting_rework',
+            task_id: r.task_id,
+            detail: `${r.task_id} has review findings to address.`,
+            command: `sigmarun resume ${run.run_id} ${r.task_id} --agent=${owner.agent_id}`,
+          });
+        }
+      }
+      // B6/S6: a ready task depending on a CANCELLED upstream waits forever — no status value
+      // ever satisfies the gate. Surface the rebuild path instead of silence.
+      if (r.status === 'ready') {
+        const deps = (r as { depends_on?: string[] }).depends_on ?? [];
+        const dead = deps.filter((d) => rows.some((x) => x.task_id === d && x.status === 'cancelled'));
+        if (dead.length > 0) {
+          needsUser.push({
+            kind: 'deps_dead',
+            task_id: r.task_id,
+            detail: `${r.task_id} depends on cancelled ${dead.join(', ')} and can never unblock.`,
+            command: `sigmarun task cancel ${run.run_id} ${r.task_id} --reason="upstream cancelled" (then task add a replacement without the dead dependency)`,
+          });
+        }
+      }
+    }
+    const integrableSet = run.default_policy?.require_verification === false ? ['verified', 'approved'] : ['verified'];
+    const integrable = rows.filter((r) => integrableSet.includes(r.status)).length;
+    const inFlight = rows.filter((r) => !['done', 'cancelled', 'integrated', ...integrableSet].includes(r.status)).length;
+    if (run.status === 'active' && integrable > 0 && inFlight === 0) {
+      needsUser.push({
+        kind: 'ready_to_integrate',
+        detail: `${integrable} task(s) passed the gates and nothing else is in flight.`,
+        command: `sigmarun integrate start ${run.run_id}`,
+      });
+    }
+    if (run.status === 'integrating' && integrable === 0) {
+      needsUser.push({ kind: 'ready_to_report', detail: 'The integration queue is empty.', command: `sigmarun report ${run.run_id}` });
     }
   }
 
