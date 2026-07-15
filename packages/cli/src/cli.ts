@@ -243,9 +243,9 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     const runId = args[1];
     const taskId = args[2];
     if (!runId || !taskId) {
-      env = failEnvelope('usage_error', 'Usage: sigmarun reclaim <RUN-ID> <TASK-ID> [--json]');
+      env = failEnvelope('usage_error', 'Usage: sigmarun reclaim <RUN-ID> <TASK-ID> [--force --agent=user] [--json]');
     } else {
-      env = reclaimTask({ ...base, runId, taskId });
+      env = reclaimTask({ ...base, runId, taskId, force, agentId: flag(argv, 'agent') });
     }
   } else if (cmd === 'status' || cmd === 'progress') {
     const runId = args[1];

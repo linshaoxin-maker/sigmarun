@@ -53,6 +53,9 @@ export interface ReleaseOptions extends HeartbeatOptions {
 export interface ReclaimOptions extends ResolveOptions {
   runId: string;
   taskId: string;
+  /** Human override: take over a live lease (requires agentId === 'user'; remediation B4/S4). */
+  force?: boolean;
+  agentId?: string;
 }
 
 export interface ApproveOptions extends ResolveOptions {
@@ -954,11 +957,25 @@ export function reclaimTask(opts: ReclaimOptions): Envelope {
     const stores = loadClaims(runDir, runId);
     const found = findActiveClaim(stores, opts.taskId);
     if (!('claim' in found)) return failEnvelope(found.code, found.message, { startedAt });
-    if (Date.parse(found.claim.lease_until) > Date.now()) {
+    // Human override (B4/S4): request-changes revives a dead owner's claim with a FULL fresh TTL,
+    // so a crashed window holds the task hostage for up to 3xTTL while every guidance points at
+    // the corpse ('Owner resumes: --agent=<owner>'). The human — and only the human — may take a
+    // live lease; agents keep waiting out the expiry (anti-collision stays machine-proof).
+    const forced = opts.force === true;
+    if (forced && opts.agentId !== 'user') {
+      return failEnvelope('usage_error', '--force is a human override: pass --agent=user to assert it.', { startedAt });
+    }
+    if (Date.parse(found.claim.lease_until) > Date.now() && !forced) {
       return failEnvelope(
         'invalid_transition',
         `Claim ${found.claim.claim_id} on ${opts.taskId} is still leased until ${found.claim.lease_until}.`,
-        { nextActions: ['Wait for the lease to expire, or ask the owner to release.'], startedAt },
+        {
+          nextActions: [
+            'Wait for the lease to expire, or ask the owner to release.',
+            `Owner unreachable? Human override: sigmarun reclaim ${runId} ${opts.taskId} --force --agent=user`,
+          ],
+          startedAt,
+        },
       );
     }
     const listFile = join(runDir, 'team-task-list.json');
@@ -966,9 +983,10 @@ export function reclaimTask(opts: ReclaimOptions): Envelope {
     const row = (list.doc as { tasks: TaskRow[] }).tasks.find((r) => r.task_id === opts.taskId);
     const task = readJsonState(join(runDir, 'tasks', opts.taskId, 'task.json'));
     const reclaimEvent = applyReclaim(runDir, runId, stores, row, found.claim, task, {
-      reason: 'stale_lease_manual',
+      reason: forced ? 'forced_by_user' : 'stale_lease_manual',
       actor: { type: 'user', id: 'user' },
     });
+    if (forced) (reclaimEvent.payload as Record<string, unknown>).forced = true;
     // docs/17 §5.3: index -> claims -> event; the append is the commit point.
     writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
     saveState(stores.taskClaims.file, stores.taskClaims.doc, stores.taskClaims.rev);

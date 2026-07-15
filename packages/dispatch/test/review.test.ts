@@ -132,6 +132,36 @@ describe('review claim + D15 synthesis (BDD-006-01/02/05; INV-008)', () => {
     }
   });
 
+  it('reclaim --force: the human takes a live lease request-changes gave a dead owner (S4/B4)', async () => {
+    const { reclaimTask } = await import('@sigmarun/dispatch');
+    reviewClaim({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: reviewer });
+    const decide = reviewDecide({
+      cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: reviewer,
+      decision: 'request_changes', review: { findings: [{ must_fix: true, message: 'fix the guard' }] },
+    });
+    expect(decide.ok).toBe(true);
+    // the owner claim is revived with a FULL fresh TTL — and the owner is dead
+    const claim = readJson('claims/task-claims.json').claims[0];
+    expect(claim.status).toBe('active');
+    expect(Date.parse(claim.lease_until)).toBeGreaterThan(Date.now() + 20 * 60_000);
+
+    // agents must keep waiting out the lease (anti-collision stays machine-proof)
+    const plain = reclaimTask({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001' });
+    expect(plain.ok).toBe(false);
+    expect(plain.code).toBe('invalid_transition');
+    expect(plain.next_actions.join(' ')).toContain('--force --agent=user');
+    const notHuman = reclaimTask({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', force: true, agentId: reviewer });
+    expect(notHuman.code).toBe('usage_error');
+
+    // the human override works: hostage released, progress kept
+    const forced = reclaimTask({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', force: true, agentId: 'user' });
+    expect(forced.ok).toBe(true);
+    expect(readJson('tasks/TASK-0001/task.json').status).toBe('ready');
+    expect(readJson('tasks/TASK-0001/task.json').previous_attempts.length).toBe(1);
+    const ev = events().find((e) => e.event === 'task_reclaimed' && e.payload.forced === true);
+    expect(ev.payload.reclaim_reason).toBe('forced_by_user');
+  });
+
   it('synthesis names the tasks filtered by independence instead of claiming the queue is empty', () => {
     const env = claimNext({ cwd: repo, runId: 'RUN-0001', agentId: owner, role: 'reviewer' });
     expect(env.ok).toBe(false);
