@@ -11,6 +11,7 @@ import {
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope } from './envelope.js';
+import { resolveRunMode } from './mode.js';
 import { appendEvent, readEventsSafe } from './events.js';
 
 export interface IntegrateStartOptions extends ResolveOptions {
@@ -93,7 +94,14 @@ export function integrateStart(opts: IntegrateStartOptions): Envelope {
   return withLock(opts, startedAt, (runDir) => {
     const runFile = join(runDir, 'run.json');
     const run = readJsonState(runFile);
-    const rdoc = run.doc as { status: string; base_branch?: string; default_policy?: { require_verification?: boolean } };
+    const rdoc = run.doc as { status: string; base_branch?: string; lightweight?: boolean; default_policy?: { require_verification?: boolean } };
+    // Mode wall (docs/26; S3): lightweight runs have no integration phase — done-all closes via report.
+    if (!resolveRunMode(rdoc).can.integrate) {
+      return failEnvelope('mode_mismatch', `Run ${opts.runId} is lightweight — there is no integration phase in this mode.`, {
+        nextActions: [`Finish the run once every task is done: sigmarun report ${opts.runId}`],
+        startedAt,
+      });
+    }
     if (rdoc.status !== 'active' && rdoc.status !== 'integrating') {
       return failEnvelope('invalid_transition', `Run ${opts.runId} is ${rdoc.status}; integrate starts from active.`, { startedAt });
     }

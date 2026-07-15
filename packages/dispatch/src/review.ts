@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJsonState, writeJsonStateAtomic, writeJsonStateNew, type ResolveOptions } from '@sigmarun/storage';
-import { appendEvent, failEnvelope, okEnvelope, type Envelope } from '@sigmarun/core';
+import { appendEvent, failEnvelope, okEnvelope, resolveRunMode, type Envelope } from '@sigmarun/core';
 import { findActiveClaim, loadClaims, readOrDefault, saveState, withRunLock, type ClaimStores, type TaskRow } from './claim-engine.js';
 
 export interface ReviewClaimOptions extends ResolveOptions {
@@ -189,6 +189,13 @@ function grantReviewClaim(
 export function reviewClaim(opts: ReviewClaimOptions): Envelope {
   const startedAt = Date.now();
   return withRunLock(opts, startedAt, (runDir, runId) => {
+    // Mode wall (docs/26; S3): lightweight runs have no review gate.
+    if (!resolveRunMode(readJsonState(join(runDir, 'run.json')).doc as { lightweight?: boolean }).can.review) {
+      return failEnvelope('mode_mismatch', `Run ${runId} is lightweight — there is no review gate in this mode.`, {
+        nextActions: [`The claim holder completes directly: sigmarun done ${runId} ${opts.taskId} --agent=<owner>`],
+        startedAt,
+      });
+    }
     if (!existsSync(join(runDir, 'agents', `${opts.agentId}.json`))) {
       return failEnvelope('agent_not_registered', `Agent ${opts.agentId} is not registered on ${runId}.`, { startedAt });
     }

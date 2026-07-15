@@ -14,6 +14,7 @@ import {
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope, type EnvelopeWarning } from './envelope.js';
+import { resolveRunMode } from './mode.js';
 import { appendEvent, readEventsSafe } from './events.js';
 
 export interface SubmitOptions extends ResolveOptions {
@@ -100,6 +101,16 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   try {
+    // Mode wall (docs/26; S3): a lightweight run has no evidence gate — one legal submit used
+    // to push the task to approved where `done` no longer reaches, stranding it.
+    const runMode = resolveRunMode(readJsonState(join(runDir, 'run.json')).doc as { lightweight?: boolean });
+    if (!runMode.can.submit) {
+      return failEnvelope('mode_mismatch', `Run ${opts.runId} is lightweight — there is no evidence gate in this mode.`, {
+        nextActions: [`Complete the task directly: sigmarun done ${opts.runId} ${opts.taskId} --agent=${opts.agentId}`],
+        startedAt,
+      });
+    }
+
     // Step 2: state gate — working + owner.
     const taskFile = join(runDir, 'tasks', opts.taskId, 'task.json');
     const task = readJsonState(taskFile);

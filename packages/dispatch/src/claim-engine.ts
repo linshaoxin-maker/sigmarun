@@ -584,11 +584,17 @@ export function claimNext(opts: ClaimOptions): Envelope {
     const role = opts.role ?? (agent.role as string) ?? 'implementer';
 
     // D15: reviewer/verifier work is synthesized from the submitted/approved queues, not the task list.
-    if (role === 'reviewer' && !opts.taskId) {
-      return synthesizeReview(runDir, runId, opts.agentId, startedAt);
-    }
-    if (role === 'verifier' && !opts.taskId) {
-      return synthesizeVerify(runDir, runId, opts.agentId, startedAt);
+    if ((role === 'reviewer' || role === 'verifier') && !opts.taskId) {
+      // Mode wall (docs/26; S3): lightweight runs have no review/verify gates to synthesize from.
+      if (lightweight) {
+        return failEnvelope('mode_mismatch', `Run ${runId} is lightweight — there is no ${role === 'reviewer' ? 'review' : 'verification'} gate in this mode.`, {
+          nextActions: [`Claim implementation work instead: sigmarun claim-next ${runId} --agent=${opts.agentId}`],
+          startedAt,
+        });
+      }
+      return role === 'reviewer'
+        ? synthesizeReview(runDir, runId, opts.agentId, startedAt)
+        : synthesizeVerify(runDir, runId, opts.agentId, startedAt);
     }
 
     // Guard #4: candidates. Directed claims answer with the specific guard code (D17).

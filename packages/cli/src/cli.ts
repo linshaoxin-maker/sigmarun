@@ -38,6 +38,8 @@ const EXIT_BY_CODE: Record<string, number> = {
   run_not_active: 7,
   run_paused: 7,
   invalid_transition: 7,
+  mode_mismatch: 7,
+  gateway_too_old: 8,
   not_a_git_repo: 8,
   bare_repo_unsupported: 8,
   team_root_not_found: 8,

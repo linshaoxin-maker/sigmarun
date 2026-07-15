@@ -33,6 +33,8 @@ export type ReasonCode =
   | 'export_redaction_hit'
   | 'path_escape_detected'
   | 'memory_entry_invalid'
+  | 'mode_mismatch'
+  | 'gateway_too_old'
   | 'io_error';
 
 /** Internal error carrying a contract reason code (docs/17 §3); converted to an envelope at the primitive layer (docs/20 §3 R2). */

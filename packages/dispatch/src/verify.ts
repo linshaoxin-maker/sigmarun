@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJsonState, redactText, writeJsonStateAtomic, writeJsonStateNew, type ResolveOptions } from '@sigmarun/storage';
-import { appendEvent, failEnvelope, okEnvelope, truncateOutput, type Envelope } from '@sigmarun/core';
+import { appendEvent, failEnvelope, okEnvelope, resolveRunMode, truncateOutput, type Envelope } from '@sigmarun/core';
 import { loadClaims, withRunLock, type ClaimStores, type TaskRow } from './claim-engine.js';
 import { activeVerifyClaim, completeVerifyClaim, grantVerifyClaim, historicalOwners } from './review.js';
 
@@ -61,6 +61,13 @@ export function mapTaskToRework(runDir: string, runId: string, taskId: string, s
 export function verifySubmit(opts: VerifyOptions): Envelope {
   const startedAt = Date.now();
   return withRunLock(opts, startedAt, (runDir, runId) => {
+    // Mode wall (docs/26; S3): lightweight runs have no verification gate.
+    if (!resolveRunMode(readJsonState(join(runDir, 'run.json')).doc as { lightweight?: boolean }).can.verify) {
+      return failEnvelope('mode_mismatch', `Run ${runId} is lightweight — there is no verification gate in this mode.`, {
+        nextActions: [`The claim holder completes directly: sigmarun done ${runId} <TASK-ID> --agent=<owner>`],
+        startedAt,
+      });
+    }
     if (!existsSync(join(runDir, 'agents', `${opts.agentId}.json`))) {
       return failEnvelope('agent_not_registered', `Agent ${opts.agentId} is not registered on ${runId}.`, {
         nextActions: [`Register first: sigmarun agent register ${runId} --tool=<tool> --label=<window>`],

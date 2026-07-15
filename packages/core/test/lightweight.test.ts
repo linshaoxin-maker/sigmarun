@@ -64,13 +64,47 @@ describe('lightweight mode — decompose → claim → done (no review/verify/in
     expect(env.code).toBe('not_claim_owner');
   });
 
+  it('the mode wall: submit/review/verify/integrate are refused on a lightweight run with mode_mismatch (S3)', async () => {
+    const repo = lightweightRun();
+    const claim = claimNext({ cwd: repo, runId: 'RUN-0001', agentId: 'win-1' });
+    const taskId = (claim.data as { task_id: string }).task_id;
+
+    const { submitEvidence, integrateStart } = await import('@sigmarun/core');
+    const submit = submitEvidence({ cwd: repo, runId: 'RUN-0001', taskId, agentId: 'win-1', evidencePath: '/nope.json' });
+    expect(submit.code).toBe('mode_mismatch');
+    expect(submit.next_actions.join(' ')).toContain('sigmarun done');
+
+    const { reviewClaim, verifySubmit } = await import('@sigmarun/dispatch');
+    const review = reviewClaim({ cwd: repo, runId: 'RUN-0001', taskId, agentId: 'win-2' });
+    expect(review.code).toBe('mode_mismatch');
+    const verify = verifySubmit({ cwd: repo, runId: 'RUN-0001', agentId: 'win-2', verifyPath: '/nope.json' });
+    expect(verify.code).toBe('mode_mismatch');
+    const integ = integrateStart({ cwd: repo, runId: 'RUN-0001' });
+    expect(integ.code).toBe('mode_mismatch');
+    const synth = claimNext({ cwd: repo, runId: 'RUN-0001', agentId: 'win-3', role: 'reviewer' });
+    expect(synth.code).toBe('mode_mismatch');
+
+    // the task is untouched by all five refusals and still completes the lightweight way
+    expect(readJson(repo, `tasks/${taskId}/task.json`).status).toBe('claimed');
+    expect(taskDone({ cwd: repo, runId: 'RUN-0001', taskId, agentId: 'win-1' }).ok).toBe(true);
+  });
+
+  it('run list carries lightweight + progress_pct so front ends can pick the right run', async () => {
+    const repo = lightweightRun();
+    const { runList } = await import('@sigmarun/watch');
+    const env = runList({ cwd: repo });
+    const runs = (env.data as { runs: Array<{ run_id: string; lightweight: boolean; progress_pct: number | null }> }).runs;
+    expect(runs[0]!.lightweight).toBe(true);
+    expect(typeof runs[0]!.progress_pct).toBe('number');
+  });
+
   it('done is refused on a full (non-lightweight) run', () => {
     const repo = mkTmpGitRepo(); dirs.push(repo);
     initProject({ cwd: repo });
     importRun({ cwd: repo, payload: validPayload() }); // full pipeline
     const env = taskDone({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: 'x' });
     expect(env.ok).toBe(false);
-    expect(env.code).toBe('invalid_transition');
+    expect(env.code).toBe('mode_mismatch');
     expect(env.message).toMatch(/not lightweight/);
   });
 });

@@ -11,6 +11,7 @@ import {
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope, type EnvelopeWarning } from './envelope.js';
+import { resolveRunMode } from './mode.js';
 import { appendEvent } from './events.js';
 import { TASK_TYPES } from './payload.js';
 
@@ -259,8 +260,8 @@ export function taskDone(opts: TaskDoneOptions): Envelope {
   const startedAt = Date.now();
   return openRunTx(opts, startedAt, (runDir) => {
     const run = readJsonState(join(runDir, 'run.json')).doc as { lightweight?: boolean };
-    if (!run.lightweight) {
-      return failEnvelope('invalid_transition', `Run ${opts.runId} is not lightweight; a task reaches done through review/verify/integrate. Use the pipeline, or create the run with --lightweight.`, { startedAt });
+    if (!resolveRunMode(run).can.done) {
+      return failEnvelope('mode_mismatch', `Run ${opts.runId} is not lightweight; a task reaches done through review/verify/integrate. Use the pipeline, or create the run with --lightweight.`, { startedAt });
     }
     const taskFile = join(runDir, 'tasks', opts.taskId, 'task.json');
     if (!existsSync(taskFile)) {

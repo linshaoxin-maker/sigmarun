@@ -233,7 +233,12 @@ export function runList(opts: ResolveOptions): Envelope {
         const runFile = join(runsDir, entry, 'run.json');
         if (!existsSync(runFile)) continue;
         const run = readJsonState(runFile).doc as Record<string, unknown>;
-        runs.push({ run_id: run.run_id, status: run.status, title: run.title, mode: run.mode });
+        // lightweight + progress let front ends (/team-do run selection) pick the right run —
+        // 'mode' stays the payload work mode (feature/bugfix/...), not the run mode kind.
+        const pct = (() => {
+          try { return computeProgress(join(runsDir, entry)).progress_pct as number; } catch { return null; }
+        })();
+        runs.push({ run_id: run.run_id, status: run.status, title: run.title, mode: run.mode, lightweight: run.lightweight === true, progress_pct: pct });
       }
     }
     return okEnvelope({
