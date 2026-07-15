@@ -210,6 +210,37 @@ describe('remediation R0-7: CLI experience group (docs/16 §2; docs/17 §1)', ()
   });
 });
 
+describe('remediation C3: human-mode sections (msg bodies, task table, needs-you)', () => {
+  it('msg list shows bodies; run show shows the task table; status shows needs-you with commands', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const { writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    const f = join(repo, 'payload.json');
+    writeFileSync(f, JSON.stringify(validPayload()));
+    runCli(['run', 'import', f, '--lightweight', '--json'], { cwd: repo });
+    runCli(['claim-next', 'RUN-0001', '--agent=win-1', '--json'], { cwd: repo });
+    runCli(['msg', 'post', 'RUN-0001', '--from=win-1', '--type=blocker', '--task=TASK-0001', '--body=Need the schema decision.', '--json'], { cwd: repo });
+
+    const msgs = runCli(['msg', 'list', 'RUN-0001'], { cwd: repo });
+    expect(msgs.stdout).toContain('Need the schema decision.'); // the body, not just a count
+    expect(msgs.stdout).toContain('MSG-0001');
+
+    const show = runCli(['run', 'show', 'RUN-0001'], { cwd: repo });
+    expect(show.stdout).toContain('TASK-0001');
+    expect(show.stdout).toContain('claimed');
+
+    const status = runCli(['status', 'RUN-0001'], { cwd: repo });
+    expect(status.stdout).toContain('needs you:');
+    expect(status.stdout).toContain('--type=answer --reply-to=MSG-0001');
+
+    const agents = runCli(['agent', 'list', 'RUN-0001'], { cwd: repo });
+    expect(agents.stdout).toContain('win-1');
+    expect(agents.stdout).toContain('TASK-0001');
+  });
+});
+
 describe('smoke-test fixes: help surface (L15) and project-scoped worktree root (L17)', () => {
   it('--help and help exit 0 with the command map', () => {
     for (const argv of [['--help'], ['help'], ['-h']]) {

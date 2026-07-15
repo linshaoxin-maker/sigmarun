@@ -112,13 +112,82 @@ function renderTimeline(events: TimelineEvent[]): string[] {
   return out;
 }
 
+/**
+ * Human-mode sections (remediation C3). The machine face (--json) is the contract; the human
+ * face used to be one summary line for everything — `msg list` did not even show message
+ * bodies, so "troubleshoot by calling the CLI directly" (docs/00 §1) meant --json + jq. Each
+ * renderer keys off a data shape, so any command carrying that shape gets the section for free.
+ */
+function renderSections(data: Record<string, unknown> | undefined, lines: string[]): void {
+  if (!data) return;
+  const checks = data.checks as DoctorCheck[] | undefined;
+  if (Array.isArray(checks)) for (const c of checks) lines.push(`  [${c.status}] ${c.name} — ${c.detail}`);
+  const events = data.events as TimelineEvent[] | undefined;
+  if (Array.isArray(events)) lines.push(...renderTimeline(events));
+
+  const tasks = data.tasks as Array<{ task_id: string; title?: string; status: string; owner_agent_id?: string | null; depends_on?: string[] }> | undefined;
+  if (Array.isArray(tasks) && tasks.length > 0 && tasks[0]?.task_id) {
+    const stW = Math.max(...tasks.map((t) => t.status.length));
+    for (const t of tasks) {
+      const deps = t.depends_on?.length ? `  deps: ${t.depends_on.join(',')}` : '';
+      lines.push(`  ${t.task_id}  ${t.status.padEnd(stW)}  ${(t.owner_agent_id ?? '-').padEnd(22)} ${t.title ?? ''}${deps}`.trimEnd());
+    }
+  }
+
+  const messages = data.messages as Array<{ message_id: string; type: string; from_agent_id: string; task_id?: string | null; status?: string; body: string; in_reply_to?: string }> | undefined;
+  if (Array.isArray(messages)) {
+    for (const m of messages) {
+      const target = m.task_id ? ` ${m.task_id}` : '';
+      const reply = m.in_reply_to ? ` re:${m.in_reply_to}` : '';
+      lines.push(`  ${m.message_id} [${m.type}${m.status === 'open' ? ', open' : ''}] ${m.from_agent_id}${target}${reply}: ${m.body}`);
+    }
+  }
+
+  const agents = data.agents as Array<{ agent_id: string; label?: string | null; role?: string; current_task?: string | null; gate_kind?: string | null; last_heartbeat_min?: number; stale?: boolean }> | undefined;
+  if (Array.isArray(agents)) {
+    for (const a of agents) {
+      const work = a.current_task ? `${a.gate_kind ? `${a.gate_kind} on ` : ''}${a.current_task}` : 'idle';
+      lines.push(`  ${a.agent_id}${a.label ? ` (${a.label})` : ''}  ${a.role ?? ''}  ${work}  hb ${a.last_heartbeat_min}m${a.stale ? '  STALE' : ''}`);
+    }
+  }
+
+  const needs = data.needs_user as Array<{ kind: string; detail: string; command: string }> | undefined;
+  if (Array.isArray(needs) && needs.length > 0) {
+    lines.push('  needs you:');
+    for (const n of needs) {
+      lines.push(`    [${n.kind}] ${n.detail}`);
+      lines.push(`      -> ${n.command}`);
+    }
+  }
+  const risks = data.risks as Array<Record<string, unknown> & { kind: string }> | undefined;
+  if (Array.isArray(risks)) {
+    for (const r of risks) {
+      const rest = Object.entries(r).filter(([k]) => k !== 'kind').map(([k, v]) => `${k}=${String(v)}`).join(' ');
+      lines.push(`  risk [${r.kind}] ${rest}`);
+    }
+  }
+
+  const findings = data.findings as Array<{ rule_id: string; severity: string; message: string; next_action: string }> | undefined;
+  if (Array.isArray(findings)) {
+    for (const f of findings) {
+      lines.push(`  [${f.severity}] ${f.rule_id} ${f.message}`);
+      lines.push(`      -> ${f.next_action}`);
+    }
+  }
+
+  // task show / evidence show detail blocks (small key-value summaries)
+  const task = data.task as { task_id?: string; status?: string; objective?: string; acceptance?: string[]; depends_on?: string[] } | undefined;
+  if (task?.task_id) {
+    if (task.objective) lines.push(`  objective: ${task.objective}`);
+    for (const a of task.acceptance ?? []) lines.push(`  accept: ${a}`);
+    if (task.depends_on?.length) lines.push(`  deps: ${task.depends_on.join(', ')}`);
+  }
+}
+
 function render(env: Envelope, json: boolean): string {
   if (json) return JSON.stringify(env);
   const lines = [env.message];
-  const checks = (env.data as { checks?: DoctorCheck[] } | undefined)?.checks;
-  if (checks) for (const c of checks) lines.push(`  [${c.status}] ${c.name} — ${c.detail}`);
-  const events = (env.data as { events?: TimelineEvent[] } | undefined)?.events;
-  if (events && Array.isArray(events)) lines.push(...renderTimeline(events));
+  renderSections(env.data as Record<string, unknown> | undefined, lines);
   for (const w of env.warnings) lines.push(`  warning: ${w.message}`);
   for (const a of env.next_actions) lines.push(`  next: ${a}`);
   return lines.join('\n');
