@@ -9,6 +9,7 @@ export interface TaskSpec {
   priority?: number;
   role?: string;
   checks?: string[];
+  type?: string;
 }
 
 export function payloadWith(tasks: TaskSpec[], policy?: Record<string, unknown>): Record<string, unknown> {
@@ -20,7 +21,7 @@ export function payloadWith(tasks: TaskSpec[], policy?: Record<string, unknown>)
     tasks: tasks.map((t) => ({
       client_task_key: t.key,
       title: `Task ${t.key}`,
-      type: 'implementation',
+      type: t.type ?? 'implementation',
       objective: `Do ${t.key}.`,
       acceptance: [`${t.key} done.`],
       ...(t.deps ? { depends_on: t.deps } : {}),

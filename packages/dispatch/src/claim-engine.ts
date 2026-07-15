@@ -627,7 +627,9 @@ export function claimNext(opts: ClaimOptions): Envelope {
       return finishClaim(row);
     }
 
-    const typeFilter = (r: TaskRow) => !integrating || ['review', 'verify', 'integration'].includes(r.type);
+    // docs/15 §2.1: integrating narrows the queue to gate/integration work. Values must come from
+    // the TASK_TYPES enum — 'verify' (not a type) silently excluded verification tasks for good.
+    const typeFilter = (r: TaskRow) => !integrating || ['review', 'verification', 'integration'].includes(r.type);
     const excluded: Array<{ task_id: string; reason: string }> = [];
     const claimable: TaskRow[] = [];
     for (const row of rows.filter((r) => r.status === 'ready' && typeFilter(r))) {

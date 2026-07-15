@@ -151,6 +151,24 @@ describe('claim-next guards (BR-001)', () => {
     expect(readJson('claims/task-claims.json').claims.length).toBe(1);
   });
 
+  it('an integrating run still offers verification-type tasks from the queue (docs/15 §2.1; enum-typo regression)', async () => {
+    repo = mkClaimRepo([{ key: 'a' }, { key: 'v', type: 'verification', paths: { allow: ['verify/**'] } }]);
+    const owner = registerDefault(repo, 'win-owner');
+    const reviewer = registerDefault(repo, 'win-rev', 'codex');
+    const verifier = registerDefault(repo, 'win-ver', 'codex');
+    const { driveToVerified } = await import('./fixture.js');
+    await driveToVerified(repo, 'TASK-0001', 'a', owner, reviewer, verifier);
+    const { integrateStart } = await import('@sigmarun/core');
+    const started = integrateStart({ cwd: repo, runId: 'RUN-0001' });
+    expect(started.ok).toBe(true);
+    expect(readJson('run.json').status).toBe('integrating');
+
+    const claimer = registerDefault(repo, 'win-x', 'codex');
+    const env = claimNext({ cwd: repo, runId: 'RUN-0001', agentId: claimer });
+    expect(env.ok).toBe(true);
+    expect((env.data as { task_id: string }).task_id).toBe('TASK-0002');
+  });
+
   it('D20 default gate: a verified upstream unblocks its downstream without any policy knob', () => {
     repo = mkClaimRepo([{ key: 'a' }, { key: 'b', deps: ['a'] }]);
     const agent = registerDefault(repo);
