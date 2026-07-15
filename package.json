@@ -29,12 +29,12 @@
   "description": "Repo-local multi-agent collaboration protocol + gateway CLI for AI coding agents (Claude Code, Codex).",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OWNER/sigmarun.git"
+    "url": "git+https://github.com/linshaoxin-maker/sigmarun.git"
   },
   "bugs": {
-    "url": "https://github.com/OWNER/sigmarun/issues"
+    "url": "https://github.com/linshaoxin-maker/sigmarun/issues"
   },
-  "homepage": "https://github.com/OWNER/sigmarun#readme",
+  "homepage": "https://github.com/linshaoxin-maker/sigmarun#readme",
   "keywords": [
     "ai-agents",
     "multi-agent",
