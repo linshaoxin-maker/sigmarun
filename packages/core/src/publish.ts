@@ -10,6 +10,7 @@ import {
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope, type EnvelopeWarning } from './envelope.js';
+import { acquireRunWriteLock } from './tx.js';
 import { appendEvent } from './events.js';
 
 export interface PublishOptions extends ResolveOptions {
@@ -80,7 +81,7 @@ export function publishTasks(opts: PublishOptions): Envelope {
 
   // Canonical run lock — publish previously locked runDir/locks/run.lock and was
   // not mutually exclusive with claim/submit/heartbeat on the same run (review finding #1).
-  const release = tryAcquireLock(runLockPath(runDir));
+  const release = acquireRunWriteLock(runDir);
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   try {

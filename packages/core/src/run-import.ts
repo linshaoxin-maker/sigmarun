@@ -10,6 +10,7 @@ import {
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope, type EnvelopeWarning } from './envelope.js';
+import { assertGatewayWritable } from './tx.js';
 import { appendEvent, type EventActor } from './events.js';
 import { payloadHash, validatePayload, type PlanPayload } from './payload.js';
 
@@ -57,6 +58,10 @@ export function importRun(opts: ImportOptions): Envelope {
   if (!existsSync(join(root.teamRoot, 'project.json'))) {
     return failEnvelope('team_root_not_found', 'This repository is not initialized for sigmarun.', { startedAt });
   }
+  // The write gate outranks every business answer — an outdated gateway must not even learn
+  // whether its payload is a duplicate; the only truthful reply is "upgrade first".
+  const tooOld = assertGatewayWritable(root.teamRoot);
+  if (tooOld) return failEnvelope(tooOld.code, tooOld.message, { startedAt });
 
   const { errors, warnings, payload } = validatePayload(opts.payload);
   if (errors.length > 0 || !payload) {

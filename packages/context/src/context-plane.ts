@@ -10,7 +10,7 @@ import {
   writeJsonStateAtomic,
   type ResolveOptions,
 } from '@sigmarun/storage';
-import { appendEvent, failEnvelope, okEnvelope, type Envelope, type EnvelopeWarning } from '@sigmarun/core';
+import { acquireRunWriteLock, appendEvent, failEnvelope, okEnvelope, type Envelope, type EnvelopeWarning } from '@sigmarun/core';
 
 /** docs/12 §6 message type enum. */
 export const MESSAGE_TYPES = [
@@ -146,7 +146,7 @@ export function postMessage(opts: PostMessageOptions): Envelope {
     });
   }
 
-  const release = tryAcquireLock(runLockPath(runDir));
+  const release = acquireRunWriteLock(runDir);
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   try {
@@ -344,7 +344,7 @@ export function hydrateContext(opts: HydrateOptions): Envelope {
   for (const g of task.paths?.avoid ?? []) risks.push(`Avoid ${g} (declared avoid path).`);
   for (const g of task.paths?.requires_approval ?? []) risks.push(`${g} requires approval before changes (run: sigmarun approve-paths).`);
 
-  const release = tryAcquireLock(runLockPath(runDir));
+  const release = acquireRunWriteLock(runDir);
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
   try {
     appendEvent(runDir, {

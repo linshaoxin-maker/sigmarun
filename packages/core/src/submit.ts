@@ -14,6 +14,7 @@ import {
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope, type EnvelopeWarning } from './envelope.js';
+import { acquireRunWriteLock } from './tx.js';
 import { resolveRunMode } from './mode.js';
 import { appendEvent, readEventsSafe } from './events.js';
 
@@ -97,7 +98,7 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
     return failEnvelope('task_not_found', `Task ${opts.taskId} does not exist on ${opts.runId}.`, { startedAt });
   }
 
-  const release = tryAcquireLock(runLockPath(runDir));
+  const release = acquireRunWriteLock(runDir);
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   try {

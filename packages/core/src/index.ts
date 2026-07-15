@@ -7,6 +7,7 @@ export { initProject, doctorProject } from './lifecycle.js';
 export type { DoctorOptions } from './lifecycle.js';
 export type { DoctorCheck } from './lifecycle.js';
 export { resolveRunMode } from './mode.js';
+export { acquireRunWriteLock, assertGatewayWritable } from './tx.js';
 export type { RunMode, RunModeKind } from './mode.js';
 export { appendEvent, collectStateRevs, readEventsSafe } from './events.js';
 export type { EventActor, EventInput, LedgerEvent, RevAfter, SafeEvents } from './events.js';

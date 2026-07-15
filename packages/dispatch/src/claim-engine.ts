@@ -15,6 +15,7 @@ import { synthesizeReview } from './review.js';
 import { synthesizeVerify } from './verify.js';
 import { extendGateLease } from './review.js';
 import {
+  acquireRunWriteLock,
   appendEvent,
   failEnvelope,
   okEnvelope,
@@ -175,7 +176,7 @@ export function registerAgent(opts: RegisterOptions): Envelope {
   const agentsDir = join(runDir, 'agents');
   mkdirSync(agentsDir, { recursive: true });
 
-  const release = tryAcquireLock(runLockPath(runDir));
+  const release = acquireRunWriteLock(runDir);
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   try {
@@ -507,7 +508,7 @@ export function claimNext(opts: ClaimOptions): Envelope {
   if (ctx instanceof GatewayError) return failEnvelope(ctx.code, ctx.message, { startedAt });
   const { runDir, runId } = ctx;
 
-  const release = tryAcquireLock(runLockPath(runDir));
+  const release = acquireRunWriteLock(runDir);
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
   try {
@@ -844,7 +845,7 @@ export function withRunLock(
 ): Envelope {
   const ctx = openRun(opts);
   if (ctx instanceof GatewayError) return failEnvelope(ctx.code, ctx.message, { startedAt });
-  const release = tryAcquireLock(runLockPath(ctx.runDir));
+  const release = acquireRunWriteLock(ctx.runDir);
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
   try {
     return body(ctx.runDir, ctx.runId);

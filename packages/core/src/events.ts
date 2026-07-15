@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { currentStateGeneration, vlog } from '@sigmarun/storage';
 
 export interface EventActor {
-  type: 'agent' | 'user' | 'policy' | 'sweep';
+  type: 'agent' | 'user' | 'policy' | 'sweep' | 'system';
   id: string;
 }
 

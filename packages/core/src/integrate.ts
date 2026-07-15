@@ -11,6 +11,7 @@ import {
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope } from './envelope.js';
+import { acquireRunWriteLock } from './tx.js';
 import { resolveRunMode } from './mode.js';
 import { appendEvent, readEventsSafe } from './events.js';
 
@@ -45,7 +46,7 @@ function withLock(opts: ResolveOptions & { runId: string }, startedAt: number, b
   if (!existsSync(join(runDir, 'run.json'))) {
     return failEnvelope('run_not_found', `Run ${opts.runId} does not exist under .team/runs/.`, { startedAt });
   }
-  const release = tryAcquireLock(runLockPath(runDir));
+  const release = acquireRunWriteLock(runDir);
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
   try {
     return body(runDir);

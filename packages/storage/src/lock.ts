@@ -6,6 +6,9 @@ import { vlog, shortPath } from './log.js';
 export interface LockOptions {
   timeoutMs?: number;
   staleMs?: number;
+  /** Fired when THIS acquire wins a stale-lock takeover (after the atomic rename, before the
+   * mkdir retry). The caller records it — the lock layer cannot write ledger events (layering). */
+  onTakeover?: (info: { age_ms: number; stale_pid?: number; stale_token?: string }) => void;
 }
 
 function sleepSync(ms: number): void {
@@ -70,8 +73,10 @@ export function acquireLock(lockDir: string, opts: LockOptions = {}): () => void
       return () => { vlog('lock', `released ${shortPath(lockDir)}`); releaseIfMine(lockDir, token); };
     } catch {
       let stale = false;
+      let ageMs = 0;
       try {
-        stale = Date.now() - statSync(lockDir).mtimeMs > staleMs;
+        ageMs = Date.now() - statSync(lockDir).mtimeMs;
+        stale = ageMs > staleMs;
       } catch { /* raced away between attempts; retry immediately */ }
       if (stale) {
         // Exclusive takeover: rename is atomic, so only ONE contender wins it — the losers
@@ -81,7 +86,12 @@ export function acquireLock(lockDir: string, opts: LockOptions = {}): () => void
         const dead = `${lockDir}.dead-${token}`;
         try {
           renameSync(lockDir, dead);
+          let staleMeta: { pid?: number; token?: string } = {};
+          try {
+            staleMeta = JSON.parse(readFileSync(join(dead, 'meta.json'), 'utf8')) as { pid?: number; token?: string };
+          } catch { /* holder crashed before meta landed — age is all we know */ }
           rmSync(dead, { recursive: true, force: true });
+          opts.onTakeover?.({ age_ms: Math.round(ageMs), stale_pid: staleMeta.pid, stale_token: staleMeta.token });
         } catch { /* another contender took it first — just retry the mkdir */ }
         continue;
       }

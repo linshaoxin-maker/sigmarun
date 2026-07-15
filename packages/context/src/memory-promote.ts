@@ -11,7 +11,7 @@ import {
   writeJsonStateAtomic,
   type ResolveOptions,
 } from '@sigmarun/storage';
-import { appendEvent, failEnvelope, okEnvelope, type Envelope } from '@sigmarun/core';
+import { assertGatewayWritable, appendEvent, failEnvelope, okEnvelope, type Envelope } from '@sigmarun/core';
 
 export interface PromoteOptions extends ResolveOptions {
   runId: string;
@@ -126,6 +126,8 @@ export function promoteMemory(opts: PromoteOptions): Envelope {
   })();
   if (ignored) return invalid(`${memRel} is gitignored; project memory must be git-tracked (docs/25 §3.1).`, startedAt);
 
+  const tooOld = assertGatewayWritable(teamRoot);
+  if (tooOld) return failEnvelope(tooOld.code, tooOld.message, { startedAt });
   const release = tryAcquireLock(join(teamRoot, 'locks', 'project.lock'));
   if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
 
