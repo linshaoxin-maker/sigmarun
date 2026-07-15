@@ -420,17 +420,24 @@ const RULES: Rule[] = [
   },
   {
     id: 'AUD-019',
-    check: (ctx) =>
-      ctx.events
+    check: (ctx) => {
+      const policyAllowsSkip =
+        (ctx.run.default_policy as { require_review?: boolean } | undefined)?.require_review === false;
+      return ctx.events
         .filter((e) => e.event === 'review_skipped' && e.task_id)
         .map((e) => {
           const review = (ctx.taskDetail(e.task_id!)?.review as { required?: boolean } | undefined) ?? {};
-          const required = review.required !== false;
-          return finding('AUD-019', required ? 'error' : 'warn',
-            `${e.task_id} review was skipped while task.review.required=${String(review.required ?? true)}.`,
-            required ? 'Restore the task to submitted and run an independent review.' : 'Keep the skip as audit history; no action if policy was intentional.',
+          // 15 §9 / 18 §4.C: a task-mandated review can never be skipped (error). A skip while the
+          // CURRENT policy still demands review is equally anomalous — submit only emits the event
+          // under require_review=false, so either policy was edited afterwards or the event was
+          // forged. Only the policy-legal skip (policy off, task not mandating) is plain history.
+          const anomalous = review.required === true || !policyAllowsSkip;
+          return finding('AUD-019', anomalous ? 'error' : 'warn',
+            `${e.task_id} review was skipped (task.review.required=${review.required === undefined ? 'unset' : String(review.required)}, run require_review=${String(!policyAllowsSkip)}).`,
+            anomalous ? 'Restore the task to submitted and run an independent review.' : 'Keep the skip as audit history; no action if policy was intentional.',
             [`seq:${e.seq}`]);
-        }),
+        });
+    },
   },
   {
     id: 'AUD-020',

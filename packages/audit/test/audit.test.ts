@@ -157,6 +157,20 @@ describe('audit run (docs/18 §7: read-only, exit 0, findings are data)', () => 
     expect(hasRule(env, 'AUD-019')).toBe(true);
   });
 
+  it('a policy-legal review skip is warn, not error (AUD-019 severity; remediation D-2)', async () => {
+    editState('run.json', (doc) => {
+      (doc.default_policy as Record<string, unknown>).require_review = false;
+    });
+    await setupWorking(repo, agent);
+    const { submitEvidence } = await import('@sigmarun/core');
+    submitEvidence({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, evidencePath: validDraft(repo) });
+    expect((readJsonState(join(runDir(), 'tasks', 'TASK-0001', 'task.json')).doc as { status: string }).status).toBe('approved');
+    const env = auditRun({ cwd: repo, runId: 'RUN-0001' });
+    const f = findings(env).find((x) => x.rule_id === 'AUD-019');
+    expect(f).toBeTruthy();
+    expect(f!.severity).toBe('warn');
+  });
+
   it('event seq gap -> AUD-033 error', () => {
     const file = join(runDir(), 'events.jsonl');
     const lines = readFileSync(file, 'utf8').trim().split('\n');
