@@ -1,31 +1,15 @@
+import { EVENT_STATUS } from '@sigmarun/core';
 import type { LedgerEvent } from '@sigmarun/core';
+
+// Single source in core/state-machine (remediation E2); re-exported for existing consumers.
+export { EVENT_STATUS };
 
 /**
  * Ledger replay fold: the last state-bearing event per task wins (docs/17 §5.3 commit point;
  * docs/15 general principle 1: a transition without an event is an audit error).
  * Shared by repair (forward-roll) and AUD-034 (replay mismatch detection) — single source of truth.
  */
-export const EVENT_STATUS: Record<string, string> = {
-  task_created: 'draft',
-  task_published: 'ready',
-  task_claimed: 'claimed',
-  task_started: 'working',
-  task_released: 'ready',
-  task_reclaimed: 'ready',
-  evidence_submitted: 'submitted',
-  review_skipped: 'approved',
-  review_claimed: 'reviewing',
-  review_released: 'submitted',
-  review_approved: 'approved',
-  review_blocked: 'blocked',
-  changes_requested: 'changes_requested',
-  task_blocked: 'blocked',
-  task_unblocked: 'working',
-  verification_passed: 'verified',
-  task_integrated: 'integrated',
-  task_cancelled: 'cancelled',
-  task_done: 'done',
-};
+
 
 const OWNER_SETTING = new Set(['task_claimed', 'task_started']);
 const OWNER_CLEARING = new Set(['task_released', 'task_reclaimed', 'task_cancelled']);

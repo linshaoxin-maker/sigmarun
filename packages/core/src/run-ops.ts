@@ -10,7 +10,7 @@ import {
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope } from './envelope.js';
-import { acquireRunWriteLock } from './tx.js';
+import { withRunTx } from './tx.js';
 import { appendEvent } from './events.js';
 
 export interface RunOpOptions extends ResolveOptions {
@@ -19,32 +19,13 @@ export interface RunOpOptions extends ResolveOptions {
 
 const TASK_TERMINAL = new Set(['done', 'cancelled', 'integrated']);
 
+/** Delegates to the ONE transaction skeleton (core/tx.ts withRunTx; remediation E1). */
 function withRunTransaction(
   opts: RunOpOptions,
   startedAt: number,
   body: (runDir: string) => Envelope,
 ): Envelope {
-  let teamRoot: string;
-  try {
-    teamRoot = resolveTeamRoot(opts).teamRoot;
-  } catch (err) {
-    const ge = err as GatewayError;
-    return failEnvelope(ge.code, ge.message, { startedAt });
-  }
-  const runDir = join(teamRoot, 'runs', opts.runId);
-  if (!existsSync(join(runDir, 'run.json'))) {
-    return failEnvelope('run_not_found', `Run ${opts.runId} does not exist under .team/runs/.`, { startedAt });
-  }
-  const release = acquireRunWriteLock(runDir);
-  if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
-  try {
-    return body(runDir);
-  } catch (err) {
-    if (err instanceof GatewayError) return failEnvelope(err.code, err.message, { startedAt });
-    throw err;
-  } finally {
-    release();
-  }
+  return withRunTx(opts, startedAt, (runDir) => body(runDir));
 }
 
 function flipRun(runDir: string, from: string[], to: string): { ok: true; was: string } | { ok: false; was: string } {

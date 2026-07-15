@@ -11,7 +11,7 @@ import {
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope, type EnvelopeWarning } from './envelope.js';
-import { acquireRunWriteLock } from './tx.js';
+import { withRunTx } from './tx.js';
 import { resolveRunMode } from './mode.js';
 import { appendEvent } from './events.js';
 import { TASK_TYPES } from './payload.js';
@@ -54,28 +54,9 @@ const id4 = (prefix: string, n: number) => `${prefix}-${String(n).padStart(4, '0
 /** Task states a user may still cancel; integrated/done results are frozen (docs/15 §3.3). */
 const CANCELLABLE = new Set(['draft', 'ready', 'claimed', 'working', 'blocked', 'submitted', 'reviewing', 'changes_requested', 'approved', 'verified']);
 
+/** Delegates to the ONE transaction skeleton (core/tx.ts withRunTx; remediation E1). */
 function openRunTx(opts: ResolveOptions & { runId: string }, startedAt: number, body: (runDir: string) => Envelope): Envelope {
-  let teamRoot: string;
-  try {
-    teamRoot = resolveTeamRoot(opts).teamRoot;
-  } catch (err) {
-    const ge = err as GatewayError;
-    return failEnvelope(ge.code, ge.message, { startedAt });
-  }
-  const runDir = join(teamRoot, 'runs', opts.runId);
-  if (!existsSync(join(runDir, 'run.json'))) {
-    return failEnvelope('run_not_found', `Run ${opts.runId} does not exist under .team/runs/.`, { startedAt });
-  }
-  const release = acquireRunWriteLock(runDir);
-  if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
-  try {
-    return body(runDir);
-  } catch (err) {
-    if (err instanceof GatewayError) return failEnvelope(err.code, err.message, { startedAt });
-    throw err;
-  } finally {
-    release();
-  }
+  return withRunTx(opts, startedAt, (runDir) => body(runDir));
 }
 
 /**

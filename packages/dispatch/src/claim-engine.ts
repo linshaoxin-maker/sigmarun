@@ -16,6 +16,7 @@ import { synthesizeVerify } from './verify.js';
 import { extendGateLease } from './review.js';
 import {
   acquireRunWriteLock,
+  withRunTx,
   appendEvent,
   failEnvelope,
   okEnvelope,
@@ -846,23 +847,13 @@ export function findActiveClaim(
   return { claim };
 }
 
+/** Delegates to the ONE transaction skeleton (core withRunTx; remediation E1). */
 export function withRunLock(
   opts: ResolveOptions & { runId: string },
   startedAt: number,
   body: (runDir: string, runId: string) => Envelope,
 ): Envelope {
-  const ctx = openRun(opts);
-  if (ctx instanceof GatewayError) return failEnvelope(ctx.code, ctx.message, { startedAt });
-  const release = acquireRunWriteLock(ctx.runDir);
-  if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
-  try {
-    return body(ctx.runDir, ctx.runId);
-  } catch (err) {
-    if (err instanceof GatewayError) return failEnvelope(err.code, err.message, { startedAt });
-    throw err;
-  } finally {
-    release();
-  }
+  return withRunTx(opts, startedAt, body);
 }
 
 export function heartbeat(opts: HeartbeatOptions): Envelope {

@@ -5,6 +5,8 @@ import {
   type ResolveOptions,
 } from '@sigmarun/storage';
 import { failEnvelope, okEnvelope, type Envelope } from './envelope.js';
+import { acquireRunWriteLock } from './tx.js';
+import { appendEvent } from './events.js';
 
 export interface MigrateOptions extends ResolveOptions {
   /** limit to one run; omit to migrate project files + every run */
@@ -84,11 +86,42 @@ export function migrateState(opts: MigrateOptions): Envelope {
     }
 
     const backupId = writeBackup(teamRoot, 'migrate', pending.map((p) => p.file));
+    // docs/21 §5 (spec-matrix gap a8, closed in R3): rewrite each run's files UNDER its write
+    // lock and put a run_migrated event on its ledger. Project-level files (project/counters)
+    // are guarded by the callers' project.lock discipline and carry no run ledger.
+    const runsRoot = join(teamRoot, 'runs');
+    const byRun = new Map<string, typeof pending>();
+    const projectFiles: typeof pending = [];
     for (const p of pending) {
+      if (p.file.startsWith(runsRoot + '/')) {
+        const runId = p.file.slice(runsRoot.length + 1).split('/')[0]!;
+        byRun.set(runId, [...(byRun.get(runId) ?? []), p]);
+      } else {
+        projectFiles.push(p);
+      }
+    }
+    const rewrite = (p: { file: string }) => {
       const migrated = readJsonState(p.file).doc; // upgraded in memory (rev preserved)
       const tmp = `${p.file}.tmp-${process.pid}`;
       writeFileSync(tmp, JSON.stringify(migrated, null, 2) + '\n');
       renameSync(tmp, p.file);
+    };
+    for (const p of projectFiles) rewrite(p);
+    for (const [runId, files] of byRun) {
+      const runDir = join(runsRoot, runId);
+      const release = acquireRunWriteLock(runDir);
+      if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
+      try {
+        for (const p of files) rewrite(p);
+        appendEvent(runDir, {
+          event: 'run_migrated',
+          actor: { type: 'system', id: 'migrate' },
+          run_id: runId,
+          payload: { files: files.map((p) => rel(p.file)), backup: backupId },
+        });
+      } finally {
+        release();
+      }
     }
 
     return okEnvelope({

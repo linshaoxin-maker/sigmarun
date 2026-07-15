@@ -1,8 +1,7 @@
 import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { GatewayError, readJsonState, resolveTeamRoot, type ResolveOptions } from '@sigmarun/storage';
-import { failEnvelope, okEnvelope, readEventsSafe, type Envelope } from '@sigmarun/core';
-import { EVENT_STATUS } from '@sigmarun/audit';
+import { EVENT_STATUS, failEnvelope, okEnvelope, readEventsSafe, type Envelope } from '@sigmarun/core';
 import { openRun } from '@sigmarun/dispatch';
 
 export interface StatusOptions extends ResolveOptions {

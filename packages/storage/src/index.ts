@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmdirSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path';
 
 export { GatewayError } from './errors.js';
@@ -159,6 +159,17 @@ export function currentStateGeneration(): number {
   return stateGeneration;
 }
 
+/** write + fsync + close (docs/17 §5.1 durability half of temp+fsync+rename). */
+function fsyncWrite(path: string, text: string): void {
+  const fd = openSync(path, 'w');
+  try {
+    writeSync(fd, text);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function writeJsonStateAtomic(
   file: string,
   doc: Record<string, unknown>,
@@ -175,7 +186,9 @@ export function writeJsonStateAtomic(
   const next = { ...doc, rev: opts.expectedRev + 1, updated_at: new Date().toISOString() };
   const tmp = `${file}.tmp-${process.pid}`;
   try {
-    writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
+    // docs/17 §5.1: temp + FSYNC + rename — without the fsync a power loss can rename an
+    // unflushed file into place (the spec waives only the directory fsync).
+    fsyncWrite(tmp, JSON.stringify(next, null, 2) + '\n');
     renameSync(tmp, file);
     stateGeneration++;
     vlog('write', `${_shortPath(file)} rev ${opts.expectedRev} -> ${opts.expectedRev + 1}`);
@@ -190,7 +203,7 @@ export function writeJsonStateNew(file: string, doc: Record<string, unknown>): v
     throw new GatewayError('io_error', `Refusing to overwrite existing state file: ${file}`);
   }
   const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, JSON.stringify({ ...doc, rev: 1 }, null, 2) + '\n');
+  fsyncWrite(tmp, JSON.stringify({ ...doc, rev: 1 }, null, 2) + '\n');
   renameSync(tmp, file);
   stateGeneration++;
   vlog('write', `${_shortPath(file)} created rev 1`);

@@ -472,17 +472,32 @@ export function updateRunMemory(opts: MemoryUpdateOptions): Envelope {
       message: 'No "Source:" references found; compressed memory should cite its origins (docs/12 §7).',
     });
   }
-  mkdirSync(join(runDir, 'context'), { recursive: true });
-  const target = join(runDir, 'context', 'run-memory.md');
-  const tmp = target + '.tmp';
-  writeFileSync(tmp, opts.content, 'utf8');
-  renameSync(tmp, target);
-  return okEnvelope({
-    message: `Run memory updated for ${runId} (${opts.content.length} chars).`,
-    data: { path: 'context/run-memory.md' },
-    warnings,
-    startedAt,
-  });
+  // R3 (spec-matrix gap a7): the memory rewrite is real run state — take the write lock and put
+  // memory_updated (docs/18 #40, never emitted before) on the ledger. INV-011 exempts messages,
+  // not memory.
+  const release = acquireRunWriteLock(runDir);
+  if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
+  try {
+    mkdirSync(join(runDir, 'context'), { recursive: true });
+    const target = join(runDir, 'context', 'run-memory.md');
+    const tmp = `${target}.tmp-${process.pid}`;
+    writeFileSync(tmp, opts.content, 'utf8');
+    renameSync(tmp, target);
+    appendEvent(runDir, {
+      event: 'memory_updated',
+      actor: { type: 'agent', id: 'run-memory' },
+      run_id: runId,
+      payload: { path: 'context/run-memory.md', chars: opts.content.length, sources_cited: /Source:/.test(opts.content) },
+    });
+    return okEnvelope({
+      message: `Run memory updated for ${runId} (${opts.content.length} chars).`,
+      data: { path: 'context/run-memory.md' },
+      warnings,
+      startedAt,
+    });
+  } finally {
+    release();
+  }
 }
 
 /** Read-only DAG view: nodes with derived status + edges (status stays derived, 13 §5.5). */

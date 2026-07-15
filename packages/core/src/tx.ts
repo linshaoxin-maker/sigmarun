@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { GatewayError, tryAcquireLock, runLockPath } from '@sigmarun/storage';
-import { GATEWAY_VERSION } from './envelope.js';
+import { GatewayError, resolveTeamRoot, tryAcquireLock, runLockPath, type ResolveOptions } from '@sigmarun/storage';
+import { failEnvelope, GATEWAY_VERSION, type Envelope } from './envelope.js';
 import { appendEvent } from './events.js';
 
 /**
@@ -61,4 +61,40 @@ export function acquireRunWriteLock(runDir: string): (() => void) | GatewayError
     }
   }
   return release;
+}
+
+/**
+ * THE run-write transaction skeleton (remediation E1, R3 migration): resolve -> run exists ->
+ * version gate + lock + takeover ledger -> body -> GatewayError-to-envelope -> release. The
+ * system's most load-bearing invariants used to live in five near-copies (dispatch withRunLock,
+ * core openRunTx / withRunTransaction / integrate withLock, plus inline forms in submit and the
+ * context plane) whose write orders had already drifted three ways. One implementation, one
+ * order of guards; the architecture test asserts no copy grows back.
+ */
+export function withRunTx(
+  opts: ResolveOptions & { runId: string },
+  startedAt: number,
+  body: (runDir: string, runId: string) => Envelope,
+): Envelope {
+  let teamRoot: string;
+  try {
+    teamRoot = resolveTeamRoot(opts).teamRoot;
+  } catch (err) {
+    const ge = err as GatewayError;
+    return failEnvelope(ge.code, ge.message, { startedAt });
+  }
+  const runDir = join(teamRoot, 'runs', opts.runId);
+  if (!existsSync(join(runDir, 'run.json'))) {
+    return failEnvelope('run_not_found', `Run ${opts.runId} does not exist under .team/runs/.`, { startedAt });
+  }
+  const release = acquireRunWriteLock(runDir);
+  if (release instanceof GatewayError) return failEnvelope(release.code, release.message, { startedAt });
+  try {
+    return body(runDir, opts.runId);
+  } catch (err) {
+    if (err instanceof GatewayError) return failEnvelope(err.code, err.message, { startedAt });
+    throw err;
+  } finally {
+    release();
+  }
 }
