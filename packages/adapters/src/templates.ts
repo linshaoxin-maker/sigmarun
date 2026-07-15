@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.3.0';
+export const TEMPLATE_VERSION = '0.4.0';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -159,8 +159,10 @@ the task's \`paths.allow\`.
 
 Flow:
 1. Find the run: if \`$ARGUMENTS\` names a RUN-ID, use it. Otherwise
-   \`sigmarun run list --json\` and take the most recent run whose status is
-   \`active\` — that's the one \`/team-plan\` just created.
+   \`sigmarun run list --json\` and take the most recent run with status
+   \`active\` AND \`lightweight: true\` — that's the one \`/team-plan\` just
+   created. A full-pipeline run is NOT yours to claim from here; if only
+   full runs exist, say so and point at /team-dispatch.
 2. Claim a piece: \`sigmarun claim-next <RUN> --agent=<name> --json\`
    (name = the \`--as\` value, or a short window name like \`win-1\`; a fresh
    name self-registers). If \`code\` is \`no_claimable_task\`, everything is
@@ -554,6 +556,106 @@ Run \`sigmarun status <RUN-ID> --json\` and report progress, risks, open
 questions, and the Needs-user list with copyable commands. Read-only.
 `;
 
+const CODEX_PUBLISH_SKILL = `---
+name: team-run-publish
+description: Use when the user asks Codex to publish drafted Team Run tasks
+  ("team-publish", "发布任务", "放行任务").
+---
+${versionHeader}
+
+# Team Run Publish
+
+${RULES_BLOCK}
+
+Run \`sigmarun task publish <RUN-ID> [--tasks=TASK-0001,...] --json\`. Report
+which tasks went ready and how agents can claim them (\`sigmarun claim-next\`).
+Publishing is the human release valve — only do it when the user asked.
+`;
+
+const CODEX_SUBMIT_SKILL = `---
+name: team-run-submit
+description: Use when Codex finished a full-pipeline Team Run task and must
+  submit evidence ("team-submit", "提交证据", "交付任务").
+---
+${versionHeader}
+
+# Team Run Submit
+
+${RULES_BLOCK}
+
+Assemble the evidence draft JSON (summary, changed_files, commands with real
+exit codes and output files, required_checks_results, acceptance mapping,
+handoff), then run
+\`sigmarun submit <RUN-ID> <TASK-ID> --agent=<id> --evidence=<draft.json> --json\`.
+On \`evidence_invalid\`, fix exactly the listed items and resubmit. Lightweight
+runs have no submit — use \`sigmarun done\` there.
+`;
+
+const CODEX_INTEGRATE_SKILL = `---
+name: team-run-integrate
+description: Use when the user asks Codex to integrate verified Team Run tasks
+  ("team-integrate", "集成", "合并任务分支").
+---
+${versionHeader}
+
+# Team Run Integrate
+
+${RULES_BLOCK}
+
+1. \`sigmarun integrate start <RUN-ID> --json\` — get the merge order.
+2. Create the integration branch as instructed; merge each task branch with
+   \`git merge --no-ff\`; run the project's checks after each merge.
+3. Record every outcome: \`sigmarun integrate record <RUN-ID> <TASK-ID>
+   --merge-commit=<sha> --json\` (or \`--failed --reason="..."\`).
+4. Finish with \`sigmarun report <RUN-ID> --json\`. The gateway never touches
+   git — you do the merges; it keeps the ledger.
+`;
+
+const CODEX_RUNS_SKILL = `---
+name: team-run-runs
+description: Use when the user asks Codex what Team Runs exist
+  ("team-runs", "有哪些 run", "列出协作").
+---
+${versionHeader}
+
+# Team Runs
+
+${RULES_BLOCK}
+
+Run \`sigmarun run list --json\` and summarize: run id, title, status,
+lightweight or full, progress. Read-only.
+`;
+
+const CODEX_TASKS_SKILL = `---
+name: team-run-tasks
+description: Use when the user asks Codex to list a Team Run's tasks
+  ("team-tasks", "任务列表", "谁在干什么").
+---
+${versionHeader}
+
+# Team Run Tasks
+
+${RULES_BLOCK}
+
+Run \`sigmarun run show <RUN-ID> --json\` for the task table and
+\`sigmarun agent list <RUN-ID> --json\` for who holds what. Read-only.
+`;
+
+const CODEX_EVIDENCE_SKILL = `---
+name: team-run-evidence
+description: Use when the user asks Codex to inspect a task's evidence
+  ("team-evidence", "看证据", "看交付记录").
+---
+${versionHeader}
+
+# Team Run Evidence
+
+${RULES_BLOCK}
+
+Run \`sigmarun evidence show <RUN-ID> <TASK-ID> --json\` and summarize the
+summary, checks (with exit codes), acceptance mapping, and handoff. Read-only.
+`;
+
 /** docs/19 §6 — pasted into repo AGENTS.md between managed markers. */
 export const AGENTS_SECTION = `<!-- sigmarun:adapter-section:begin (managed by sigmarun adapter install) -->
 ## Team Run Protocol (.team/)
@@ -607,5 +709,11 @@ export const TEMPLATES: Record<string, Record<string, string>> = {
     '.codex/skills/team-run-review/SKILL.md': CODEX_REVIEW_SKILL,
     '.codex/skills/team-run-status/SKILL.md': CODEX_STATUS_SKILL,
     '.codex/skills/team-run-verify/SKILL.md': CODEX_VERIFY_SKILL,
+    '.codex/skills/team-run-publish/SKILL.md': CODEX_PUBLISH_SKILL,
+    '.codex/skills/team-run-submit/SKILL.md': CODEX_SUBMIT_SKILL,
+    '.codex/skills/team-run-integrate/SKILL.md': CODEX_INTEGRATE_SKILL,
+    '.codex/skills/team-run-runs/SKILL.md': CODEX_RUNS_SKILL,
+    '.codex/skills/team-run-tasks/SKILL.md': CODEX_TASKS_SKILL,
+    '.codex/skills/team-run-evidence/SKILL.md': CODEX_EVIDENCE_SKILL,
   },
 };

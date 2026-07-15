@@ -22,11 +22,34 @@ agents keep doing the thinking.
 ## Install
 
 ```bash
+# From npm (once published):
 npm i -g sigmarun     # Node >= 20
+
+# From source (works today):
+git clone <this-repo> && cd sigmarun
+npm install && npm run release
+npm i -g ./release/*.tgz
+
 sigmarun --version
 ```
 
-## Quick start
+## Quick start (lightweight — the 5-command loop)
+
+```bash
+cd your-repo
+sigmarun init --example          # .team/ (gitignored) + sigmarun-plan.example.json
+sigmarun run import sigmarun-plan.example.json --lightweight   # tasks claimable now
+sigmarun claim-next RUN-0001 --agent=win-1    # any fresh name self-registers
+# ...do the work...
+sigmarun done RUN-0001 TASK-0001 --agent=win-1
+sigmarun report RUN-0001         # once every task is done -> run closes
+```
+
+Prefer a sentence over JSON? `sigmarun adapter install --tool=claude-code`
+and type `/team-plan <goal>` then `/team-do` in Claude Code — the AI writes
+the payload and drives the CLI. See [docs/26](docs/26-lightweight-mode.md).
+
+## Quick start (full pipeline — evidence, review, verification, integration)
 
 ```bash
 cd your-repo

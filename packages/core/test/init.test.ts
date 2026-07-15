@@ -46,6 +46,22 @@ describe('sigmarun init (contract: docs/17 §8, docs/16 §1, docs/02 §6)', () =
     expect(p.tooling).toEqual({ supports_claude_code: true, supports_codex: true, supports_cursor: false });
   });
 
+  it('init --example scaffolds a valid payload that imports clean (remediation A4)', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    const env = initProject({ cwd: repo, example: true });
+    expect(env.ok).toBe(true);
+    const { join } = await import('node:path');
+    const { existsSync } = await import('node:fs');
+    expect(existsSync(join(repo, 'sigmarun-plan.example.json'))).toBe(true);
+    expect(env.next_actions.join(' ')).toContain('sigmarun-plan.example.json');
+    // the scaffold must survive its own import — a broken example is worse than none
+    const { importRun } = await import('@sigmarun/core');
+    const { readFileSync } = await import('node:fs');
+    const payload = JSON.parse(readFileSync(join(repo, 'sigmarun-plan.example.json'), 'utf8'));
+    const imported = importRun({ cwd: repo, payload, lightweight: true });
+    expect(imported.ok).toBe(true);
+  });
+
   it('fails with not_a_git_repo outside a repository', () => {
     const plain = mkTmpDir(); dirs.push(plain);
     const env = initProject({ cwd: plain });

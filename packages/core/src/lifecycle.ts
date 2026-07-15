@@ -1,5 +1,5 @@
 import { spawnSync, execSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import {
   GatewayError,
@@ -32,7 +32,33 @@ function currentBranch(repoRoot: string): string {
  * @contract docs/17 §8 init · docs/16 §1.1 gitignore rule (D4) · docs/02 §6 project.json fields
  * @uc UC-001 precondition (BDD-001 background)
  */
-export function initProject(opts: ResolveOptions = {}): Envelope {
+/** `init --example` scaffold — the smallest payload that imports clean (remediation A4). */
+const EXAMPLE_PAYLOAD = {
+  schema_version: 'team.plan_payload.v1',
+  source: { tool: 'claude-code', command: '/team-plan', prompt: 'example', agent_id: 'AGENT-claude-001' },
+  run: { title: 'Example run', mode: 'feature', goal: 'Replace this with your goal.' },
+  plan: { summary: 'Two independent example tasks. Edit freely.' },
+  tasks: [
+    {
+      client_task_key: 'first',
+      title: 'First piece',
+      type: 'implementation',
+      objective: 'Describe the first independent piece of work.',
+      acceptance: ['A testable statement of done.'],
+      paths: { allow: ['src/**'] },
+    },
+    {
+      client_task_key: 'second',
+      title: 'Second piece',
+      type: 'implementation',
+      objective: 'Describe the second independent piece of work.',
+      acceptance: ['Another testable statement of done.'],
+      paths: { allow: ['docs/**'] },
+    },
+  ],
+};
+
+export function initProject(opts: ResolveOptions & { example?: boolean } = {}): Envelope {
   const startedAt = Date.now();
   let root;
   try {
@@ -88,12 +114,24 @@ export function initProject(opts: ResolveOptions = {}): Envelope {
     gitignoreUpdated = true;
   }
 
+  if (opts.example) {
+    const target = join(root.repoRoot, 'sigmarun-plan.example.json');
+    if (existsSync(target)) {
+      skipped.push(target);
+    } else {
+      writeFileSync(target, JSON.stringify(EXAMPLE_PAYLOAD, null, 2) + '\n', 'utf8');
+      created.push(target);
+    }
+  }
+
   return okEnvelope({
     startedAt,
     message: created.length > 0 ? 'Initialized .team coordination directory.' : 'Already initialized; nothing to do.',
     data: { teamRoot: root.teamRoot, created, skipped, gitignoreUpdated },
     warnings,
-    nextActions: ['Run `sigmarun doctor` to verify the setup.'],
+    nextActions: opts.example
+      ? ['Edit sigmarun-plan.example.json, then: sigmarun run import sigmarun-plan.example.json --lightweight', 'Run `sigmarun doctor` to verify the setup.']
+      : ['Run `sigmarun doctor` to verify the setup.'],
   });
 }
 
