@@ -34,6 +34,7 @@ export interface TaskAddOptions extends ResolveOptions {
 export interface TaskCancelOptions extends ResolveOptions {
   runId: string;
   taskId: string;
+  reason?: string;
 }
 
 export interface TaskDoneOptions extends ResolveOptions {
@@ -239,11 +240,11 @@ export function taskCancel(opts: TaskCancelOptions): Envelope {
       actor: { type: 'user', id: 'user' },
       run_id: opts.runId,
       task_id: opts.taskId,
-      payload: { released_claim_ids: released },
+      payload: { released_claim_ids: released, reason: opts.reason ?? null },
     });
     return okEnvelope({
-      message: `${opts.taskId} cancelled (was ${status}); ${released.length} claim(s) cascaded.`,
-      data: { task_id: opts.taskId, released_claim_ids: released },
+      message: `${opts.taskId} cancelled (was ${status}${opts.reason ? `; reason: ${opts.reason}` : ''}); ${released.length} claim(s) cascaded.`,
+      data: { task_id: opts.taskId, released_claim_ids: released, reason: opts.reason ?? null },
       startedAt,
     });
   });

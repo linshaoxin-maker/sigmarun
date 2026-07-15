@@ -58,6 +58,32 @@ function flag(argv: string[], name: string): string | undefined {
   return hit ? hit.slice(name.length + 3) : undefined;
 }
 
+/** Flags that carry a value (everything else is boolean). Drives the `--flag value` misuse diagnosis. */
+const VALUE_FLAGS = new Set([
+  'agent', 'task', 'role', 'tool', 'label', 'paths', 'evidence', 'review', 'verify', 'path', 'branch',
+  'from', 'type', 'body', 'to', 'reply-to', 'refs', 'file', 'entry', 'section', 'supersedes', 'tasks',
+  'merge-commit', 'reason', 'interval', 'since', 'limit', 'note', 'team-root',
+]);
+
+/** Command groups and their subcommands — used to answer `task lst` with the task menu, not "Unknown command: task". */
+const GROUP_SUBCOMMANDS: Record<string, string> = {
+  task: 'publish | add | cancel | show',
+  run: 'import | list | show | pause | resume | cancel | archive',
+  msg: 'post | list',
+  worktree: 'register | adopt | list | prune',
+  graph: 'show | validate',
+  memory: 'update | candidates | promote',
+  review: 'claim | approve | request-changes | block',
+  integrate: 'start | record',
+  adapter: 'install',
+  agent: 'register',
+  context: 'hydrate',
+  evidence: 'show',
+  backup: 'list',
+  audit: 'run',
+  verify: 'submit',
+};
+
 export interface CliResult {
   exitCode: number;
   stdout: string;
@@ -67,7 +93,11 @@ interface TimelineEvent { seq: number; ts: string | null; event: string; actor: 
 
 /** Compact ledger timeline for human mode; --json carries the full events (incl. payload). */
 function renderTimeline(events: TimelineEvent[]): string[] {
-  const hhmmss = (ts: string | null): string => (ts && /\dT(\d\d:\d\d:\d\d)/.exec(ts)?.[1]) || '--:--:--';
+  // MM-DD HH:MM:SS — a run can span days, and a bare clock time misreads across midnight.
+  const hhmmss = (ts: string | null): string => {
+    const m = ts && /(\d\d)-(\d\d)T(\d\d:\d\d:\d\d)/.exec(ts);
+    return m ? `${m[1]}-${m[2]} ${m[3]}` : '??-?? --:--:--';
+  };
   const seqW = Math.max(3, ...events.map((e) => String(e.seq).length));
   const evW = Math.min(22, Math.max(5, ...events.map((e) => e.event.length)));
   const out: string[] = [];
@@ -133,11 +163,24 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
   const force = argv.includes('--force');
   const args = argv.filter((a) => !a.startsWith('--'));
   const cmd = args[0];
+  // Bare invocation is a request for orientation, not an error.
+  if (!cmd) return { exitCode: 0, stdout: HELP_TEXT };
+  // docs/16 §2: --team-root flag outranks TEAM_ROOT env and git discovery.
+  const base = { cwd: opts.cwd, env: opts.env, teamRootFlag: flag(argv, 'team-root') };
+  // `--agent X` (space) used to silently drop the value and read as a missing flag; name the fix.
+  const bareValueFlag = argv.find((a) => /^--[a-z][a-z-]*$/.test(a) && VALUE_FLAGS.has(a.slice(2)));
+  if (bareValueFlag) {
+    const bad = failEnvelope(
+      'usage_error',
+      `${bareValueFlag} takes a value: write ${bareValueFlag}=<value> — flags use "=", not a space.`,
+    );
+    return { exitCode: EXIT_BY_CODE[bad.code] ?? 1, stdout: render(bad, json) };
+  }
   let env: Envelope;
   if (cmd === 'init') {
-    env = initProject({ cwd: opts.cwd, env: opts.env });
+    env = initProject({ ...base });
   } else if (cmd === 'doctor') {
-    env = doctorProject({ cwd: opts.cwd, env: opts.env, fix: argv.includes('--fix') });
+    env = doctorProject({ ...base, fix: argv.includes('--fix') });
   } else if (cmd === 'task' && args[1] === 'publish') {
     const runId = args[2];
     if (!runId) {
@@ -145,7 +188,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     } else {
       const tasksFlag = argv.find((a) => a.startsWith('--tasks='));
       const taskIds = tasksFlag ? tasksFlag.slice('--tasks='.length).split(',').filter(Boolean) : undefined;
-      env = publishTasks({ cwd: opts.cwd, env: opts.env, runId, taskIds, force });
+      env = publishTasks({ ...base, runId, taskIds, force });
     }
   } else if (cmd === 'run' && args[1] === 'import') {
     const file = args[2];
@@ -154,7 +197,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     } else {
       try {
         const payload = readJsonFileBom(file);
-        env = importRun({ cwd: opts.cwd, env: opts.env, payload, force, lightweight: argv.includes('--lightweight') });
+        env = importRun({ ...base, payload, force, lightweight: argv.includes('--lightweight') });
       } catch (e) {
         env = failEnvelope('schema_invalid', `Payload file is not valid JSON: ${String(e)}`);
       }
@@ -165,7 +208,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     if (!runId || !tool) {
       env = failEnvelope('usage_error', 'Usage: sigmarun agent register <RUN-ID> --tool=<tool> [--role=<role>] [--label=<window>] [--json]');
     } else {
-      env = registerAgent({ cwd: opts.cwd, env: opts.env, runId, tool, role: flag(argv, 'role'), label: flag(argv, 'label') });
+      env = registerAgent({ ...base, runId, tool, role: flag(argv, 'role'), label: flag(argv, 'label') });
     }
   } else if (cmd === 'claim-next') {
     const runId = args[1];
@@ -174,8 +217,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       env = failEnvelope('usage_error', 'Usage: sigmarun claim-next <RUN-ID> --agent=<AGENT-ID> [--role=<role>] [--task=<TASK-ID>] [--dry-run] [--json]');
     } else {
       env = claimNext({
-        cwd: opts.cwd,
-        env: opts.env,
+        ...base,
         runId,
         agentId,
         role: flag(argv, 'role'),
@@ -190,9 +232,9 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     if (!runId || !taskId || !agentId) {
       env = failEnvelope('usage_error', `Usage: sigmarun ${cmd} <RUN-ID> <TASK-ID> --agent=<AGENT-ID> [--json]`);
     } else if (cmd === 'heartbeat') {
-      env = heartbeat({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId });
+      env = heartbeat({ ...base, runId, taskId, agentId });
     } else {
-      env = releaseTask({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, reason: flag(argv, 'reason') });
+      env = releaseTask({ ...base, runId, taskId, agentId, reason: flag(argv, 'reason') });
     }
   } else if (cmd === 'reclaim') {
     const runId = args[1];
@@ -200,13 +242,13 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     if (!runId || !taskId) {
       env = failEnvelope('usage_error', 'Usage: sigmarun reclaim <RUN-ID> <TASK-ID> [--json]');
     } else {
-      env = reclaimTask({ cwd: opts.cwd, env: opts.env, runId, taskId });
+      env = reclaimTask({ ...base, runId, taskId });
     }
   } else if (cmd === 'status' || cmd === 'progress') {
     const runId = args[1];
     env = !runId
       ? failEnvelope('usage_error', 'Usage: sigmarun status <RUN-ID> [--json]')
-      : statusRun({ cwd: opts.cwd, env: opts.env, runId });
+      : statusRun({ ...base, runId });
   } else if (cmd === 'events') {
     const runId = args[1];
     if (!runId) {
@@ -220,32 +262,32 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
         env = failEnvelope('usage_error', '--since and --limit must be numbers (--limit=0 shows all).');
       } else {
         env = readEvents({
-          cwd: opts.cwd, env: opts.env, runId,
+          ...base, runId,
           task: flag(argv, 'task'), type: flag(argv, 'type'),
           since, limit,
         });
       }
     }
   } else if (cmd === 'run' && args[1] === 'list') {
-    env = runList({ cwd: opts.cwd, env: opts.env });
+    env = runList({ ...base });
   } else if (cmd === 'task' && args[1] === 'show') {
     const runId = args[2];
     const taskId = args[3];
     env = !runId || !taskId
       ? failEnvelope('usage_error', 'Usage: sigmarun task show <RUN-ID> <TASK-ID> [--json]')
-      : taskShow({ cwd: opts.cwd, env: opts.env, runId, taskId });
+      : taskShow({ ...base, runId, taskId });
   } else if (cmd === 'evidence' && args[1] === 'show') {
     const runId = args[2];
     const taskId = args[3];
     env = !runId || !taskId
       ? failEnvelope('usage_error', 'Usage: sigmarun evidence show <RUN-ID> <TASK-ID> [--json]')
-      : evidenceShow({ cwd: opts.cwd, env: opts.env, runId, taskId });
+      : evidenceShow({ ...base, runId, taskId });
   } else if (cmd === 'watch') {
     const runId = args[1];
     if (!runId) {
       env = failEnvelope('usage_error', 'Usage: sigmarun watch <RUN-ID> [--interval=30] [--once] [--force] [--json]');
     } else if (argv.includes('--once')) {
-      env = watchOnce({ cwd: opts.cwd, env: opts.env, runId, force: argv.includes('--force') });
+      env = watchOnce({ ...base, runId, force: argv.includes('--force') });
     } else {
       // looped mode: synchronous ticks until the run is terminal (D14 passive CLI — no daemon)
       const intervalSec = Number(flag(argv, 'interval') ?? 30);
@@ -253,10 +295,10 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
         // NaN would coerce Atomics.wait's timeout to +Infinity and hang forever (review finding #10)
         env = failEnvelope('usage_error', `--interval must be a positive number of seconds, got "${flag(argv, 'interval')}".`);
       } else {
-        env = watchOnce({ cwd: opts.cwd, env: opts.env, runId, force: argv.includes('--force') });
+        env = watchOnce({ ...base, runId, force: argv.includes('--force') });
         while (env.ok && !(env.data as { terminal?: boolean }).terminal) {
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(5, intervalSec) * 1000);
-          env = watchOnce({ cwd: opts.cwd, env: opts.env, runId, force: true });
+          env = watchOnce({ ...base, runId, force: true });
         }
       }
     }
@@ -264,28 +306,28 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     const runId = args[2];
     env = !runId
       ? failEnvelope('usage_error', 'Usage: sigmarun audit run <RUN-ID> [--json]')
-      : auditRun({ cwd: opts.cwd, env: opts.env, runId });
+      : auditRun({ ...base, runId });
   } else if (cmd === 'repair') {
     const runId = args[1];
     env = !runId
       ? failEnvelope('usage_error', 'Usage: sigmarun repair <RUN-ID> [--json]')
-      : repairRun({ cwd: opts.cwd, env: opts.env, runId });
+      : repairRun({ ...base, runId });
   } else if (cmd === 'migrate') {
-    env = migrateState({ cwd: opts.cwd, env: opts.env, runId: args[1], dryRun: argv.includes('--dry-run') });
+    env = migrateState({ ...base, runId: args[1], dryRun: argv.includes('--dry-run') });
   } else if (cmd === 'backup' && args[1] === 'list') {
-    env = backupList({ cwd: opts.cwd, env: opts.env });
+    env = backupList({ ...base });
   } else if (cmd === 'restore') {
     const backupId = args[1];
     env = !backupId
       ? failEnvelope('usage_error', 'Usage: sigmarun restore <backup-id> [--dry-run] [--json] (list ids: sigmarun backup list)')
-      : restoreBackup({ cwd: opts.cwd, env: opts.env, backupId, dryRun: argv.includes('--dry-run') });
+      : restoreBackup({ ...base, backupId, dryRun: argv.includes('--dry-run') });
   } else if (cmd === 'run' && ['pause', 'resume', 'cancel', 'archive'].includes(args[1] ?? '')) {
     const runId = args[2];
     if (!runId) {
       env = failEnvelope('usage_error', `Usage: sigmarun run ${args[1]} <RUN-ID> [--json]`);
     } else {
       const op = { pause: runPause, resume: runResume, cancel: runCancel, archive: runArchive }[args[1] as 'pause' | 'resume' | 'cancel' | 'archive'];
-      env = op({ cwd: opts.cwd, env: opts.env, runId });
+      env = op({ ...base, runId });
     }
   } else if (cmd === 'task' && args[1] === 'add') {
     const runId = args[2];
@@ -294,7 +336,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       env = failEnvelope('usage_error', 'Usage: sigmarun task add <RUN-ID> --file=<task.json> [--json]');
     } else {
       try {
-        env = taskAdd({ cwd: opts.cwd, env: opts.env, runId, task: readJsonFileBom(file) as Record<string, unknown> });
+        env = taskAdd({ ...base, runId, task: readJsonFileBom(file) as Record<string, unknown> });
       } catch (e) {
         env = failEnvelope('schema_invalid', `Task file is not valid JSON: ${String(e)}`);
       }
@@ -303,36 +345,36 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     const runId = args[2];
     const taskId = args[3];
     env = !runId || !taskId
-      ? failEnvelope('usage_error', 'Usage: sigmarun task cancel <RUN-ID> <TASK-ID> [--json]')
-      : taskCancel({ cwd: opts.cwd, env: opts.env, runId, taskId });
+      ? failEnvelope('usage_error', 'Usage: sigmarun task cancel <RUN-ID> <TASK-ID> [--reason=..] [--json]')
+      : taskCancel({ ...base, runId, taskId, reason: flag(argv, 'reason') });
   } else if (cmd === 'done') {
     const runId = args[1];
     const taskId = args[2];
     const agentId = flag(argv, 'agent');
     env = !runId || !taskId || !agentId
       ? failEnvelope('usage_error', 'Usage: sigmarun done <RUN-ID> <TASK-ID> --agent=<AGENT-ID> [--note=...] [--json]')
-      : taskDone({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, note: flag(argv, 'note') });
+      : taskDone({ ...base, runId, taskId, agentId, note: flag(argv, 'note') });
   } else if (cmd === 'worktree' && args[1] === 'list') {
     const runId = args[2];
     env = !runId
       ? failEnvelope('usage_error', 'Usage: sigmarun worktree list <RUN-ID> [--json]')
-      : listWorktrees({ cwd: opts.cwd, env: opts.env, runId });
+      : listWorktrees({ ...base, runId });
   } else if (cmd === 'worktree' && args[1] === 'prune') {
     const runId = args[2];
     env = !runId
       ? failEnvelope('usage_error', 'Usage: sigmarun worktree prune <RUN-ID> [--dry-run] [--json]')
-      : pruneWorktrees({ cwd: opts.cwd, env: opts.env, runId, dryRun: argv.includes('--dry-run') });
+      : pruneWorktrees({ ...base, runId, dryRun: argv.includes('--dry-run') });
   } else if (cmd === 'graph' && args[1] === 'show') {
     const runId = args[2];
     env = !runId
       ? failEnvelope('usage_error', 'Usage: sigmarun graph show <RUN-ID> [--json]')
-      : showGraph({ cwd: opts.cwd, env: opts.env, runId });
+      : showGraph({ ...base, runId });
   } else if (cmd === 'run' && args[1] === 'show') {
     const runId = args[2];
     if (!runId) {
       env = failEnvelope('usage_error', 'Usage: sigmarun run show <RUN-ID> [--json]');
     } else {
-      env = runShow({ cwd: opts.cwd, env: opts.env, runId });
+      env = runShow({ ...base, runId });
     }
   } else if (cmd === 'worktree' && (args[1] === 'register' || args[1] === 'adopt')) {
     const runId = args[2];
@@ -345,9 +387,9 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       const branch = flag(argv, 'branch');
       env = !path || !branch
         ? failEnvelope('usage_error', 'worktree register needs both --path and --branch.')
-        : registerWorktree({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, path, branch });
+        : registerWorktree({ ...base, runId, taskId, agentId, path, branch });
     } else {
-      env = adoptWorktree({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId });
+      env = adoptWorktree({ ...base, runId, taskId, agentId });
     }
   } else if (cmd === 'verify' && args[1] === 'submit') {
     const runId = args[2];
@@ -355,19 +397,19 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     const verifyFile = flag(argv, 'verify');
     env = !runId || !agentId || !verifyFile
       ? failEnvelope('usage_error', 'Usage: sigmarun verify submit <RUN-ID> --agent=<AGENT-ID> --verify=<verify.json> [--json]')
-      : verifySubmit({ cwd: opts.cwd, env: opts.env, runId, agentId, verifyPath: verifyFile });
+      : verifySubmit({ ...base, runId, agentId, verifyPath: verifyFile });
   } else if (cmd === 'integrate' && (args[1] === 'start' || args[1] === 'record')) {
     const runId = args[2];
     if (!runId) {
       env = failEnvelope('usage_error', `Usage: sigmarun integrate ${args[1]} <RUN-ID>${args[1] === 'record' ? ' <TASK-ID> --merge-commit=<sha> | --failed --reason=...' : ''} [--json]`);
     } else if (args[1] === 'start') {
-      env = integrateStart({ cwd: opts.cwd, env: opts.env, runId });
+      env = integrateStart({ ...base, runId });
     } else {
       const taskId = args[3];
       env = !taskId
         ? failEnvelope('usage_error', 'integrate record needs a TASK-ID.')
         : integrateRecord({
-            cwd: opts.cwd, env: opts.env, runId, taskId,
+            ...base, runId, taskId,
             mergeCommit: flag(argv, 'merge-commit'),
             failed: argv.includes('--failed'),
             reason: flag(argv, 'reason'),
@@ -377,12 +419,12 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     const runId = args[1];
     env = !runId
       ? failEnvelope('usage_error', 'Usage: sigmarun report <RUN-ID> [--json]')
-      : reportRun({ cwd: opts.cwd, env: opts.env, runId });
+      : reportRun({ ...base, runId });
   } else if (cmd === 'export') {
     const runId = args[1];
     env = !runId
       ? failEnvelope('usage_error', 'Usage: sigmarun export <RUN-ID> [--to=<dir>] [--full] [--force] [--json]')
-      : exportRun({ cwd: opts.cwd, env: opts.env, runId, to: flag(argv, 'to'), full: argv.includes('--full'), force });
+      : exportRun({ ...base, runId, to: flag(argv, 'to'), full: argv.includes('--full'), force });
   } else if (cmd === 'review' && (args[1] === 'claim' || args[1] === 'approve' || args[1] === 'request-changes' || args[1] === 'block')) {
     const runId = args[2];
     const taskId = args[3];
@@ -390,7 +432,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     if (!runId || !taskId || !agentId) {
       env = failEnvelope('usage_error', `Usage: sigmarun review ${args[1]} <RUN-ID> <TASK-ID> --agent=<AGENT-ID>${args[1] === 'claim' ? '' : ' --review=<review.json>'} [--json]`);
     } else if (args[1] === 'claim') {
-      env = reviewClaim({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId });
+      env = reviewClaim({ ...base, runId, taskId, agentId });
     } else {
       const reviewFile = flag(argv, 'review');
       if (!reviewFile) {
@@ -399,7 +441,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
         try {
           const review = readJsonFileBom(reviewFile);
           const decision = args[1] === 'approve' ? 'approve' : args[1] === 'block' ? 'block' : 'request_changes';
-          env = reviewDecide({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, decision, review: review as Parameters<typeof reviewDecide>[0]['review'] });
+          env = reviewDecide({ ...base, runId, taskId, agentId, decision, review: review as Parameters<typeof reviewDecide>[0]['review'] });
         } catch (e) {
           env = failEnvelope('schema_invalid', `Review file is not valid JSON: ${String(e)}`);
         }
@@ -412,9 +454,9 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     if (!runId || !taskId || !agentId) {
       env = failEnvelope('usage_error', `Usage: sigmarun ${cmd} <RUN-ID> <TASK-ID> --agent=<AGENT-ID> [--json]`);
     } else if (cmd === 'resume') {
-      env = resumeTask({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId });
+      env = resumeTask({ ...base, runId, taskId, agentId });
     } else {
-      env = unblockTask({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, reason: flag(argv, 'reason') });
+      env = unblockTask({ ...base, runId, taskId, agentId, reason: flag(argv, 'reason') });
     }
   } else if (cmd === 'submit') {
     const runId = args[1];
@@ -424,14 +466,14 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     if (!runId || !taskId || !agentId || !evidence) {
       env = failEnvelope('usage_error', 'Usage: sigmarun submit <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --evidence=<draft.json> [--json]');
     } else {
-      env = submitEvidence({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId, evidencePath: evidence });
+      env = submitEvidence({ ...base, runId, taskId, agentId, evidencePath: evidence });
     }
   } else if (cmd === 'adapter' && args[1] === 'install') {
     const tool = flag(argv, 'tool');
     if (!tool) {
       env = failEnvelope('usage_error', 'Usage: sigmarun adapter install --tool=claude-code|codex [--update] [--json]');
     } else {
-      env = installAdapters({ cwd: opts.cwd, env: opts.env, tool, update: argv.includes('--update') });
+      env = installAdapters({ ...base, tool, update: argv.includes('--update') });
     }
   } else if (cmd === 'msg' && args[1] === 'post') {
     const runId = args[2];
@@ -442,7 +484,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       env = failEnvelope('usage_error', 'Usage: sigmarun msg post <RUN-ID> --from=<AGENT-ID> --type=<type> --body=<text> [--task=<TASK-ID>] [--to=<route>] [--reply-to=<MSG-ID>] [--refs=a,b] [--json]');
     } else {
       env = postMessage({
-        cwd: opts.cwd, env: opts.env, runId, fromAgentId: from, type, body,
+        ...base, runId, fromAgentId: from, type, body,
         taskId: flag(argv, 'task'), to: flag(argv, 'to'), inReplyTo: flag(argv, 'reply-to'),
         refs: flag(argv, 'refs')?.split(',').filter(Boolean),
       });
@@ -452,7 +494,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     if (!runId) {
       env = failEnvelope('usage_error', 'Usage: sigmarun msg list <RUN-ID> [--task=<TASK-ID>] [--type=<type>] [--open] [--json]');
     } else {
-      env = listMessages({ cwd: opts.cwd, env: opts.env, runId, taskId: flag(argv, 'task'), type: flag(argv, 'type'), open: argv.includes('--open') });
+      env = listMessages({ ...base, runId, taskId: flag(argv, 'task'), type: flag(argv, 'type'), open: argv.includes('--open') });
     }
   } else if (cmd === 'context' && args[1] === 'hydrate') {
     const runId = args[2];
@@ -460,14 +502,14 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     if (!runId || !taskId) {
       env = failEnvelope('usage_error', 'Usage: sigmarun context hydrate <RUN-ID> <TASK-ID> [--agent=<AGENT-ID>] [--json]');
     } else {
-      env = hydrateContext({ cwd: opts.cwd, env: opts.env, runId, taskId, agentId: flag(argv, 'agent') });
+      env = hydrateContext({ ...base, runId, taskId, agentId: flag(argv, 'agent') });
     }
   } else if (cmd === 'graph' && args[1] === 'validate') {
     const runId = args[2];
     if (!runId) {
       env = failEnvelope('usage_error', 'Usage: sigmarun graph validate <RUN-ID> [--json]');
     } else {
-      env = validateGraph({ cwd: opts.cwd, env: opts.env, runId });
+      env = validateGraph({ ...base, runId });
     }
   } else if (cmd === 'memory' && args[1] === 'promote') {
     const runId = args[2];
@@ -477,13 +519,13 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     if (!runId || !entry || !section || !refs || refs.length === 0) {
       env = failEnvelope('usage_error', 'Usage: sigmarun memory promote <RUN-ID> --entry="…" --section=Architecture|Interfaces|Constraints|Pitfalls --from=<MSG-ID|path,...> [--supersedes=MEM-xxxx] [--json]');
     } else {
-      env = promoteMemory({ cwd: opts.cwd, env: opts.env, runId, entry, section, refs, supersedes: flag(argv, 'supersedes') });
+      env = promoteMemory({ ...base, runId, entry, section, refs, supersedes: flag(argv, 'supersedes') });
     }
   } else if (cmd === 'memory' && args[1] === 'candidates') {
     const runId = args[2];
     env = !runId
       ? failEnvelope('usage_error', 'Usage: sigmarun memory candidates <RUN-ID> [--json]')
-      : memoryCandidates({ cwd: opts.cwd, env: opts.env, runId });
+      : memoryCandidates({ ...base, runId });
   } else if (cmd === 'memory' && args[1] === 'update') {
     const runId = args[2];
     const file = flag(argv, 'file');
@@ -491,7 +533,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       env = failEnvelope('usage_error', 'Usage: sigmarun memory update <RUN-ID> --file=<memory.md> [--json]');
     } else {
       try {
-        env = updateRunMemory({ cwd: opts.cwd, env: opts.env, runId, content: readFileSync(file, 'utf8') });
+        env = updateRunMemory({ ...base, runId, content: readFileSync(file, 'utf8') });
       } catch (e) {
         env = failEnvelope('io_error', `Cannot read memory file: ${String(e)}`);
       }
@@ -503,10 +545,16 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     if (!runId || !taskId || !paths || paths.length === 0) {
       env = failEnvelope('usage_error', 'Usage: sigmarun approve-paths <RUN-ID> <TASK-ID> --paths=<glob,...> [--json]');
     } else {
-      env = approvePaths({ cwd: opts.cwd, env: opts.env, runId, taskId, paths });
+      env = approvePaths({ ...base, runId, taskId, paths });
     }
+  } else if (GROUP_SUBCOMMANDS[cmd]) {
+    env = failEnvelope('usage_error', `Unknown subcommand: "sigmarun ${[cmd, args[1]].filter(Boolean).join(' ')}".`, {
+      nextActions: [`${cmd} subcommands: ${GROUP_SUBCOMMANDS[cmd]}`, 'See all commands: sigmarun help'],
+    });
   } else {
-    env = failEnvelope('usage_error', `Unknown command: ${cmd ?? '(none)'}`);
+    env = failEnvelope('usage_error', `Unknown command: ${cmd}`, {
+      nextActions: ['See all commands: sigmarun help'],
+    });
   }
   return { exitCode: EXIT_BY_CODE[env.code] ?? 1, stdout: render(env, json) };
 }

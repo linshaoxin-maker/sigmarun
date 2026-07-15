@@ -158,6 +158,58 @@ describe('cli front-end (contract: docs/17 §1/§2.2 — parse, delegate, map ex
   });
 });
 
+describe('remediation R0-7: CLI experience group (docs/16 §2; docs/17 §1)', () => {
+  it('bare invocation prints help and exits 0', () => {
+    const r = runCli([], { cwd: '/tmp' });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('sigmarun — repo-local multi-agent collaboration gateway');
+  });
+
+  it('a mistyped subcommand answers with the group menu, not a bare unknown-command', () => {
+    const r = runCli(['task', 'lst', '--json'], { cwd: '/tmp' });
+    expect(r.exitCode).toBe(2);
+    const env = JSON.parse(r.stdout);
+    expect(env.message).toContain('Unknown subcommand');
+    expect(env.next_actions.join(' ')).toContain('publish | add | cancel | show');
+  });
+
+  it('--flag with a space instead of "=" gets a targeted diagnosis', () => {
+    const r = runCli(['claim-next', 'RUN-0001', '--agent', 'AGENT-X', '--json'], { cwd: '/tmp' });
+    expect(r.exitCode).toBe(2);
+    expect(JSON.parse(r.stdout).message).toContain('--agent takes a value');
+  });
+
+  it('--team-root outranks cwd discovery (docs/16 §2 resolution order)', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const { join } = await import('node:path');
+    const r = runCli(['run', 'list', `--team-root=${join(repo, '.team')}`, '--json'], { cwd: '/tmp' });
+    expect(r.exitCode).toBe(0);
+    expect(JSON.parse(r.stdout).ok).toBe(true);
+  });
+
+  it('task cancel --reason lands in the envelope and the ledger event; events timeline shows the date', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const { writeFileSync, readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    const f = join(repo, 'payload.json');
+    writeFileSync(f, JSON.stringify(validPayload()));
+    runCli(['run', 'import', f, '--json'], { cwd: repo });
+    const r = runCli(['task', 'cancel', 'RUN-0001', 'TASK-0001', '--reason=descoped in planning', '--json'], { cwd: repo });
+    expect(r.exitCode).toBe(0);
+    expect(JSON.parse(r.stdout).data.reason).toBe('descoped in planning');
+    const events = readFileSync(join(repo, '.team', 'runs', 'RUN-0001', 'events.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l));
+    expect(events.find((e) => e.event === 'task_cancelled')?.payload.reason).toBe('descoped in planning');
+
+    // human-mode events timeline carries the date — a run can span days
+    const timeline = runCli(['events', 'RUN-0001'], { cwd: repo });
+    expect(timeline.stdout).toMatch(/\d\d-\d\d \d\d:\d\d:\d\d/);
+  });
+});
+
 describe('smoke-test fixes: help surface (L15) and project-scoped worktree root (L17)', () => {
   it('--help and help exit 0 with the command map', () => {
     for (const argv of [['--help'], ['help'], ['-h']]) {
