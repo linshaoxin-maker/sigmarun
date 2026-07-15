@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **整改 R0 止血轮**（2026-07-15 全面审查 → 整改设计方案 v1.0 已批准,docs/02-phases/remediation-design-2026-07-15.md;D21–D24 四项产品裁决全按推荐项落账）。九项修复各带回归锁,279/279（+13）:
+  - **P0**:`claim-next` 的 worktree 建议路径改从 `run.worktree_root` 派生（冒烟修复 L17 给根加了项目名段,建议路径没跟——每个新仓库 full 模式第一个任务在 `worktree register` 撞 `path_escape_detected`）。新增自洽元断言:网关自己的建议必须过网关自己的 register 校验。
+  - **S5 首刷谎报**:`synthesizeReview` 先 sweep 后取任务快照（原先快照在前,自己刚释放的过期评审任务第一刷看不见,报"没有任务在等评审",按 RULES 停机的 agent 就此放弃）。
+  - **AUD-019 严重度写反**:policy 合法跳过的评审现按 spec 报 warn（原先 `review.required !== false` 即 error——健康 run 审计满屏红）;task 强制评审被跳过、或 skip 事件与现行 policy 矛盾（伪造/篡改)仍 error。
+  - **枚举笔误**:integrating 阶段队列过滤 `'verify'` → `'verification'`（原值不在 TASK_TYPES,验证型任务整个集成期不可领取）。
+  - **真空 pass 封堵**:verify 五 gate 全 skipped + verdict=pass 现被机械拒绝（规则 4 对全 skip 真空成立,验证门在被迫绕行时形同虚设）。
+  - **捎带续租兑现**（RULE 7 / docs/15 §8）:`msg post` 现对发送者的活跃 task/path/gate 租约续期——发 blocker 等人答复恰是没有心跳节奏的场景,此前规规矩矩提问反被 3×TTL 回收;租约变更补 `heartbeat` 事件（piggyback 标注）保 AUD-032 对账诚实;`--from=user` 永不续租（authorship 未验证,不得为他人 claim 造活性）。
+  - **require_verification 实装**:此前该 policy 无任何消费方,设 false 照样要求 verify 记录才能集成（骗人的死配置);现 integrate start/record/report 三门按 `integrableStatuses` 放行 approved,默认行为逐字节不变（对照测试锁定）。
+  - **CLI 体验组**:`--team-root` flag 接入解析（docs/16 §2 承诺的最高优先级覆盖,原先只有 env 生效）;`task cancel --reason` 落账（help 承诺、实现丢弃);裸 `sigmarun` 打印 help、子命令拼错回组内菜单;`--agent X` 空格写法给出指名 `=` 语法的诊断;events 时间线带日期（跨天 run 不再误读）。
+  - **清理组**:writeProgress tmp 文件名加 pid（双窗口并发 status 的 rename 竞态）;candidateGuard 死默认 `['done']` 删除（与 D20 现行默认在同一签名里并存两套）;core 对 storage 的零消费 re-export 删除;init 不再创建无人读写的 `.team/templates/` 死目录。
+
 - 轻量斜杠命令(用户反馈:人不该手写 plan.json / 敲 CLI,该在 Claude Code 里一句话)。adapter 模板 v0.3.0:`/team-plan <目标>` 重写为**轻量默认**——AI 把目标拆成 2–6 个独立块、自产 payload、`run import --lightweight`,用大白话回报(人看不到 plan.json/run 编号);新增 **`/team-do`**——找到最新 active run、领一块、在仓库里真干、`done` 标记完成(默认隐藏 RUN-ID)。Codex 侧对应 `team-run-plan`(轻量化)+ 新 `team-run-do` skill。完整质量流水线命令(dispatch/review/verify/integrate)原样保留,想要时用。测试 266/266。
 
 - 轻量模式文案清理:`run import --lightweight` 不再报"no required_checks; verification will be unclear"(轻量无验证,该警告是噪音),成功信息改为"claimable now (lightweight)"并直接提示 `claim-next`(不再指向不存在的 publish 步骤)。
