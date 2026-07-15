@@ -58,6 +58,23 @@ describe('review claim + D15 synthesis (BDD-006-01/02/05; INV-008)', () => {
     expect(readJson('claims/review-claims.json').claims.length).toBe(1);
   });
 
+  it('synthesis offers a task freed by its own sweep on the FIRST call (remediation S5 stale-read)', () => {
+    reviewClaim({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: reviewer }); // task -> reviewing
+    // the reviewer dies: expire its gate lease on disk
+    const f = join(runDir(), 'claims', 'review-claims.json');
+    const { doc, rev } = readJsonState(f);
+    (doc as { claims: Array<{ lease_until: string }> }).claims[0]!.lease_until = new Date(Date.now() - 60_000).toISOString();
+    writeJsonStateAtomic(f, doc as Record<string, unknown>, { expectedRev: rev });
+    // a second reviewer synthesizes: the same call must sweep the stale gate AND offer the task —
+    // one call, not "no_claimable_task then retry"
+    const env2 = registerAgent({ cwd: repo, runId: 'RUN-0001', tool: 'codex', role: 'reviewer', label: 'win-review-2' });
+    const r2 = (env2.data as { agent_id: string }).agent_id;
+    const first = claimNext({ cwd: repo, runId: 'RUN-0001', agentId: r2, role: 'reviewer' });
+    expect(first.ok).toBe(true);
+    expect((first.data as { task_id: string }).task_id).toBe('TASK-0001');
+    expect(readJson('tasks/TASK-0001/task.json').status).toBe('reviewing');
+  });
+
   it('any historical owner is rejected with self_approval_forbidden (BDD-006-02)', () => {
     const direct = reviewClaim({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: owner });
     expect(direct.ok).toBe(false);

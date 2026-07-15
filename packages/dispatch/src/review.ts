@@ -216,10 +216,13 @@ export function reviewClaim(opts: ReviewClaimOptions): Envelope {
 
 /** D15: synthesize a review work item for `claim-next --role reviewer`; called inside the claim-next lock. */
 export function synthesizeReview(runDir: string, runId: string, agentId: string, startedAt: number): Envelope {
+  const rc = loadReviewClaims(runDir, runId);
+  // Sweep BEFORE snapshotting rows: the sweep flips expired-reviewing tasks back to submitted on
+  // disk, and the candidate filter below must see them — a pre-sweep snapshot made the first call
+  // report "no task waiting" for the very task its own sweep had just freed (remediation S5).
+  sweepReviewClaims(runDir, runId, rc);
   const listFile = join(runDir, 'team-task-list.json');
   const rows = (readJsonState(listFile).doc as { tasks: TaskRow[] }).tasks;
-  const rc = loadReviewClaims(runDir, runId);
-  sweepReviewClaims(runDir, runId, rc);
   const stores = loadClaims(runDir, runId);
   // One pass over claims instead of rows x claims scans (review round: efficiency candidate).
   const claimOwners = new Map<string, Set<string>>();
