@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **整改 R1 裁决落地轮**(D21–D24 已批,docs/02-phases/remediation-design-2026-07-15.md §6)。八项交付各带回归锁,293/293(+14);状态机猎手复现的 S1–S13 中 R1 消解 S1/S2/S3/S4/S7/S8/S10 七个:
+  - **RunMode + 模式墙**(S3):`core/mode.ts` 成为轻量/full 的唯一分叉点;轻量 run 上 submit/review/verify/integrate/合成一律 `mode_mismatch`(exit 7)并指路 `done`;full run 的 done 同码拒绝;`run list` 增 `lightweight`+`progress_pct`。
+  - **轻量终局**(S8/D21):全任务终态后 `report` 自 active 收口(简化 report.md,事件带 mode:lightweight)→ reported → archive;最后一个 done 递上 report 命令;watch 自然退出。轻量宪法落 **docs/26**,INV-007 修订注入 docs/15 §9。
+  - **audit 轻量档**(S10):AUD-011/016/017/019 对轻量 run 降 **info**(新 severity 档),健康轻量 run 审计零 error;其余 36 条不动。
+  - **INV-008 实质贡献判据**(S1/D22):排除集=evidence 提交者(全 revision)∪当前持有者;纯接管未产出者可评审——接管不再毒化评审门;合成器在独立性滤空队列时如实报 `filtered_by_independence`;AUD-015 同判据;残余风险记档 docs/18。
+  - **owner block 通道**(S2):`sigmarun block <RUN> <TASK> --agent --msg=MSG-ID`(working→blocked,须关联真实 blocker 消息,sweep 豁免=租约冻结);回收停靠(docs/10 §10 补全):未答复 blocker 的任务被 reclaim 后停靠 blocked 而非 ready(事件 payload.parked);unblock 无可复活 claim 时回 ready(接管场景不再造出无 claim 的 working)。
+  - **reclaim --force**(S4):仅 `--agent=user` 可接管活租约(request-changes 给死者续满 TTL 的人质期由人解),事件 forced:true/forced_by_user;拒绝文案递上 override 路径。
+  - **run reopen**(S7):`integrating → active`(spec 既有的 integration_reopened 补实现),集成中可补任务再重入。
+  - **TxKernel 种子**(D-4/E1):`core/tx.ts` 的 `acquireRunWriteLock` 成为全部 11 个 run 写事务入口 + 2 个 project 写入口的必经门——`min_gateway_version` 写闸门(gateway_too_old,exit 8;读路径不拦)与 `lock_takeover` 账本事件(先夺后记,actor=system)由此一处兑现;存量事务体迁移按计划留 R3。
+  - 宪法回写:docs/26 新增;docs/15 头部修订注(新转换五条)+ §9 INV-007/008 修订;docs/18 AUD-015 判据+轻量档+事件注;docs/13 决策台账补 D21–D24。
+
 - **整改 R0 止血轮**（2026-07-15 全面审查 → 整改设计方案 v1.0 已批准,docs/02-phases/remediation-design-2026-07-15.md;D21–D24 四项产品裁决全按推荐项落账）。九项修复各带回归锁,279/279（+13）:
   - **P0**:`claim-next` 的 worktree 建议路径改从 `run.worktree_root` 派生（冒烟修复 L17 给根加了项目名段,建议路径没跟——每个新仓库 full 模式第一个任务在 `worktree register` 撞 `path_escape_detected`）。新增自洽元断言:网关自己的建议必须过网关自己的 register 校验。
   - **S5 首刷谎报**:`synthesizeReview` 先 sweep 后取任务快照（原先快照在前,自己刚释放的过期评审任务第一刷看不见,报"没有任务在等评审",按 RULES 停机的 agent 就此放弃）。

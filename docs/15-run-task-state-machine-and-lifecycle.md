@@ -3,6 +3,7 @@
 > 日期：2026-07-09
 > 状态：v0.1 设计草案
 > 依据：[13](13-design-audit-and-next-breakdown.md) 审计发现 M1–M5、裁决 §5.2/§5.3，决策 D5 / D6 / D9 / D10 / D14
+> **修订注（2026-07-15，整改 R1 回写）**：§2.2 `integrating -> active`（integration_reopened）与 §3.3 `working -> blocked`（owner 主动 block，须关联 blocker message）**已实现**（`sigmarun run reopen` / `sigmarun block`）；docs/10 §10 的"回收时有未解 blocker 则停靠 blocked"已实现（task_reclaimed 事件 payload.parked）；unblock 在无可复活 claim 时回 **ready** 而非 working（接管后场景）；`reclaim --force --agent=user` 为人类新增活租约接管（事件 payload.forced）；轻量 run 新增 `active -> reported`（全任务终态后显式 report），见 [26](26-lightweight-mode.md) §5。
 > 目标：把 run、task、claim 三层状态机闭环。解决：run 状态机缺失、`blocked` 无出口、`stale` 身份矛盾、返工环 path claim 语义、reclaim/resume、publish/pause/cancel 命令面。本文档定稿后，[03](03-team-task-list-and-task-schema.md) §7–8、[10](10-claim-next-lock-and-conflict-rules.md) §3.3/§9/§10、[11](11-4-plus-1-architecture-view.md) §3.4 以本文为准修订。
 
 ---
@@ -312,7 +313,7 @@ Run policy 新增：
 | 默认 | `policy.require_review: true` |
 | 关闭方式 | run payload 或 project 配置显式 `false`；**task 级 `review.required: true` 覆盖 run 级 `false`（更严格者胜）** |
 | 关闭后的路径 | `submitted -> approved`，写 skip 标注的 review record + `review_skipped` 事件（actor=policy），保证事实链不断 |
-| 永不放开的不变量 | INV-008 self-approval 禁令与"实现者不能标自己 done"（INV-007）**不受本开关影响**——开关跳过的是"要不要第三方 review"，不是"能不能自批" |
+| 永不放开的不变量 | INV-008 self-approval 禁令与"实现者不能标自己 done"（INV-007）**不受本开关影响**——开关跳过的是"要不要第三方 review"，不是"能不能自批"。**修订（2026-07-15，D21）**：INV-007 的"永不放开"限定于 **full 模式 run**；轻量 run 显式豁免且必须留痕（run.json.lightweight + task_done 事件），边界与审计口径见 [26](26-lightweight-mode.md) §3–4。INV-008 不豁免，且其 owner 判据自 D22 起改为**实质贡献**（提交过 evidence 的人 ∪ 当前持有者），见 [18](18-audit-rule-catalog-and-trust-model.md) §6 修订注 |
 | 审计 | run 存在 `review_skipped` 时，audit 报 warning（规则归 [18](18-audit-rule-catalog-and-trust-model.md)），复盘可见 |
 
 这与 [09](09-team-run-import-payload-schema.md) §5.2 "policy 不允许绕过 gateway 不变量"一致：`require_review` 是合法策略位，`allow_self_approval` 依旧是非法字段。

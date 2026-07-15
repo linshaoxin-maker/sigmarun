@@ -144,6 +144,8 @@ jsonl 示例（三种 actor）：
 
 ## 4. 规则目录主表（AUD-001 … AUD-035）
 
+> **修订注（2026-07-15，D21）**：轻量 run（[26](26-lightweight-mode.md)）下 AUD-011/016/017/019 降为 **info**（文案注明豁免）——直标完成是该模式的正当形态；其余规则口径不变。severity 枚举自此为 error/warn/info。另：`lock_takeover`（#44）自整改 R1 起真实发出（接管后首事件，actor=system/lock-manager）；`task_reclaimed` payload 新增 `parked`（blocker 停靠）与 `forced`（人类强制接管）；`run_reported` payload 新增 `mode`。
+
 编号连续、列结构统一，按主题分六组呈现。层级取值见 §1.2；`P0-inline` 规则的"依赖事件"同时是其拒绝时的留痕参考。severity 只取 `error` / `warn`。
 
 ### 4.A Claim / Path / Lease
@@ -176,7 +178,7 @@ jsonl 示例（三种 actor）：
 | AUD-012 | check_result_untrusted | evidence/TASK-ID/evidence.json、outputs/、tasks/*/task.json | required_checks_results 未逐条覆盖 task.required_checks；或某条 status=pass 而对应 commands[].exit_code ≠ 0；或 output_ref 文件不存在；或 status=skipped 无 note（D8 / D11） | error | TASK-{t} 的 check "{check}" 结果不可信：{why} | owner 重跑该 check 并重新 submit | evidence_submitted | P0-inline |
 | AUD-013 | acceptance_misaligned | evidence/TASK-ID/evidence.json、tasks/*/task.json | evidence.acceptance[] 与 task.acceptance[] 数量不等或逐条文本不匹配；或 status ∉ {met, unmet, partial} | error | TASK-{t} acceptance 覆盖不对齐：{diff} | owner 按 task.json 逐条补齐后重 submit | evidence_submitted | P0-inline |
 | AUD-014 | out_of_scope_change | evidence/TASK-ID/evidence.json、claims/path-claims.json | 以 path claim 的 allow glob 重算 changed_files[].path 的 in_scope（不信任存量 flag），存在 in_scope=false 条目；severity 按 run policy（默认 warn，可配 error） | warn | TASK-{t} 有 {n} 个越界改动：{paths} | reviewer 重点核查；必要时拆新 task 或申请扩 path | evidence_submitted、path_claimed | P0-inline |
-| AUD-015 | self_approval | reviews/TASK-ID/REVIEW-*.json、claims/*、tasks/*/task.json（previous_attempts） | REVIEW-*.json.reviewer_agent_id 等于该 task 任一 claim 的 agent_id 或 previous_attempts[].agent_id（INV-008，不受 D6 开关影响） | error | REVIEW-{id} 的 reviewer {a} 是 TASK-{t} 的历任 owner | 作废该 review；换 reviewer 重新 `team review claim` | review_claimed、review_approved | P0-inline |
+| AUD-015 | self_approval | reviews/TASK-ID/REVIEW-*.json、claims/*、tasks/*/task.json（previous_attempts） | REVIEW-*.json.reviewer_agent_id ∈ **实质贡献者集合**（D22，2026-07-15 修订）：提交过任一 evidence revision 的 agent_id（evidence.json + history/rev-*.json）∪ 当前 active/submitted claim 持有者。纯粹持有过 claim 而从未提交者**不再**算 owner——旧判据"曾持有即 owner"与租约接管相乘会把评审门对全体在场身份永久焊死（整改 S1）。**残余风险（如实记档）**：A 写了未提交的代码、B 接管后续写并提交，A 可评审含自己旧行的提交；缓解=评审永久留痕+本规则同判据复查。（INV-008，不受 D6 开关影响） | error | REVIEW-{id} 的 reviewer {a} 是 TASK-{t} 的历任 owner | 作废该 review；换 reviewer 重新 `team review claim` | review_claimed、review_approved | P0-inline |
 | AUD-016 | approved_without_review_record | tasks/*/task.json、reviews/TASK-ID/ | task.status ∈ {approved, verified, integrated, done} 且 reviews/TASK-ID/ 下无任何 REVIEW-*.json（含 decision=skipped_by_policy 的最小记录） | error | TASK-{t} 已 approved 但无 review 记录 | 核对 review 事件；补 review 或回退状态 | review_approved、review_skipped | P1-audit |
 | AUD-017 | verified_without_pass_verification | tasks/*/task.json、verification/VERIFY-*.json | task.status ∈ {verified, integrated, done} 且不存在 target.kind=task、task_id=本 task、verdict=pass 的 VERIFY 记录 | error | TASK-{t} 已 verified 但无 pass 的 verification 记录 | verifier 补 `team verify --task`；或回退状态 | verification_passed | P1-audit |
 | AUD-018 | secret_in_outputs | evidence/*/outputs/*.log、verification outputs | 输出文件命中 [24](24-security-permissions-and-data-hygiene.md) 定义的 secret 正则模式集，且未被替换为 `[REDACTED:*]`（redaction 漏网） | error | {file} 疑似含未脱敏 secret（{kind}） | 立即人工清理；修复 redaction 管道；export 前必须清零 | evidence_submitted | P1-audit |
