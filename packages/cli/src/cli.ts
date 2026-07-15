@@ -223,7 +223,7 @@ const HELP_TEXT = [
   'Every command accepts --json (single-envelope machine face) and --verbose (step trace to stderr). Exit codes: docs/17 §2.2.',
 ].join('\n');
 
-export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string, string | undefined> } = {}): CliResult {
+export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string, string | undefined>; onTick?: (line: string) => void } = {}): CliResult {
   if (argv.includes('--help') || argv.includes('-h') || argv[0] === 'help') {
     return { exitCode: 0, stdout: HELP_TEXT };
   }
@@ -372,10 +372,22 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
         // NaN would coerce Atomics.wait's timeout to +Infinity and hang forever (review finding #10)
         env = failEnvelope('usage_error', `--interval must be a positive number of seconds, got "${flag(argv, 'interval')}".`);
       } else {
+        // C4: stream one line per tick (NDJSON envelope under --json) — the loop used to swallow
+        // every intermediate envelope and print only the terminal one: for a long run, silence.
+        const emit = opts.onTick ?? ((line: string) => process.stdout.write(line + '\n'));
+        const tickLine = (e: Envelope): string => {
+          if (json) return JSON.stringify(e);
+          const d = e.data as { swept?: unknown[]; progress?: { progress_pct?: number; needs_user?: unknown[] }; terminal?: boolean; run_status?: string };
+          const stamp = new Date().toISOString().slice(11, 19);
+          if (d.terminal) return `${stamp}  ${e.message}`;
+          return `${stamp}  tick: ${(d.swept ?? []).length} reclaimed, progress ${d.progress?.progress_pct ?? '?'}%, ${(d.progress?.needs_user ?? []).length} need(s) you`;
+        };
         env = watchOnce({ ...base, runId, force: argv.includes('--force') });
+        emit(tickLine(env));
         while (env.ok && !(env.data as { terminal?: boolean }).terminal) {
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(5, intervalSec) * 1000);
           env = watchOnce({ ...base, runId, force: true });
+          emit(tickLine(env));
         }
       }
     }

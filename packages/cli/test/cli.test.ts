@@ -241,6 +241,34 @@ describe('remediation C3: human-mode sections (msg bodies, task table, needs-you
   });
 });
 
+describe('remediation C4: watch loop streams a heartbeat line per tick', () => {
+  it('loop mode emits tick lines through the sink and exits on a terminal run', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const { writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    writeFileSync(join(repo, 'payload.json'), JSON.stringify(validPayload()));
+    runCli(['run', 'import', join(repo, 'payload.json'), '--lightweight', '--json'], { cwd: repo });
+    // drive to terminal so the loop exits after one tick
+    for (const t of ['TASK-0001', 'TASK-0002']) {
+      runCli(['claim-next', 'RUN-0001', '--agent=w', '--json'], { cwd: repo });
+      runCli(['done', 'RUN-0001', t, '--agent=w', '--json'], { cwd: repo });
+    }
+    runCli(['report', 'RUN-0001', '--json'], { cwd: repo });
+
+    const ticks: string[] = [];
+    const r = runCli(['watch', 'RUN-0001'], { cwd: repo, onTick: (l) => ticks.push(l) });
+    expect(r.exitCode).toBe(0);
+    expect(ticks.length).toBe(1);
+    expect(ticks[0]).toContain('terminal');
+
+    const jsonTicks: string[] = [];
+    runCli(['watch', 'RUN-0001', '--json'], { cwd: repo, onTick: (l) => jsonTicks.push(l) });
+    expect(() => JSON.parse(jsonTicks[0]!)).not.toThrow(); // NDJSON per tick
+  });
+});
+
 describe('smoke-test fixes: help surface (L15) and project-scoped worktree root (L17)', () => {
   it('--help and help exit 0 with the command map', () => {
     for (const argv of [['--help'], ['help'], ['-h']]) {
