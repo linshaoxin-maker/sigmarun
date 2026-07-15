@@ -194,7 +194,8 @@ export function computeProgress(runDir: string): Record<string, unknown> {
 /** Persist the derived snapshot (no rev — progress.json is delete-and-recompute, docs/02 §Derived). */
 export function writeProgress(runDir: string, snapshot: Record<string, unknown>): void {
   const target = join(runDir, 'progress.json');
-  const tmp = target + '.tmp';
+  // pid-unique tmp: two windows running status/watch concurrently must not race on one tmp name
+  const tmp = `${target}.tmp-${process.pid}`;
   writeFileSync(tmp, JSON.stringify(snapshot, null, 2), 'utf8');
   renameSync(tmp, target);
 }

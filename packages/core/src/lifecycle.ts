@@ -44,7 +44,7 @@ export function initProject(opts: ResolveOptions = {}): Envelope {
   const skipped: string[] = [];
   const warnings: { code: string; message: string }[] = [];
 
-  for (const dir of ['', 'templates', 'locks']) {
+  for (const dir of ['', 'locks']) {
     const p = join(root.teamRoot, dir);
     if (existsSync(p)) skipped.push(p);
     else {

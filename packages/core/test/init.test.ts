@@ -12,7 +12,7 @@ describe('sigmarun init (contract: docs/17 §8, docs/16 §1, docs/02 §6)', () =
     const repo = mkTmpGitRepo(); dirs.push(repo);
     const env = initProject({ cwd: repo });
     expect(env.ok).toBe(true);
-    for (const p of ['.team/project.json', '.team/counters.json', '.team/templates', '.team/locks']) {
+    for (const p of ['.team/project.json', '.team/counters.json', '.team/locks']) {
       expect(existsSync(join(repo, p)), p).toBe(true);
     }
   });

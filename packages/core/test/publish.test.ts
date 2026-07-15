@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { importRun, initProject, publishTasks, readJsonState, writeJsonStateAtomic } from '@sigmarun/core';
+import { importRun, initProject, publishTasks } from '@sigmarun/core';
+import { readJsonState, writeJsonStateAtomic } from '@sigmarun/storage';
 import { mkTmpGitRepo, cleanup } from '../../storage/test/helpers.js';
 import { validPayload } from './payload-fixture.js';
 

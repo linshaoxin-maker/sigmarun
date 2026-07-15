@@ -429,7 +429,7 @@ function candidateGuard(
   role: string,
   stores: ClaimStores,
   approvals: Array<{ task_id: string; paths: string[]; status: string }>,
-  depsSatisfiedWhen: string[] = ['done'],
+  depsSatisfiedWhen: string[],
 ): GuardFailure | null {
   const unmet = row.depends_on.filter((dep) => !depsSatisfiedWhen.includes(rowsById.get(dep)?.status ?? ''));
   if (unmet.length > 0) {

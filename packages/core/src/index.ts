@@ -1,12 +1,11 @@
-export { GatewayError, resolveTeamRoot, readJsonState, writeJsonStateAtomic, writeJsonStateNew, probeLockCapability } from '@sigmarun/storage';
-export type { ReasonCode, TeamRootResolution, ResolveOptions } from '@sigmarun/storage';
+// Storage primitives are NOT re-exported: every package imports @sigmarun/storage directly,
+// and a second door into the same symbols left "is core a facade over storage?" undecidable.
 export { okEnvelope, failEnvelope, GATEWAY_VERSION, ENVELOPE_VERSION } from './envelope.js';
 export type { Envelope, EnvelopeMeta, EnvelopeWarning } from './envelope.js';
 export { ProjectSchema, CountersSchema, parseSchemaId, SUPPORTED_MAJOR } from './schemas.js';
 export { initProject, doctorProject } from './lifecycle.js';
 export type { DoctorOptions } from './lifecycle.js';
 export type { DoctorCheck } from './lifecycle.js';
-export { acquireLock, scanForSecrets } from '@sigmarun/storage';
 export { appendEvent, collectStateRevs, readEventsSafe } from './events.js';
 export type { EventActor, EventInput, LedgerEvent, RevAfter, SafeEvents } from './events.js';
 export { validatePayload, payloadHash, PayloadSchema, TASK_TYPES } from './payload.js';
