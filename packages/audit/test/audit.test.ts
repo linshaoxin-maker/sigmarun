@@ -171,6 +171,33 @@ describe('audit run (docs/18 §7: read-only, exit 0, findings are data)', () => 
     expect(f!.severity).toBe('warn');
   });
 
+  it('a healthy lightweight run audits with ZERO errors — evidence-chain rules report info (S10/D21)', async () => {
+    const { importRun, taskDone } = await import('@sigmarun/core');
+    const { mkTmpGitRepo } = await import('../../storage/test/helpers.js');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    const { initProject } = await import('@sigmarun/core');
+    const lite = mkTmpGitRepo();
+    try {
+      initProject({ cwd: lite });
+      importRun({ cwd: lite, payload: validPayload(), lightweight: true });
+      // complete every task the sanctioned lightweight way
+      for (;;) {
+        const c = claimNext({ cwd: lite, runId: 'RUN-0001', agentId: 'win-1' });
+        if (!c.ok) break;
+        taskDone({ cwd: lite, runId: 'RUN-0001', taskId: (c.data as { task_id: string }).task_id, agentId: 'win-1' });
+      }
+      const env = auditRun({ cwd: lite, runId: 'RUN-0001' });
+      const all = findings(env);
+      expect(all.filter((f) => f.severity === 'error')).toEqual([]);
+      // visibility is kept: the waiver is announced as info, not silence
+      expect(all.some((f) => f.rule_id === 'AUD-011' && f.severity === 'info')).toBe(true);
+      expect(all.some((f) => f.rule_id === 'AUD-016' && f.severity === 'info')).toBe(true);
+      expect(all.some((f) => f.rule_id === 'AUD-017' && f.severity === 'info')).toBe(true);
+    } finally {
+      cleanup(lite);
+    }
+  });
+
   it('event seq gap -> AUD-033 error', () => {
     const file = join(runDir(), 'events.jsonl');
     const lines = readFileSync(file, 'utf8').trim().split('\n');

@@ -11,7 +11,7 @@ export interface AuditOptions extends ResolveOptions {
 
 export interface Finding {
   rule_id: string;
-  severity: 'error' | 'warn';
+  severity: 'error' | 'warn' | 'info';
   message: string;
   next_action: string;
   refs: string[];
@@ -22,6 +22,9 @@ interface Ctx {
   runDir: string;
   runId: string;
   run: Record<string, unknown>;
+  /** D21 lightweight profile: evidence-chain rules (AUD-011/016/017/019) downgrade to info —
+   * direct completion is the sanctioned shape there, not a violation. All other rules unchanged. */
+  lightweight: boolean;
   rows: Array<{ task_id: string; status: string; weight: number }>;
   taskClaims: Array<{ claim_id: string; task_id: string; agent_id: string; status: string; lease_until: string }>;
   pathClaims: Array<{ claim_id: string; task_id: string; agent_id: string; status: string; paths: { allow?: string[] } }>;
@@ -44,7 +47,7 @@ const SKIPPED: Array<{ rule_id: string; reason: string }> = []; // all 40 catalo
 
 type Rule = { id: string; check: (ctx: Ctx) => Finding[] };
 
-const finding = (rule_id: string, severity: 'error' | 'warn', message: string, next_action: string, refs: string[] = []): Finding => ({
+const finding = (rule_id: string, severity: 'error' | 'warn' | 'info', message: string, next_action: string, refs: string[] = []): Finding => ({
   rule_id,
   severity,
   message,
@@ -252,8 +255,11 @@ const RULES: Rule[] = [
       for (const row of ctx.rows.filter((r) => gated.has(r.status))) {
         const ev = ctx.evidence(row.task_id);
         if (!ev) {
-          out.push(finding('AUD-011', 'error', `${row.task_id} is ${row.status} but evidence.json is missing (INV-007).`,
-            `Owner must re-run sigmarun submit; if the state was hand-edited, roll it back.`, [row.task_id]));
+          out.push(ctx.lightweight
+            ? finding('AUD-011', 'info', `${row.task_id} is ${row.status} with no evidence — expected in a lightweight run (D21 INV-007 waiver).`,
+                'No action: lightweight tasks complete without an evidence gate.', [row.task_id])
+            : finding('AUD-011', 'error', `${row.task_id} is ${row.status} but evidence.json is missing (INV-007).`,
+                `Owner must re-run sigmarun submit; if the state was hand-edited, roll it back.`, [row.task_id]));
           continue;
         }
         const handoffRef = ev.handoff_ref as string | undefined;
@@ -377,8 +383,11 @@ const RULES: Rule[] = [
         .filter((r) => gated.has(r.status))
         .filter((r) => ctx.reviews(r.task_id).length === 0)
         .map((r) =>
-          finding('AUD-016', 'error', `${r.task_id} is ${r.status} but has no review record (including skipped_by_policy).`,
-            'Restore a valid review record or roll the task status back before continuing.', [r.task_id]),
+          ctx.lightweight
+            ? finding('AUD-016', 'info', `${r.task_id} is ${r.status} with no review record — expected in a lightweight run (D21).`,
+                'No action: lightweight runs have no review gate.', [r.task_id])
+            : finding('AUD-016', 'error', `${r.task_id} is ${r.status} but has no review record (including skipped_by_policy).`,
+                'Restore a valid review record or roll the task status back before continuing.', [r.task_id]),
         );
     },
   },
@@ -395,8 +404,11 @@ const RULES: Rule[] = [
           }),
         )
         .map((r) =>
-          finding('AUD-017', 'error', `${r.task_id} is ${r.status} but has no passing task verification record.`,
-            `Run sigmarun verify submit ${ctx.runId} --agent=<verifier> --verify=<file>, or roll the task status back.`, [r.task_id]),
+          ctx.lightweight
+            ? finding('AUD-017', 'info', `${r.task_id} is ${r.status} with no verification record — expected in a lightweight run (D21).`,
+                'No action: lightweight runs have no verification gate.', [r.task_id])
+            : finding('AUD-017', 'error', `${r.task_id} is ${r.status} but has no passing task verification record.`,
+                `Run sigmarun verify submit ${ctx.runId} --agent=<verifier> --verify=<file>, or roll the task status back.`, [r.task_id]),
         );
     },
   },
@@ -432,9 +444,10 @@ const RULES: Rule[] = [
           // under require_review=false, so either policy was edited afterwards or the event was
           // forged. Only the policy-legal skip (policy off, task not mandating) is plain history.
           const anomalous = review.required === true || !policyAllowsSkip;
-          return finding('AUD-019', anomalous ? 'error' : 'warn',
+          const sev = ctx.lightweight ? 'info' : anomalous ? 'error' : 'warn';
+          return finding('AUD-019', sev,
             `${e.task_id} review was skipped (task.review.required=${review.required === undefined ? 'unset' : String(review.required)}, run require_review=${String(!policyAllowsSkip)}).`,
-            anomalous ? 'Restore the task to submitted and run an independent review.' : 'Keep the skip as audit history; no action if policy was intentional.',
+            ctx.lightweight ? 'No action: lightweight runs have no review gate.' : anomalous ? 'Restore the task to submitted and run an independent review.' : 'Keep the skip as audit history; no action if policy was intentional.',
             [`seq:${e.seq}`]);
         });
     },
@@ -936,11 +949,13 @@ export function auditRun(opts: AuditOptions): Envelope {
   const detailCache = new Map<string, Record<string, unknown> | null>();
   const evidenceCache = new Map<string, Record<string, unknown> | null>();
   const reviewCache = new Map<string, Array<Record<string, unknown>>>();
+  const runDoc = readJsonState(join(runDir, 'run.json')).doc as Record<string, unknown>;
   const ctx: Ctx = {
     repoRoot,
     runDir,
     runId: opts.runId,
-    run: readJsonState(join(runDir, 'run.json')).doc as Record<string, unknown>,
+    run: runDoc,
+    lightweight: runDoc.lightweight === true,
     rows: (readJsonState(join(runDir, 'team-task-list.json')).doc as { tasks: Ctx['rows'] }).tasks,
     taskClaims: readClaims('claims/task-claims.json'),
     pathClaims: readClaims('claims/path-claims.json'),
@@ -1020,8 +1035,9 @@ export function auditRun(opts: AuditOptions): Envelope {
   const after = readEvents().events;
   const concurrent = (after.length > 0 ? (after[after.length - 1]! as { seq: number }).seq : 0) !== snapshotSeq;
   const errors = findings.filter((f) => f.severity === 'error').length;
+  const warns = findings.filter((f) => f.severity === 'warn').length;
   return okEnvelope({
-    message: `Audit of ${opts.runId} (snapshot seq ${snapshotSeq}): ${findings.length} finding(s) — ${errors} error, ${findings.length - errors} warn; ${rulesRun.length} rule(s) run, ${SKIPPED.length} skipped.`,
+    message: `Audit of ${opts.runId} (snapshot seq ${snapshotSeq}): ${findings.length} finding(s) — ${errors} error, ${warns} warn, ${findings.length - errors - warns} info; ${rulesRun.length} rule(s) run, ${SKIPPED.length} skipped.`,
     data: {
       findings,
       rules_run: rulesRun,
