@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **整改 R2 观测与指引轮**(六项交付,302/302(+9);S6/S9/S11/S12/S13 消解——至此 2026-07-15 审查复现的 **13 个卡点场景全数关闭**,方案 P-2「指引活性」与 P-3「无死锁」对场景包成立):
+  - **guidance 注册表**(S12):failEnvelope 的「万能 doctor」兜底退役——全部错误码各有其指引(rev_conflict→audit/repair、run_paused→resume、claim 族→task show/claim-next…),无条目宁可空列表不编造;(S9)claim-next 对终局 run 明说「run 已关闭,余活开新 run」,不再与 publish 互踢;(S13)worktree register 放宽接受「working 且无活树」——prune 后重建从断头路变成真路径(WT-ID 防撞、不重发 task_started),prune 指引同步指明 owner 重建/reclaim(--force)双路。
+  - **needs_user 流水线扩容**(C1):新五类 awaiting_review/awaiting_verify/awaiting_rework/ready_to_integrate/ready_to_report(policy 与模式感知),单窗口最常见的「现在该干嘛」从此有答案;(B4)changes_requested + owner 心跳静默超 1×TTL → `stale_owner` 直给 `reclaim --force --agent=user`;(B6/S6)ready 任务依赖 cancelled 上游 → `deps_dead` 给重建路,task cancel 同时警告 orphaned_dependents;(S11)blocker 项的命令改为**可清除它的** answer 命令。
+  - **agent 视图**(C2):`sigmarun agent list`(注册×活跃 claim×gate 租约联查,心跳龄+stale 判定)+ status 的 agents 汇总——「谁在干什么」首次有数据面。
+  - **人面渲染**(C3):render() 按 data 形状出节段——msg list 显示**正文**、run show 出任务表、status 出 needs-you(带缩进命令)、agent list 出表、audit 出 findings 行;--json 逐字节不变。
+  - **watch 逐轮心跳**(C4):循环模式每 tick 一行(HH:MM:SS+回收数+进度+needs 数;--json 为 NDJSON 信封),终局报出场;onTick 注入点保可测。
+  - **起步资料**(A4):`init --example` 产可直接 import 的示例 payload(测试保证示例过自家 import);README 安装双轨+轻量 5 命令 quickstart 领跑;codex 侧补 publish/submit/integrate/runs/tasks/evidence 六 skill(6→12,Codex-only 团队可走完全程);adapter v0.4.0 的 /team-do 只认领 lightweight run(S3 连锁入口封死)。
+
 - **整改 R1 裁决落地轮**(D21–D24 已批,docs/02-phases/remediation-design-2026-07-15.md §6)。八项交付各带回归锁,293/293(+14);状态机猎手复现的 S1–S13 中 R1 消解 S1/S2/S3/S4/S7/S8/S10 七个:
   - **RunMode + 模式墙**(S3):`core/mode.ts` 成为轻量/full 的唯一分叉点;轻量 run 上 submit/review/verify/integrate/合成一律 `mode_mismatch`(exit 7)并指路 `done`;full run 的 done 同码拒绝;`run list` 增 `lightweight`+`progress_pct`。
   - **轻量终局**(S8/D21):全任务终态后 `report` 自 active 收口(简化 report.md,事件带 mode:lightweight)→ reported → archive;最后一个 done 递上 report 命令;watch 自然退出。轻量宪法落 **docs/26**,INV-007 修订注入 docs/15 §9。
