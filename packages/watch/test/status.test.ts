@@ -30,6 +30,26 @@ function expireLease(minutes: number): void {
 }
 
 describe('status (Slice 7 acceptance; M32 Needs-user; INV-006 derived progress)', () => {
+  it('agent list joins registrations with live claims; status carries the agents summary (C2)', async () => {
+    const { agentList } = await import('@sigmarun/watch');
+    claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent });
+    const idle = registerDefault(repo, 'win-idle', 'codex');
+
+    const env = agentList({ cwd: repo, runId: 'RUN-0001' });
+    expect(env.ok).toBe(true);
+    const agents = (env.data as { agents: Array<{ agent_id: string; current_task: string | null; active_claims: number; stale: boolean }> }).agents;
+    expect(agents.length).toBe(2);
+    const worker = agents.find((a) => a.agent_id === agent)!;
+    expect(worker.current_task).toBe('TASK-0001');
+    expect(worker.active_claims).toBe(1);
+    expect(worker.stale).toBe(false);
+    expect(agents.find((a) => a.agent_id === idle)!.current_task).toBeNull();
+
+    const status = statusRun({ cwd: repo, runId: 'RUN-0001' });
+    const summary = (status.data as { agents: { total: number; with_claims: number; stale: number } }).agents;
+    expect(summary).toEqual({ total: 2, with_claims: 1, stale: 0 });
+  });
+
   it('pipeline waits get needs_user items with executable commands (remediation C1)', async () => {
     await setupWorking(repo, agent);
     const { submitEvidence } = await import('@sigmarun/core');

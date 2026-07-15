@@ -4,7 +4,7 @@ import { initProject, doctorProject, importRun, publishTasks, runShow, readEvent
 import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, blockTask, verifySubmit, listWorktrees, pruneWorktrees } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, showGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
 import { installAdapters } from '@sigmarun/adapters';
-import { statusRun, runList, taskShow, evidenceShow, watchOnce } from '@sigmarun/watch';
+import { statusRun, runList, taskShow, evidenceShow, agentList, watchOnce } from '@sigmarun/watch';
 import { auditRun, repairRun } from '@sigmarun/audit';
 
 const EXIT_BY_CODE: Record<string, number> = {
@@ -78,7 +78,7 @@ const GROUP_SUBCOMMANDS: Record<string, string> = {
   review: 'claim | approve | request-changes | block',
   integrate: 'start | record',
   adapter: 'install',
-  agent: 'register',
+  agent: 'register | list',
   context: 'hydrate',
   evidence: 'show',
   backup: 'list',
@@ -137,7 +137,7 @@ const HELP_TEXT = [
   'Runs:       run list | run show <RUN> | run pause|resume|cancel|archive|reopen <RUN> | status <RUN> | watch <RUN> [--interval=s]',
   'Observe:    events <RUN> [--task=T] [--type=<event>] [--since=<seq>] [--limit=n] — read the append-only ledger (timeline; --json for full payload)',
   'Tasks:      task add <RUN> --file=<task.json> | task cancel <RUN> <TASK> [--reason=..] | task show <RUN> <TASK> | graph show|validate <RUN>',
-  'Dispatch:   agent register <RUN> --tool=<t> [--role=r] [--label=w] | claim-next <RUN> --agent=<A> [--role=r] [--task=T] [--dry-run]',
+  'Dispatch:   agent register <RUN> --tool=<t> [--role=r] [--label=w] | agent list <RUN> | claim-next <RUN> --agent=<A> [--role=r] [--task=T] [--dry-run]',
   '            heartbeat <RUN> <TASK> --agent=<A> | release <RUN> <TASK> --agent=<A> | reclaim <RUN> <TASK> | approve-paths <RUN> <TASK> --paths=g1,g2',
   'Worktrees:  worktree register <RUN> <TASK> --agent=<A> --path=<p> --branch=<b> | worktree adopt <RUN> <TASK> --agent=<A> | worktree list <RUN> | worktree prune <RUN> [--dry-run]',
   'Deliver:    submit <RUN> <TASK> --agent=<A> --evidence=<draft.json> | evidence show <RUN> <TASK>',
@@ -205,6 +205,11 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
         env = failEnvelope('schema_invalid', `Payload file is not valid JSON: ${String(e)}`);
       }
     }
+  } else if (cmd === 'agent' && args[1] === 'list') {
+    const runId = args[2];
+    env = !runId
+      ? failEnvelope('usage_error', 'Usage: sigmarun agent list <RUN-ID> [--json]')
+      : agentList({ ...base, runId });
   } else if (cmd === 'agent' && args[1] === 'register') {
     const runId = args[2];
     const tool = flag(argv, 'tool');

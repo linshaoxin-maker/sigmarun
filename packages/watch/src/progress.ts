@@ -273,6 +273,18 @@ export function computeProgress(runDir: string): Record<string, unknown> {
     }
   }
 
+  // C2: "who is doing what" — the first question of any multi-window session had no data plane.
+  const agentsDir = join(runDir, 'agents');
+  const agentFiles = existsSync(agentsDir) ? readdirSync(agentsDir).filter((f) => f.endsWith('.json')) : [];
+  let agentsStale = 0;
+  let agentsWithWork = 0;
+  for (const f of agentFiles) {
+    const a = readJsonState(join(agentsDir, f)).doc as { agent_id: string; last_heartbeat_at?: string; registered_at?: string };
+    const hb = Date.parse(a.last_heartbeat_at ?? a.registered_at ?? '') || 0;
+    if (now - hb > ttlMs) agentsStale += 1;
+    if (taskClaims.some((c) => c.agent_id === a.agent_id && c.status === 'active')) agentsWithWork += 1;
+  }
+
   return {
     schema_version: 'team.progress.v1',
     run_id: run.run_id,
@@ -285,6 +297,7 @@ export function computeProgress(runDir: string): Record<string, unknown> {
     risks,
     needs_user: needsUser,
     open_questions: openQuestions,
+    agents: { total: agentFiles.length, with_claims: agentsWithWork, stale: agentsStale },
   };
 }
 
@@ -404,6 +417,64 @@ export function evidenceShow(opts: TaskShowOptions): Envelope {
   return okEnvelope({
     message: `Evidence rev ${evidence.revision as number} for ${opts.taskId}: ${outputs.length} output file(s), ${history.length} archived revision(s).`,
     data: { evidence, outputs, history },
+    startedAt,
+  });
+}
+
+export interface AgentListOptions extends ResolveOptions {
+  runId: string;
+}
+
+/**
+ * Who is doing what (remediation C2; the docs/04 §6 "Agents: N active | M stale" view, unbuilt
+ * until now). Joins agents/*.json with live task claims and gate leases; staleness is heartbeat
+ * age past 1x TTL — the same signal the sweep and stale_owner detection use.
+ */
+export function agentList(opts: AgentListOptions): Envelope {
+  const startedAt = Date.now();
+  const ctx = openRun(opts);
+  if (ctx instanceof GatewayError) return failEnvelope(ctx.code, ctx.message, { startedAt });
+  const { runDir, runId } = ctx;
+  const run = readJsonState(join(runDir, 'run.json')).doc as { default_policy?: { claim_ttl_minutes?: number } };
+  const ttlMs = (run.default_policy?.claim_ttl_minutes ?? 30) * 60_000;
+  const now = Date.now();
+  const claimsFile = join(runDir, 'claims', 'task-claims.json');
+  const taskClaims = existsSync(claimsFile)
+    ? (readJsonState(claimsFile).doc as { claims: Array<{ task_id: string; agent_id: string; status: string }> }).claims
+    : [];
+  const gateFile = join(runDir, 'claims', 'review-claims.json');
+  const gateClaims = existsSync(gateFile)
+    ? (readJsonState(gateFile).doc as { claims: Array<{ task_id: string; reviewer_agent_id: string; status: string; kind?: string }> }).claims
+    : [];
+  const agentsDir = join(runDir, 'agents');
+  const agents = (existsSync(agentsDir) ? readdirSync(agentsDir).filter((f) => f.endsWith('.json')) : [])
+    .map((f) => {
+      const a = readJsonState(join(agentsDir, f)).doc as {
+        agent_id: string; label?: string | null; tool?: string; role?: string;
+        last_heartbeat_at?: string; registered_at?: string;
+      };
+      const work = taskClaims.filter((c) => c.agent_id === a.agent_id && c.status === 'active');
+      const gates = gateClaims.filter((c) => c.reviewer_agent_id === a.agent_id && c.status === 'active');
+      const hb = Date.parse(a.last_heartbeat_at ?? a.registered_at ?? '') || 0;
+      const hbMin = Math.round((now - hb) / 60_000);
+      return {
+        agent_id: a.agent_id,
+        label: a.label ?? null,
+        tool: a.tool ?? 'unknown',
+        role: a.role ?? 'implementer',
+        current_task: work[0]?.task_id ?? gates[0]?.task_id ?? null,
+        gate_kind: gates[0] ? (gates[0].kind ?? 'review') : null,
+        active_claims: work.length + gates.length,
+        last_heartbeat_min: hbMin,
+        stale: now - hb > ttlMs,
+      };
+    })
+    .sort((a, b) => a.agent_id.localeCompare(b.agent_id));
+  const staleCount = agents.filter((a) => a.stale).length;
+  const busy = agents.filter((a) => a.active_claims > 0).length;
+  return okEnvelope({
+    message: `${agents.length} agent(s) on ${runId}: ${busy} holding work, ${staleCount} stale.`,
+    data: { agents },
     startedAt,
   });
 }
