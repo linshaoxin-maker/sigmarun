@@ -118,3 +118,59 @@ describe('integrate + report (16 §4; BDD-008-01/02/03)', () => {
     expect(env.code).toBe('invalid_transition');
   });
 });
+
+describe('require_verification=false — the D6-symmetric verify-gate knob (docs/15 §10; remediation R0-9)', () => {
+  let lite: string;
+  afterEach(() => cleanup(lite));
+
+  async function approveViaPolicySkip(taskId: string, slug: string, agent: string): Promise<void> {
+    const { setupWorking } = await import('../../dispatch/test/fixture.js');
+    const { submitEvidence } = await import('@sigmarun/core');
+    const { validDraft } = await import('./submit-fixture.js');
+    await setupWorking(lite, agent, taskId, slug);
+    submitEvidence({
+      cwd: lite, runId: 'RUN-0001', taskId, agentId: agent,
+      evidencePath: validDraft(lite, {
+        changed_files: [{ path: `src/${slug.replace('task-', '')}/index.ts`, change_type: 'added' }],
+        acceptance: [{ item: `${slug.replace('task-', '')} done.`, status: 'met' }],
+      }),
+    });
+  }
+
+  it('approved tasks integrate and report when the run policy waives verification', async () => {
+    lite = mkClaimRepo([{ key: 'a' }, { key: 'b' }], { policy: { require_review: false, require_verification: false } });
+    const w = registerDefault(lite, 'w-owner');
+    await approveViaPolicySkip('TASK-0001', 'task-a', w);
+    await approveViaPolicySkip('TASK-0002', 'task-b', w);
+    const liteDir = join(lite, '.team', 'runs', 'RUN-0001');
+    expect(JSON.parse(readFileSync(join(liteDir, 'tasks', 'TASK-0001', 'task.json'), 'utf8')).status).toBe('approved');
+
+    const start = integrateStart({ cwd: lite, runId: 'RUN-0001' });
+    expect(start.ok).toBe(true);
+    expect((start.data as { merge_order: unknown[] }).merge_order.length).toBe(2);
+
+    const recA = integrateRecord({ cwd: lite, runId: 'RUN-0001', taskId: 'TASK-0001', mergeCommit: 'a1b2c3d' });
+    expect(recA.ok).toBe(true);
+
+    // an approved-but-unintegrated task must still block the report
+    const early = reportRun({ cwd: lite, runId: 'RUN-0001' });
+    expect(early.ok).toBe(false);
+    expect(early.code).toBe('invalid_transition');
+
+    const recB = integrateRecord({ cwd: lite, runId: 'RUN-0001', taskId: 'TASK-0002', mergeCommit: 'e4f5a6b' });
+    expect(recB.ok).toBe(true);
+    const rep = reportRun({ cwd: lite, runId: 'RUN-0001' });
+    expect(rep.ok).toBe(true);
+    expect(JSON.parse(readFileSync(join(liteDir, 'run.json'), 'utf8')).status).toBe('reported');
+    expect(JSON.parse(readFileSync(join(liteDir, 'tasks', 'TASK-0001', 'task.json'), 'utf8')).status).toBe('done');
+  });
+
+  it('with the gate ON (default), an approved task does not integrate', async () => {
+    lite = mkClaimRepo([{ key: 'a' }], { policy: { require_review: false } });
+    const w = registerDefault(lite, 'w-owner');
+    await approveViaPolicySkip('TASK-0001', 'task-a', w);
+    const start = integrateStart({ cwd: lite, runId: 'RUN-0001' });
+    expect(start.ok).toBe(false);
+    expect(start.code).toBe('invalid_transition');
+  });
+});

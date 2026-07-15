@@ -56,6 +56,11 @@ function withLock(opts: ResolveOptions & { runId: string }, startedAt: number, b
   }
 }
 
+/** Statuses eligible for integration under the run policy (docs/15 §10 require_verification). */
+function integrableStatuses(policy: { require_verification?: boolean } | undefined): Set<string> {
+  return policy?.require_verification === false ? new Set(['verified', 'approved']) : new Set(['verified']);
+}
+
 /** Deterministic merge order: topo over blocks edges within the verified set, then priority desc, task_id asc (16 §4.2). */
 function mergeOrder(runDir: string, verified: Row[]): string[] {
   const inSet = new Set(verified.map((r) => r.task_id));
@@ -88,14 +93,17 @@ export function integrateStart(opts: IntegrateStartOptions): Envelope {
   return withLock(opts, startedAt, (runDir) => {
     const runFile = join(runDir, 'run.json');
     const run = readJsonState(runFile);
-    const rdoc = run.doc as { status: string; base_branch?: string };
+    const rdoc = run.doc as { status: string; base_branch?: string; default_policy?: { require_verification?: boolean } };
     if (rdoc.status !== 'active' && rdoc.status !== 'integrating') {
       return failEnvelope('invalid_transition', `Run ${opts.runId} is ${rdoc.status}; integrate starts from active.`, { startedAt });
     }
+    // docs/15 §10: require_verification=false waives the verify gate (D6's symmetric knob) —
+    // approved tasks become integrable; a voluntarily verified task still counts either way.
+    const wanted = integrableStatuses(rdoc.default_policy);
     const rows = (readJsonState(join(runDir, 'team-task-list.json')).doc as { tasks: Row[] }).tasks;
-    const verified = rows.filter((r) => r.status === 'verified');
+    const verified = rows.filter((r) => wanted.has(r.status));
     if (verified.length === 0) {
-      return failEnvelope('invalid_transition', `Run ${opts.runId} has no verified task to integrate.`, {
+      return failEnvelope('invalid_transition', `Run ${opts.runId} has no ${[...wanted].join('/')} task to integrate.`, {
         nextActions: [`Check the pipeline: sigmarun status ${opts.runId}`],
         startedAt,
       });
@@ -140,7 +148,7 @@ export function integrateStart(opts: IntegrateStartOptions): Envelope {
 export function integrateRecord(opts: IntegrateRecordOptions): Envelope {
   const startedAt = Date.now();
   return withLock(opts, startedAt, (runDir) => {
-    const run = readJsonState(join(runDir, 'run.json')).doc as { status: string };
+    const run = readJsonState(join(runDir, 'run.json')).doc as { status: string; default_policy?: { require_verification?: boolean } };
     if (run.status !== 'integrating') {
       return failEnvelope('invalid_transition', `Run ${opts.runId} is ${run.status}; start integration first.`, { startedAt });
     }
@@ -150,8 +158,9 @@ export function integrateRecord(opts: IntegrateRecordOptions): Envelope {
     }
     const task = readJsonState(taskFile);
     const status = (task.doc as { status: string }).status;
-    if (status !== 'verified') {
-      return failEnvelope('invalid_transition', `Task ${opts.taskId} is ${status}; integrate record targets verified tasks.`, { startedAt });
+    const recordable = integrableStatuses(run.default_policy);
+    if (!recordable.has(status)) {
+      return failEnvelope('invalid_transition', `Task ${opts.taskId} is ${status}; integrate record targets ${[...recordable].join('/')} tasks.`, { startedAt });
     }
 
     const listFile = join(runDir, 'team-task-list.json');
@@ -278,15 +287,16 @@ export function reportRun(opts: IntegrateStartOptions): Envelope {
   return withLock(opts, startedAt, (runDir) => {
     const runFile = join(runDir, 'run.json');
     const run = readJsonState(runFile);
-    const rdoc = run.doc as { status: string; title?: string; goal?: string };
+    const rdoc = run.doc as { status: string; title?: string; goal?: string; default_policy?: { require_verification?: boolean } };
     if (rdoc.status !== 'integrating') {
       return failEnvelope('invalid_transition', `Run ${opts.runId} is ${rdoc.status}; report follows integration.`, { startedAt });
     }
     const listState = readJsonState(join(runDir, 'team-task-list.json'));
     const rows = (listState.doc as { tasks: Array<{ task_id: string; title: string; status: string }> }).tasks;
-    const remaining = rows.filter((r) => r.status === 'verified');
+    const awaiting = integrableStatuses(rdoc.default_policy);
+    const remaining = rows.filter((r) => awaiting.has(r.status));
     if (remaining.length > 0) {
-      return failEnvelope('invalid_transition', `${remaining.length} verified task(s) still await integrate record: ${remaining.map((r) => r.task_id).join(', ')}.`, { startedAt });
+      return failEnvelope('invalid_transition', `${remaining.length} ${[...awaiting].join('/')} task(s) still await integrate record: ${remaining.map((r) => r.task_id).join(', ')}.`, { startedAt });
     }
 
     // 15 §3.3 `integrated -> done: accept` — reporting IS the run accepting its results.
