@@ -56,9 +56,9 @@ writeFileSync(join(out, 'package.json'), JSON.stringify({
   keywords: ['ai-agents', 'multi-agent', 'claude-code', 'codex', 'orchestration', 'cli', 'collaboration', 'gateway'],
   license: 'MIT',
   author: 'Lin Shaoxin <skyaward@icloud.com>',
-  repository: { type: 'git', url: 'git+https://github.com/OWNER/sigmarun.git' },
-  bugs: { url: 'https://github.com/OWNER/sigmarun/issues' },
-  homepage: 'https://github.com/OWNER/sigmarun#readme',
+  repository: { type: 'git', url: 'git+https://github.com/linshaoxin-maker/sigmarun.git' },
+  bugs: { url: 'https://github.com/linshaoxin-maker/sigmarun/issues' },
+  homepage: 'https://github.com/linshaoxin-maker/sigmarun#readme',
   dependencies,
 }, null, 2) + '\n');
 
