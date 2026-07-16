@@ -220,7 +220,7 @@ function render(env: Envelope, json: boolean): string {
 const HELP_TEXT = [
   'sigmarun — repo-local multi-agent collaboration gateway (.team/)',
   '',
-  'Setup:      init [--example] | doctor [--fix] | adapter install --tool=claude-code|codex',
+  'Setup:      init [--example] | doctor [--fix] | adapter install --tool=claude-code|codex|all',
   'Lightweight: run import <payload.json> --lightweight  (tasks claimable now; no review/verify/integrate) -> claim-next -> done',
   'Plan:       run import <payload.json> [--lightweight] [--force] | task publish <RUN> [--tasks=..] [--force]',
   'Runs:       run list | run show <RUN> | run pause|resume|cancel|archive|reopen <RUN> | status <RUN> | watch <RUN> [--interval=s]',
@@ -595,7 +595,7 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
   } else if (cmd === 'adapter' && args[1] === 'install') {
     const tool = flag(argv, 'tool');
     if (!tool) {
-      env = failEnvelope('usage_error', 'Usage: sigmarun adapter install --tool=claude-code|codex [--update] [--json]');
+      env = failEnvelope('usage_error', 'Usage: sigmarun adapter install --tool=claude-code|codex|all (comma-separate for several) [--update] [--json]');
     } else {
       env = installAdapters({ ...base, tool, update: argv.includes('--update') });
     }
