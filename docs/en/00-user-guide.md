@@ -26,6 +26,17 @@ The boundary in one sentence:
 
 > Coding agents provide the intelligence, Skills standardize the process, the gateway provides order, and `.team/` stores the facts.
 
+### You stay in the loop
+
+You don't watch every step, but you're not cut out of the decisions either. The installed `/team-*` commands make the agent **pause and ask you — with a short, researched choice, not a blank "what should I do?"** — at the real forks:
+
+- **Planning**: it shows the task breakdown and waits for your OK before creating the run (no more "it already made the run").
+- **Picking work**: it previews which task it would claim, and why, so you can let it proceed or point it elsewhere.
+- **Red lines** (always pause, even on autopilot): merging onto the shared integration branch; taking over a crashed window's half-done work (continue it, or restart clean?); touching files outside a task's declared scope.
+- **When stuck**: a check that keeps failing comes back with a diagnosis and options, instead of burning turns or silently giving up.
+
+You control how much it checks in, in one sentence at any time: *"you drive it"* (autopilot — act and report), the default (pause at the forks above), or *"ask me each step"*. Note this is a property of how the **agent is instructed**, not something the gateway enforces — the gateway has no intelligence to know a fork is happening. It behaves the same in Claude Code and Codex.
+
 ---
 
 ## 2. Installation and project onboarding

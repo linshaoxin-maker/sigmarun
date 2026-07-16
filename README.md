@@ -121,6 +121,26 @@ Agents drive this through installed slash commands / skills — `/team-plan`,
 `/team-dispatch`, `/team-review`, `/team-verify`, `/team-status`,
 `/team-integrate` (Claude Code) or the matching `team-run-*` Codex skills.
 
+## Staying in control
+
+The agents don't run off on their own. At the real forks they pause and hand
+you a choice — with a short, researched set of options, not a fait accompli:
+
+- **Planning** — the agent shows the task breakdown and waits for your OK
+  before it creates the run.
+- **Picking work** — it previews which task it would take, and why, before
+  claiming, so you can let it go or point it elsewhere.
+- **Red lines** (always pause, even on autopilot) — merging onto the shared
+  branch, taking over another window's half-finished work, or writing outside
+  a task's declared scope.
+- **When stuck** — a check that keeps failing comes back with a diagnosis and
+  options, instead of burning turns or going quiet.
+
+You set how much it checks in, in one sentence at any time: *"you drive it"*
+(autopilot — act and report), the default (pause at the forks above), or
+*"ask me each step"*. This lives in the agent instructions, so it works the
+same in Claude Code and Codex; the gateway itself stays out of it.
+
 ## How it works
 
 - **State** lives in `.team/` as plain JSON plus an append-only `events.jsonl`.
