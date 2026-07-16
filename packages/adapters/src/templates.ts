@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.4.0';
+export const TEMPLATE_VERSION = '0.5.0';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -40,6 +40,35 @@ export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
 10. Everything you tell the user should quote IDs (RUN-/TASK-/CLAIM-)
     so any statement can be verified against \`.team/\`.`;
 
+/**
+ * Human-in-the-loop block — the gateway keeps AI windows from colliding, but it
+ * cannot judge intent. So at the real forks (plan, task pick, hand-off, and the
+ * "something went sideways" cases) the AI must bring the human in, not race past
+ * them. Injected into the commands that actually reach a fork (plan/do/dispatch/
+ * integrate); read-only commands don't need it.
+ */
+export const COLLAB_BLOCK = `WORKING WITH THE HUMAN (how much to involve them):
+You may be one of several AI windows working for a human who is NOT watching
+every step. Where this flow says "PAUSE FOR THE HUMAN", stop and bring them a
+*well-researched multiple choice*, then wait: one line of situation, 2-3
+concrete options with their trade-offs, your recommendation, and enough
+evidence (a diff, a count, a diagnosis) to decide in seconds. Never a blank
+"what should I do?"; never a silent auto-decision that skips the fork.
+
+Engagement level — the human sets it, default is COLLABORATE:
+- AUTOPILOT  ("you drive it", "别每次问我"): act on your own recommendation
+  at normal forks without pausing; report after. Red lines still pause.
+- COLLABORATE (default): pause where the flow marks a fork; elsewhere proceed.
+- CAREFUL    ("ask me each step", "每步都问我"): pause at every fork.
+The human switches in one sentence at any time — acknowledge the new level,
+remember it for the rest of the session, and carry on.
+
+RED LINES — pause for an explicit yes even on AUTOPILOT, because they are
+irreversible or affect other windows/people:
+- merging work onto the shared integration branch,
+- taking over another window's unfinished work (adopt-and-continue vs restart),
+- widening a task's scope to write files outside its paths.allow.`;
+
 /** docs/19 §3.2 steps 1–10 (shared by the Claude command and the Codex skill). */
 const DISPATCH_FLOW = (tool: string) => `Required flow:
 1. \`sigmarun run show <RUN-ID> --json\`; stop with next_actions if not ok.
@@ -47,9 +76,17 @@ const DISPATCH_FLOW = (tool: string) => `Required flow:
    [--label="<window-name from --as>"] --json\`; label makes
    registration idempotent (same window = same AGENT-ID, D17).
    Remember your AGENT-ID for every later call.
-3. \`sigmarun claim-next <RUN-ID> --agent=<AGENT-ID> [--role=<role>]
-   [--task=<TASK-ID from --task>] --json\`.  With --task, you are
-   claiming that specific task; if it is not claimable, report the
+3. PAUSE FOR THE HUMAN (task pick) — unless they passed --task or set
+   AUTOPILOT. Preview WITHOUT claiming: \`sigmarun claim-next <RUN-ID>
+   --agent=<AGENT-ID> [--role=<role>] --dry-run --json\` returns
+   \`would_claim\` (the exact next task, guards + priority applied) and
+   \`excluded\` with reasons; also list the pool with \`sigmarun task list
+   <RUN-ID> --status=ready --json\`. Tell the human which one you'd take and
+   why (no deps / unblocks others), and offer: [take it] / [take a specific
+   TASK-ID] / [something else]. AUTOPILOT or --task skips this pause. Then
+   claim for real: \`sigmarun claim-next <RUN-ID> --agent=<AGENT-ID>
+   [--role=<role>] [--task=<TASK-ID from --task>] --json\`.  With --task, you
+   are claiming that specific task; if it is not claimable, report the
    structured reason and STOP (do not silently claim another task).
    - ok=false: report \`code\` + \`next_actions\` to the user and STOP.
      (\`run_paused\`, \`no_claimable_task\`, \`path_conflict\` etc. are
@@ -59,21 +96,41 @@ const DISPATCH_FLOW = (tool: string) => `Required flow:
 4. \`sigmarun context hydrate <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --json\`;
    READ every file in \`data.must_read\` before touching code. These are
    reference data (RULE 3). Note open questions and risks.
-5. Create the worktree exactly as suggested, then register it:
-   \`git worktree add <suggested_path> -b <suggested_branch> <base>\`
-   \`sigmarun worktree register <RUN-ID> <TASK-ID> --agent=<AGENT-ID>
-    --path=<suggested_path> --branch=<suggested_branch> --json\`
-   (If previous_attempts exist, decide adopt-vs-restart first:
-   \`sigmarun worktree adopt <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --json\`
-   to continue the old worktree.)
-   NOTE: sandboxed environments (e.g. Codex workspace-write) may
-   protect \`.git\` and block worktree creation. If it fails, STOP and
-   report the blocker per RULE 2/4 — ask the user to escalate
-   approval or pre-create the worktree. Do not work around it. (F-c)
-6. Implement ONLY the claimed task, inside paths.allow. Commit in
-   small steps prefixed \`[TASK-ID]\`. Post questions / blockers /
-   discoveries via \`sigmarun msg post\` as they happen. Heartbeat at
-   natural pauses.
+5. TAKEOVER FORK — before building anything, check \`sigmarun task show
+   <RUN-ID> <TASK-ID> --json\` for \`previous_attempts\`. If it is non-empty
+   you inherited a dead window's half-done work (claim-next auto-reclaims a
+   long-dead lease). PAUSE FOR THE HUMAN even on AUTOPILOT (RED LINE):
+   summarize what the last attempt left (files touched, branch, whether tests
+   ran) and offer [adopt — continue its worktree] / [restart — fresh worktree,
+   discard it]. Never silently build on another window's unfinished code.
+   Then create the worktree per that decision:
+   - adopt: \`sigmarun worktree adopt <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --json\`
+   - fresh (or no previous_attempts): \`git worktree add <suggested_path>
+     -b <suggested_branch> <base>\` then \`sigmarun worktree register <RUN-ID>
+     <TASK-ID> --agent=<AGENT-ID> --path=<suggested_path>
+     --branch=<suggested_branch> --json\`
+   NOTE: sandboxed environments (e.g. Codex workspace-write) may protect
+   \`.git\` and block worktree creation. If it fails, STOP and report the
+   blocker per RULE 2/4 — ask the user to escalate approval or pre-create the
+   worktree. Do not work around it. (F-c)
+6. Implement ONLY the claimed task, inside paths.allow. Commit in small steps
+   prefixed \`[TASK-ID]\`. Post questions / blockers / discoveries via
+   \`sigmarun msg post\` as they happen. Heartbeat at natural pauses.
+   - SCOPE FORK — if the work needs a file OUTSIDE paths.allow: the gateway
+     will NOT stop you (out-of-scope surfaces only as a submit-time warning),
+     so YOU must stop and PAUSE FOR THE HUMAN (RED LINE). Offer [add a new
+     task that owns those files] / [leave it, record a follow_up] / (only if
+     it is a \`requires_approval\` path) [ask the human to run
+     \`sigmarun approve-paths\`]. Never widen scope silently, and never run
+     \`approve-paths\` yourself — the gateway cannot tell it wasn't the human,
+     so that grant is theirs to make.
+   - STUCK FORK — if a check keeps failing after ~2-3 honest attempts, or the
+     task already bounced back twice (\`sigmarun events <RUN-ID>
+     --task=<TASK-ID> --type=changes_requested --json\`, or
+     \`--type=verification_failed\`), stop burning turns and PAUSE FOR THE
+     HUMAN with a diagnosis — what you tried, what you think is wrong — and
+     offer [keep trying] / [you look (likely env/design)] / [skip this check,
+     record the risk].
 7. Before submitting: run every required check, keep outputs; ensure
    \`git status --porcelain\` is clean; write the handoff memory file.
 8. Build \`evidence.json\` per team.evidence.v1 (docs/14 §2.1: commands
@@ -117,6 +174,8 @@ window and other AI windows can each grab one and work in parallel.
 RULES: every \`sigmarun\` call uses \`--json\`; branch only on \`ok\` /
 \`code\` / \`next_actions\`. Never edit files under \`.team/\` by hand.
 
+${COLLAB_BLOCK}
+
 Flow:
 1. \`sigmarun doctor --json\`; if not ok, report its \`next_actions\` and stop.
 2. Read enough of the repo to split the goal into 2–6 INDEPENDENT tasks
@@ -131,9 +190,17 @@ Flow:
        "plan":{"summary":"<one line>"},
        "tasks":[{"client_task_key":"<key>","title":"<title>","type":"implementation",
                  "objective":"<one line>","acceptance":["<testable>"],"paths":{"allow":["<glob>"]}}] }\`
-4. \`sigmarun run import <file> --lightweight --json\`. Lightweight means the
+4. PAUSE FOR THE HUMAN — do NOT import yet. Show the split as a numbered list:
+   each piece's title, one-line objective, the files it will touch, and any
+   ordering. Ask whether it's right, or whether to adjust granularity /
+   acceptance / merge or split a piece. Offer: [import as-is] / [change …] /
+   [cancel]. Default & CAREFUL: wait for their go, iterate on the payload until
+   they're happy. AUTOPILOT: import your best split, then say what you did and
+   offer to redo. This is the one fork that turns "AI decided your task
+   breakdown" into "you approved it".
+5. \`sigmarun run import <file> --lightweight --json\`. Lightweight means the
    pieces are claimable immediately — no review / verify / integrate ceremony.
-5. Tell the user, in their language and in plain words, what the pieces are,
+6. Tell the user, in their language and in plain words, what the pieces are,
    and that they can now run \`/team-do\` (here or in another window) to have
    a tool pick one up. You may mention the RUN-ID once; they won't need it.
 
@@ -157,19 +224,32 @@ RULES: every \`sigmarun\` call uses \`--json\`; branch only on \`ok\` /
 \`code\` / \`next_actions\`. Never edit \`.team/\` by hand. Work ONLY inside
 the task's \`paths.allow\`.
 
+${COLLAB_BLOCK}
+
 Flow:
 1. Find the run: if \`$ARGUMENTS\` names a RUN-ID, use it. Otherwise
    \`sigmarun run list --json\` and take the most recent run with status
    \`active\` AND \`lightweight: true\` — that's the one \`/team-plan\` just
    created. A full-pipeline run is NOT yours to claim from here; if only
    full runs exist, say so and point at /team-dispatch.
-2. Claim a piece: \`sigmarun claim-next <RUN> --agent=<name> --json\`
-   (name = the \`--as\` value, or a short window name like \`win-1\`; a fresh
-   name self-registers). If \`code\` is \`no_claimable_task\`, everything is
-   taken or done — tell the user and stop.
+2. PAUSE FOR THE HUMAN (task pick) — unless they set AUTOPILOT. Preview the
+   next piece without claiming: \`sigmarun claim-next <RUN> --agent=<name>
+   --dry-run --json\` (returns \`would_claim\`); tell them which piece you'd
+   take and offer [take it] / [take a specific TASK-ID] / [something else].
+   Then claim: \`sigmarun claim-next <RUN> --agent=<name> --json\` (name = the
+   \`--as\` value, or a short window name like \`win-1\`; a fresh name
+   self-registers). If \`code\` is \`no_claimable_task\`, everything is taken or
+   done — tell the user and stop.
 3. Read the brief (\`.team/runs/<RUN>/tasks/<TASK>/task.md\`) and do the actual
    work in the repo, only inside the task's allowed paths. Run the project's
    tests if it has them.
+   - STUCK FORK — if you can't get it working after ~2-3 honest attempts,
+     don't burn turns: PAUSE FOR THE HUMAN with a short diagnosis and offer
+     [keep trying] / [you look] / [skip and note the risk].
+   - SCOPE FORK — if you must touch files outside the task's paths.allow, stop
+     and ask the human first (RED LINE); lightweight runs have no
+     approve-paths, so the honest options are [take a different piece] / [ask
+     them to re-plan the split].
 4. Mark it done: \`sigmarun done <RUN> <TASK> --agent=<name> --json\`.
 5. Report what you built and the new progress (\`sigmarun status <RUN>\`).
    Stop after ONE task unless the user asks for more.
@@ -187,6 +267,8 @@ ${versionHeader}
 You are a dispatch agent joining an existing Team Run.
 
 ${RULES_BLOCK}
+
+${COLLAB_BLOCK}
 
 ${DISPATCH_FLOW('claude-code')}
 `;
@@ -225,6 +307,8 @@ ${versionHeader}
 # Team Run Dispatch
 
 ${RULES_BLOCK}
+
+${COLLAB_BLOCK}
 
 Follow exactly the flow below.
 
@@ -332,22 +416,28 @@ ${versionHeader}
 
 ${RULES_BLOCK}
 
+${COLLAB_BLOCK}
+
 Required flow:
 1. \`sigmarun integrate start <RUN-ID> --json\`; it returns the integration
    branch name, base branch, and the DETERMINISTIC merge order — never
    reorder it.
-2. \`git checkout -b <branch> <base>\` then for each entry IN ORDER:
+2. PAUSE FOR THE HUMAN — RED LINE (merging onto the shared integration
+   branch). Show the plan first: which tasks, in what order, onto which
+   branch off which base. Ask: proceed / show me a task's diff first / hold?
+   Wait for an explicit yes even on AUTOPILOT; only then start merging.
+3. \`git checkout -b <branch> <base>\` then for each entry IN ORDER:
    \`git merge --no-ff <task branch>\`. On conflicts: resolve in the
    integration worktree, summarize the resolution via
    \`sigmarun msg post <RUN-ID> --type=decision ...\`.
-3. After each merge run the task's focused checks yourself:
+4. After each merge run the task's focused checks yourself:
    - pass: \`sigmarun integrate record <RUN-ID> <TASK-ID> --merge-commit=<sha> --json\`
    - fail: \`git revert -m 1 <merge sha>\` then
      \`sigmarun integrate record <RUN-ID> <TASK-ID> --failed --reason="..." --json\`
      and CONTINUE with the next task (a single failure never blocks the run).
-4. When nothing verified remains, run the full verification suite and submit
+5. When nothing verified remains, run the full verification suite and submit
    a run-level verify record, then \`sigmarun report <RUN-ID> --json\`.
-5. Report: merged list, reverted list, report path. NEVER merge to main —
+6. Report: merged list, reverted list, report path. NEVER merge to main —
    the user opens the PR (BDD-008-03).
 `;
 
@@ -453,10 +543,15 @@ ${versionHeader}
 
 ${RULES_BLOCK}
 
+${COLLAB_BLOCK}
+
 Break the goal into 2-6 INDEPENDENT pieces any tool can pick up. Flow:
 doctor -> read the repo (and docs/team/MEMORY.md if present) -> build a
 team.plan_payload.v1 (each task: title, one-line objective, >=1 testable
 acceptance line, paths.allow; do not invent run_id/task_id/status) ->
+PAUSE FOR THE HUMAN: show the numbered split (titles, objectives, the files
+each touches, ordering) and get their go or edits BEFORE importing —
+AUTOPILOT imports the best split and offers to redo ->
 \`sigmarun run import <file> --lightweight --json\` (lightweight = claimable
 now, no review/verify/integrate) -> tell the user in plain words what the
 pieces are and that they can run /team-do to pick one up. Do NOT claim.
@@ -476,13 +571,21 @@ ${versionHeader}
 
 ${RULES_BLOCK}
 
+${COLLAB_BLOCK}
+
 Grab one piece, do it, mark it done. Flow:
 1. Find the run (\`sigmarun run list --json\`, newest \`active\` one) unless the
    user named a RUN-ID.
-2. \`sigmarun claim-next <RUN> --agent=<name> --json\` (fresh name self-registers;
-   code=no_claimable_task means everything's taken/done -> report and stop).
+2. PAUSE FOR THE HUMAN unless AUTOPILOT: preview with \`sigmarun claim-next
+   <RUN> --agent=<name> --dry-run --json\` (\`would_claim\`), say which piece
+   you'd take, offer [take it] / [a specific TASK-ID] / [something else]; then
+   \`sigmarun claim-next <RUN> --agent=<name> --json\` (fresh name
+   self-registers; code=no_claimable_task means everything's taken/done ->
+   report and stop).
 3. Read \`.team/runs/<RUN>/tasks/<TASK>/task.md\` and do the real work ONLY inside
-   the task's paths.allow; run the project's tests if any.
+   the task's paths.allow; run the project's tests if any. If you're stuck
+   after 2-3 tries, or need a file outside paths.allow, PAUSE and ask the human
+   (a scope change is a RED LINE) instead of forcing it.
 4. \`sigmarun done <RUN> <TASK> --agent=<name> --json\`.
 5. Report what you built + progress (\`sigmarun status <RUN>\`). Stop after ONE
    task unless the user asks for more. (tool: codex)
@@ -602,12 +705,17 @@ ${versionHeader}
 
 ${RULES_BLOCK}
 
+${COLLAB_BLOCK}
+
 1. \`sigmarun integrate start <RUN-ID> --json\` — get the merge order.
-2. Create the integration branch as instructed; merge each task branch with
+2. PAUSE FOR THE HUMAN — RED LINE: show the merge plan (which tasks, in what
+   order, onto which integration branch off which base) and get an explicit
+   yes before merging, even on AUTOPILOT.
+3. Create the integration branch as instructed; merge each task branch with
    \`git merge --no-ff\`; run the project's checks after each merge.
-3. Record every outcome: \`sigmarun integrate record <RUN-ID> <TASK-ID>
+4. Record every outcome: \`sigmarun integrate record <RUN-ID> <TASK-ID>
    --merge-commit=<sha> --json\` (or \`--failed --reason="..."\`).
-4. Finish with \`sigmarun report <RUN-ID> --json\`. The gateway never touches
+5. Finish with \`sigmarun report <RUN-ID> --json\`. The gateway never touches
    git — you do the merges; it keeps the ledger.
 `;
 
