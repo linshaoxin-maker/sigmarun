@@ -40,7 +40,7 @@ const DEFAULT_NEXT_ACTIONS: Record<string, string[]> = {
   bare_repo_unsupported: ['Use a non-bare working checkout of the repository.'],
   team_root_not_found: ['Run `sigmarun init` inside the target repository first.'],
   io_error: ['Check filesystem permissions and free space, then retry.'],
-  lock_timeout: ['Another sigmarun command holds the run lock; retry in a few seconds.', 'A crashed holder is seized automatically ~30s after its last activity.'],
+  lock_timeout: ['Another sigmarun command holds the run lock; retry in a few seconds.', 'A crashed holder (its process is gone) is seized automatically; a genuinely long-running holder is waited out rather than killed.'],
   // run / task state
   run_paused: ['Resume the run: sigmarun run resume <RUN>'],
   run_not_active: ['See where the run stands: sigmarun run show <RUN>'],

@@ -55,6 +55,34 @@ function releaseIfMine(lockDir: string, token: string): void {
   } catch { /* absent/unreadable — cannot confirm ownership; do not remove */ }
 }
 
+/**
+ * The lock dir's mtime is stamped once at mkdir and never refreshed, so age alone cannot tell a
+ * crashed holder apart from a legitimately long transaction. Beyond this multiple of staleMs we
+ * seize regardless — a bound so a recycled pid that probes as "alive" cannot leak the lock forever.
+ */
+const HARD_STALE_MULTIPLE = 20;
+
+/**
+ * Is the process recorded in the lock's meta.json still alive? Best-effort and same-host only —
+ * sigmarun locks are repo-local, so probing the pid is valid. Returns false (⇒ seizable) when meta
+ * is unreadable or the pid is gone, so a genuinely crashed holder is still taken over. EPERM means
+ * the process exists but isn't ours to signal — that counts as alive (do not seize).
+ */
+function holderAlive(lockDir: string): boolean {
+  try {
+    const meta = JSON.parse(readFileSync(join(lockDir, 'meta.json'), 'utf8')) as { pid?: unknown };
+    if (typeof meta.pid !== 'number') return false;
+    try {
+      process.kill(meta.pid, 0);
+      return true;
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === 'EPERM';
+    }
+  } catch {
+    return false;
+  }
+}
+
 export function acquireLock(lockDir: string, opts: LockOptions = {}): () => void {
   const timeoutMs = opts.timeoutMs ?? 5000;
   const staleMs = opts.staleMs ?? 30_000;
@@ -76,7 +104,12 @@ export function acquireLock(lockDir: string, opts: LockOptions = {}): () => void
       let ageMs = 0;
       try {
         ageMs = Date.now() - statSync(lockDir).mtimeMs;
-        stale = ageMs > staleMs;
+        if (ageMs > staleMs) {
+          // An old mtime is AMBIGUOUS — it is never refreshed, so a crashed holder and a legitimately
+          // long transaction look identical by age. Probe the holder: seize only if its process is
+          // truly gone, or once the hard ceiling is passed (recycled-pid safety net).
+          stale = ageMs > staleMs * HARD_STALE_MULTIPLE || !holderAlive(lockDir);
+        }
       } catch { /* raced away between attempts; retry immediately */ }
       if (stale) {
         // Exclusive takeover: rename is atomic, so only ONE contender wins it — the losers

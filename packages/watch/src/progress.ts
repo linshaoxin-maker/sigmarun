@@ -84,10 +84,10 @@ export function computeProgress(runDir: string): Record<string, unknown> {
   let weightTotal = 0;
   let weightDone = 0;
   let progressWeighted = 0;
-  let ledger: ReturnType<typeof readEventsSafe>['events'] | null = null;
+  const safeLedger = readEventsSafe(runDir); // {events, corrupt_lines} — reused for the integrity check below
   const blockedPrev = (taskId: string): number => {
     // docs/03 §9: blocked keeps the last pre-block fraction — replay the ledger backwards for it.
-    const events = (ledger ??= readEventsSafe(runDir).events);
+    const events = safeLedger.events;
     for (let i = events.length - 1; i >= 0; i--) {
       const e = events[i]!;
       if (e.task_id !== taskId) continue;
@@ -282,6 +282,23 @@ export function computeProgress(runDir: string): Record<string, unknown> {
     const hb = Date.parse(a.last_heartbeat_at ?? a.registered_at ?? '') || 0;
     if (now - hb > ttlMs) agentsStale += 1;
     if (taskClaims.some((c) => c.agent_id === a.agent_id && c.status === 'active')) agentsWithWork += 1;
+  }
+
+  // Ledger integrity → human handoff. Torn lines or duplicate seq are damage the gateway CANNOT
+  // self-heal: `repair` rolls next_seq forward but can neither reconstruct a torn tail nor de-dup a
+  // seq collision (corner cases #3/#4). Previously this only surfaced if a human ran `audit`; make
+  // it an explicit needs_user so a damaged ledger reaches a person instead of silently degrading.
+  const dupSeq = safeLedger.events.length !== new Set(safeLedger.events.map((e) => e.seq)).size;
+  if (safeLedger.corrupt_lines.length > 0 || dupSeq) {
+    const parts = [
+      safeLedger.corrupt_lines.length > 0 ? `${safeLedger.corrupt_lines.length} unreadable line(s)` : '',
+      dupSeq ? 'duplicate seq numbers' : '',
+    ].filter(Boolean).join(' + ');
+    needsUser.unshift({
+      kind: 'ledger_broken',
+      detail: `events.jsonl is damaged (${parts}) — the audit ledger can't self-heal; restore .team from a backup or truncate the torn tail, then repair.`,
+      command: `sigmarun audit run ${run.run_id}`,
+    });
   }
 
   return {

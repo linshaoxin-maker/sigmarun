@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJsonState, writeJsonStateAtomic } from '@sigmarun/storage';
 import { claimNext } from '@sigmarun/dispatch';
@@ -30,6 +30,15 @@ function expireLease(minutes: number): void {
 }
 
 describe('status (Slice 7 acceptance; M32 Needs-user; INV-006 derived progress)', () => {
+  it('surfaces a damaged ledger (torn line) as a ledger_broken needs_user (corner #3/#4)', () => {
+    appendFileSync(join(runDir(), 'events.jsonl'), '{ this line is torn\n');
+    const status = statusRun({ cwd: repo, runId: 'RUN-0001' });
+    const needs = (status.data as { needs_user: Array<{ kind: string; command: string }> }).needs_user;
+    const broken = needs.find((n) => n.kind === 'ledger_broken');
+    expect(broken).toBeTruthy();
+    expect(broken!.command).toContain('audit run');
+  });
+
   it('agent list joins registrations with live claims; status carries the agents summary (C2)', async () => {
     const { agentList } = await import('@sigmarun/watch');
     claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent });
