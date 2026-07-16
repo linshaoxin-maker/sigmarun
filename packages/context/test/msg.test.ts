@@ -31,7 +31,7 @@ describe('msg post (docs/12 §6; INV-011 no event mirror)', () => {
     expect(lines[0]).toMatchObject({
       message_id: 'MSG-0001', run_id: 'RUN-0001', task_id: 'TASK-0002',
       from_agent_id: agent, to: 'task:TASK-0001', type: 'question',
-      visibility: 'run', body: 'What is the session expiry rule?', status: 'open',
+      body: 'What is the session expiry rule?', status: 'open',
     });
     const second = postMessage({ cwd: repo, runId: 'RUN-0001', fromAgentId: agent, type: 'note', body: 'noted' });
     expect((second.data as { message_id: string }).message_id).toBe('MSG-0002');

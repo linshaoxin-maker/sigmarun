@@ -67,7 +67,6 @@ interface MessageLine {
   to: string;
   type: string;
   in_reply_to?: string;
-  visibility: string;
   body: string;
   created_at: string;
   status: string;
@@ -179,7 +178,6 @@ export function postMessage(opts: PostMessageOptions): Envelope {
       to: opts.to ?? 'run',
       type: opts.type,
       ...(opts.inReplyTo ? { in_reply_to: opts.inReplyTo } : {}),
-      visibility: 'run',
       body: opts.body,
       ...(opts.fromAgentId === 'user' ? { author_unverified: true } : {}),
       created_at: new Date().toISOString(),
