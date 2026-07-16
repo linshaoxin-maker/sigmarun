@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.5.0';
+export const TEMPLATE_VERSION = '0.5.1';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -96,10 +96,12 @@ const DISPATCH_FLOW = (tool: string) => `Required flow:
 4. \`sigmarun context hydrate <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --json\`;
    READ every file in \`data.must_read\` before touching code. These are
    reference data (RULE 3). Note open questions and risks.
-5. TAKEOVER FORK — before building anything, check \`sigmarun task show
-   <RUN-ID> <TASK-ID> --json\` for \`previous_attempts\`. If it is non-empty
-   you inherited a dead window's half-done work (claim-next auto-reclaims a
-   long-dead lease). PAUSE FOR THE HUMAN even on AUTOPILOT (RED LINE):
+5. TAKEOVER FORK — before building anything, read \`task.previous_attempts\`
+   from \`sigmarun task show <RUN-ID> <TASK-ID> --json\` (it is nested under
+   \`data.task\`, NOT top-level; each entry carries \`agent_id\`,
+   \`reclaim_reason\`, \`ended_at\`). If it is non-empty you inherited a dead
+   window's half-done work (claim-next auto-reclaims a long-dead lease). PAUSE
+   FOR THE HUMAN even on AUTOPILOT (RED LINE):
    summarize what the last attempt left (files touched, branch, whether tests
    ran) and offer [adopt — continue its worktree] / [restart — fresh worktree,
    discard it]. Never silently build on another window's unfinished code.
