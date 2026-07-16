@@ -14,10 +14,19 @@ smoke runs). Interfaces may still move before 1.0.
 ## Why
 
 Point two agent windows at the same repo and they collide: duplicate work,
-clobbered files, "done" with no evidence, no shared memory. sigmarun gives them
-deterministic primitives to coordinate through — task claims with leases,
-evidence gates, independent review/verify, topological integration — while the
-agents keep doing the thinking.
+clobbered files, no shared memory. **sigmarun's core job is to stop the
+collision** — a task claim with a lease means no two windows grab the same
+piece; a path claim means no two windows write the same file. That coordination
+is *enforced*: the gateway computes it from the ledger, and no agent can fake it.
+
+Everything the full pipeline adds on top — evidence, review, verify, integrate —
+is **structured record-keeping, not a quality authority.** The gateway has no
+intelligence of its own (the agents supply that, by design), so it cannot know
+whether your tests really ran or your review was really independent; it records
+what you *claim*, in order, on an append-only ledger you can replay and audit.
+Treat the pipeline as a shared logbook that keeps windows from colliding — not
+as a guarantee that the work behind an entry is correct. The judgment stays with
+you and the agents; the gateway keeps the order.
 
 ## Demo — a 60-second lightweight run
 

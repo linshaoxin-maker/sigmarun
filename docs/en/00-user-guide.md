@@ -9,7 +9,7 @@
 
 ## 1. What is this
 
-**sigmarun lets you use multiple Claude Code and Codex windows at the same time in one project, collaborating like a small software team that has a task queue, work isolation, and quality gates.**
+**sigmarun lets you use multiple Claude Code and Codex windows at the same time in one project, collaborating like a small software team that has a task queue, work isolation, and a shared, replayable logbook.**
 
 It is made up of four layers:
 
@@ -17,10 +17,10 @@ It is made up of four layers:
 |---|---|---|
 | Claude Code / Codex | Understand the project, break down tasks, write code, review, run tests | The AI coding tool you talk to |
 | `/team-*` commands or Skills | Standardize the AI's collaboration steps and require it to call the gateway | The main control surface you type into the AI chat |
-| `sigmarun` gateway CLI | Assign IDs, import tasks, atomic claims, conflict checks, evidence gates, state transitions, and audit | Called by the AI most of the time; you can also call it directly when troubleshooting |
+| `sigmarun` gateway CLI | Assign IDs, import tasks, atomic claims, conflict checks, evidence *recording*, state transitions, and audit | Called by the AI most of the time; you can also call it directly when troubleshooting |
 | `.team/` | The local source of truth for collaboration in the current project | Usually not edited directly; state, evidence, and events can all be looked up |
 
-sigmarun **is not a new AI**; it does not understand requirements or write code on its own — that work is still done by coding agents like Claude Code and Codex. It also **does not depend on any centralized website or cloud service**. The optional future dashboard is only a read-only observation surface over `.team/`; it does not break down tasks, claim them, or modify state.
+sigmarun **is not a new AI**; it does not understand requirements or write code on its own — that work is still done by coding agents like Claude Code and Codex. Because it has no intelligence of its own, it also **cannot judge whether the evidence, reviews, and verifications you record are true** — it enforces *who may write what, in what order* (claims, path locks, state transitions) and keeps an auditable record, but the honesty of a submitted test run or the real independence of a review stays the agents' and your responsibility, not a guarantee the gateway makes. It also **does not depend on any centralized website or cloud service**. The optional future dashboard is only a read-only observation surface over `.team/`; it does not break down tasks, claim them, or modify state.
 
 The boundary in one sentence:
 
