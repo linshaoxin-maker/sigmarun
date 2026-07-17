@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.6.3';
+export const TEMPLATE_VERSION = '0.6.4';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -153,6 +153,17 @@ const DISPATCH_FLOW = (tool: string) => `Required flow:
    \`.git\` and block worktree creation. If it fails, STOP and report the
    blocker per RULE 2/4 — ask the user to escalate approval or pre-create the
    worktree. Do not work around it. (F-c)
+   DEPENDENCIES — an isolated worktree does NOT inherit the main checkout's
+   \`node_modules\`: it is gitignored and \`git worktree add\` copies only
+   tracked files, so the new worktree starts with none. Any dependency-backed
+   check (vitest, tsc, eslint) will then die with ERR_MODULE_NOT_FOUND /
+   "command not found" — that is a MISSING-ENV failure, not a real test
+   failure. Before running checks, provision deps in the worktree: either
+   install them there (\`npm install\` / \`pnpm install\`; can be slow on a big
+   monorepo) or symlink the main checkout's folder
+   (\`ln -s <main-repo>/node_modules node_modules\`). Never record a check that
+   only failed for missing \`node_modules\` as a real \`fail\` in evidence —
+   fix the environment and re-run first. (P1-5)
 6. Implement ONLY the claimed task, inside paths.allow. Commit in small steps
    prefixed \`[TASK-ID]\`. Post questions / blockers / discoveries via
    \`sigmarun msg post\` as they happen. Heartbeat at natural pauses.
@@ -315,8 +326,9 @@ Flow:
    - lightweight → continue with steps 5-8 here.
    - full pipeline → switch to the Required flow of /team-dispatch from its
      claim step onward (worktree, evidence, submit; its TAKEOVER / SCOPE /
-     STUCK forks all apply). Read \`.claude/commands/team-dispatch.md\` if you
-     need the exact steps. Everything below is the lightweight path.
+     STUCK forks AND its worktree DEPENDENCIES note — a fresh worktree has no
+     \`node_modules\` — all apply). Read \`.claude/commands/team-dispatch.md\`
+     if you need the exact steps. Everything below is the lightweight path.
 5. PAUSE FOR THE HUMAN (task pick) — unless AUTOPILOT. Preview WITHOUT
    claiming: \`sigmarun claim-next <RUN> --agent=<name> --dry-run --json\`
    returns \`would_claim\`; say which piece you'd take and why (no deps /
@@ -717,8 +729,9 @@ needs to know lightweight vs full. Flow:
    if it is \`changes_requested\`, first \`sigmarun resume <RUN> <TASK>
    --agent=<name> --json\`, read the request_changes messages, rework, resubmit.
 3. Run mode \`lightweight: false\`? → switch to the team-run-dispatch skill
-   flow (worktree + evidence + submit; read
-   \`.codex/skills/team-run-dispatch/SKILL.md\`). Below is lightweight only.
+   flow (worktree + evidence + submit; its worktree DEPENDENCIES note applies
+   too — a fresh worktree has no \`node_modules\`; read
+   \`.agents/skills/team-run-dispatch/SKILL.md\`). Below is lightweight only.
 4. PAUSE FOR THE HUMAN unless AUTOPILOT: preview with \`sigmarun claim-next
    <RUN> --agent=<name> --dry-run --json\` (\`would_claim\`), say which piece
    you'd take, offer [take it] / [a specific TASK-ID] / [something else]; then
@@ -970,17 +983,17 @@ export const TEMPLATES: Record<string, Record<string, string>> = {
     '.claude/commands/team-submit.md': TEAM_SUBMIT,
   },
   codex: {
-    '.codex/skills/team-run-dispatch/SKILL.md': CODEX_DISPATCH_SKILL,
-    '.codex/skills/team-run-plan/SKILL.md': CODEX_PLAN_SKILL,
-    '.codex/skills/team-run-do/SKILL.md': CODEX_DO_SKILL,
-    '.codex/skills/team-run-review/SKILL.md': CODEX_REVIEW_SKILL,
-    '.codex/skills/team-run-status/SKILL.md': CODEX_STATUS_SKILL,
-    '.codex/skills/team-run-verify/SKILL.md': CODEX_VERIFY_SKILL,
-    '.codex/skills/team-run-publish/SKILL.md': CODEX_PUBLISH_SKILL,
-    '.codex/skills/team-run-submit/SKILL.md': CODEX_SUBMIT_SKILL,
-    '.codex/skills/team-run-integrate/SKILL.md': CODEX_INTEGRATE_SKILL,
-    '.codex/skills/team-run-runs/SKILL.md': CODEX_RUNS_SKILL,
-    '.codex/skills/team-run-tasks/SKILL.md': CODEX_TASKS_SKILL,
-    '.codex/skills/team-run-evidence/SKILL.md': CODEX_EVIDENCE_SKILL,
+    '.agents/skills/team-run-dispatch/SKILL.md': CODEX_DISPATCH_SKILL,
+    '.agents/skills/team-run-plan/SKILL.md': CODEX_PLAN_SKILL,
+    '.agents/skills/team-run-do/SKILL.md': CODEX_DO_SKILL,
+    '.agents/skills/team-run-review/SKILL.md': CODEX_REVIEW_SKILL,
+    '.agents/skills/team-run-status/SKILL.md': CODEX_STATUS_SKILL,
+    '.agents/skills/team-run-verify/SKILL.md': CODEX_VERIFY_SKILL,
+    '.agents/skills/team-run-publish/SKILL.md': CODEX_PUBLISH_SKILL,
+    '.agents/skills/team-run-submit/SKILL.md': CODEX_SUBMIT_SKILL,
+    '.agents/skills/team-run-integrate/SKILL.md': CODEX_INTEGRATE_SKILL,
+    '.agents/skills/team-run-runs/SKILL.md': CODEX_RUNS_SKILL,
+    '.agents/skills/team-run-tasks/SKILL.md': CODEX_TASKS_SKILL,
+    '.agents/skills/team-run-evidence/SKILL.md': CODEX_EVIDENCE_SKILL,
   },
 };

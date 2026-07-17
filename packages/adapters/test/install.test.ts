@@ -42,13 +42,34 @@ describe('adapter install (docs/19; docs/22 §installation; D12 sigmarun naming)
     expect((updated.data as { written: string[] }).written.length).toBeGreaterThan(0);
   });
 
-  it('codex: writes the dispatch skill and the AGENTS section', () => {
+  it('codex: writes skills under the OFFICIAL .agents/skills tree, never .codex/skills (P0-3)', () => {
+    // OpenAI Codex only scans .agents/skills (repo), ~/.agents/skills (user), /etc/codex/skills —
+    // NOT .codex/skills (developers.openai.com/codex/skills). Install the single official source only.
     const env = installAdapters({ cwd: repo, tool: 'codex' });
     expect(env.ok).toBe(true);
-    const skill = readFileSync(join(repo, '.codex', 'skills', 'team-run-dispatch', 'SKILL.md'), 'utf8');
+    const skill = readFileSync(join(repo, '.agents', 'skills', 'team-run-dispatch', 'SKILL.md'), 'utf8');
     expect(skill).toContain('name: team-run-dispatch');
     expect(skill).toContain('sigmarun claim-next');
     expect(existsSync(join(repo, 'AGENTS.md'))).toBe(true);
+    // No double-install: the wrong .codex/skills tree must not be created at all.
+    expect(existsSync(join(repo, '.codex', 'skills'))).toBe(false);
+    // Cross-references inside the pack must point at the official tree too.
+    const doSkill = readFileSync(join(repo, '.agents', 'skills', 'team-run-do', 'SKILL.md'), 'utf8');
+    expect(doSkill).toContain('.agents/skills/team-run-dispatch/SKILL.md');
+    expect(doSkill).not.toContain('.codex/skills');
+  });
+
+  it('dispatch flow warns that isolated worktrees lack node_modules and must bootstrap deps (P1-5)', () => {
+    // A `git worktree add` copies only tracked files; node_modules is gitignored, so dependency-backed
+    // checks (vitest/tsc) ERR_MODULE_NOT_FOUND in a fresh worktree unless deps are installed/symlinked.
+    installAdapters({ cwd: repo, tool: 'all' });
+    const claudeDispatch = readFileSync(join(repo, '.claude', 'commands', 'team-dispatch.md'), 'utf8');
+    const codexDispatch = readFileSync(join(repo, '.agents', 'skills', 'team-run-dispatch', 'SKILL.md'), 'utf8');
+    for (const dispatch of [claudeDispatch, codexDispatch]) {
+      expect(dispatch).toContain('node_modules');
+      expect(dispatch).toMatch(/ERR_MODULE_NOT_FOUND/);
+      expect(dispatch).toMatch(/npm install|pnpm install/);
+    }
   });
 
   it('unknown tool is a usage error', () => {
