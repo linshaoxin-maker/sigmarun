@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`/team-do` 多-run 消歧(human-loop 补丁,adapter 0.5.2)**:不带 RUN-ID 时,指令原本静默取"最近的 active 轻量 run"——但用户常在**另一个 session/窗口**里打 `/team-do`,或开了**多个 `/team-plan`**,"最近"很可能不是他要的那个。改为:活跃轻量 run 恰好一个才自动用;**多于一个 → PAUSE FOR THE HUMAN**,列出(RUN-ID/标题/状态)让用户选,绝不猜;一个都没有则明说。两侧(Claude `/team-do` + Codex `team-run-do`)同步。选 run 本身是"歧义交给人",此前被漏。
+
 - **故障 fork 补两处「交给人」缺口**(运行时数据流梳理挖出的 corner case;337/337=+4):①**锁误夺**:stale 判定原本纯看锁目录 `mtime`——而 mtime 建锁后从不刷新,一个合法长事务(大文件脱敏、慢 FS,>30s)和崩溃无法区分、会被等待者夺锁。改为**探持锁进程存活**(`process.kill(pid,0)`):只有进程真没了(或 meta 不可读)才夺;加硬上限 `20×staleMs` 兜 pid 复用;`lock_timeout` guidance 从误导的"~30s after last activity"改为按真实行为(进程没了才夺、长事务等它)。②**账本损坏交给人**:`events.jsonl` 的 torn 行或 seq 碰撞是 gateway 自愈不了的(`repair` 只能 roll next_seq),原来只有人主动 `audit` 才看得到;现在 status/watch 检测到就冒 `ledger_broken` needs_user(带 audit 命令、排最前),把解不了的主动交人。锁测试补活/死/无 meta/硬上限四场景,status 补 torn-line 检测。
 
 - **adapter install 一次装多工具**:`sigmarun adapter install --tool=all`(或 `--tool=claude-code,codex`)一条命令把 Claude Code 与 Codex 两套指令都装上——本地两个工具都有的用户不必跑两次。抽出 `installOne` 循环、合并 written/updated/skipped、AGENTS.md 只写一次(工具无关);未知工具名仍 `usage_error` 并列出支持项;`data.tools` 给展开后的列表(保留 `data.tool` 原样兼容)。

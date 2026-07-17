@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.5.1';
+export const TEMPLATE_VERSION = '0.5.2';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -229,11 +229,14 @@ the task's \`paths.allow\`.
 ${COLLAB_BLOCK}
 
 Flow:
-1. Find the run: if \`$ARGUMENTS\` names a RUN-ID, use it. Otherwise
-   \`sigmarun run list --json\` and take the most recent run with status
-   \`active\` AND \`lightweight: true\` — that's the one \`/team-plan\` just
-   created. A full-pipeline run is NOT yours to claim from here; if only
-   full runs exist, say so and point at /team-dispatch.
+1. Find the run:
+   - \`$ARGUMENTS\` names a RUN-ID → use it.
+   - else \`sigmarun run list --json\`; among runs that are \`active\` AND
+     \`lightweight: true\`: EXACTLY ONE → use it; MORE THAN ONE → PAUSE FOR THE
+     HUMAN — several plans are open and "the most recent" would be a silent
+     guess (they may be from other sessions/windows); list them (RUN-ID, title,
+     status) and ask which to work on, do NOT guess. NONE → say so, and if only
+     full-pipeline runs exist, point at /team-dispatch.
 2. PAUSE FOR THE HUMAN (task pick) — unless they set AUTOPILOT. Preview the
    next piece without claiming: \`sigmarun claim-next <RUN> --agent=<name>
    --dry-run --json\` (returns \`would_claim\`); tell them which piece you'd
@@ -576,8 +579,10 @@ ${RULES_BLOCK}
 ${COLLAB_BLOCK}
 
 Grab one piece, do it, mark it done. Flow:
-1. Find the run (\`sigmarun run list --json\`, newest \`active\` one) unless the
-   user named a RUN-ID.
+1. Find the run: RUN-ID from the user → use it; else \`sigmarun run list --json\`
+   and among \`active\` + \`lightweight\` runs: exactly one → use it; MORE THAN
+   ONE → PAUSE FOR THE HUMAN, list them (id/title/status) and ask which (do NOT
+   guess "newest" — they may be from other sessions); none → say so.
 2. PAUSE FOR THE HUMAN unless AUTOPILOT: preview with \`sigmarun claim-next
    <RUN> --agent=<name> --dry-run --json\` (\`would_claim\`), say which piece
    you'd take, offer [take it] / [a specific TASK-ID] / [something else]; then
