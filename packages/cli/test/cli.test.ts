@@ -59,6 +59,18 @@ describe('cli front-end (contract: docs/17 §1/§2.2 — parse, delegate, map ex
     expect(JSON.parse(r.stdout).code).toBe('usage_error');
   });
 
+  it('a HUMAN-face validation failure prints the error list, not just "fix the listed fields" (golden-journey stranger breakpoint #1)', () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const f = join(repo, 'bad.json');
+    writeFileSync(f, JSON.stringify({ tasks: [{ objective: 'x' }] })); // missing schema_version/source/run/plan/task fields
+    const r = runCli(['run', 'import', f], { cwd: repo }); // human mode — no --json
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stdout).toMatch(/failed validation with \d+ error/); // the summary line…
+    expect(r.stdout).toMatch(/^\s+- .+/m);                        // …and the actual list is printed
+    expect(r.stdout).toContain('Required');                      // a concrete field-level message a user can act on
+  });
+
   it('register -> claim-next -> release roundtrip via argv (FEAT-004)', async () => {
     const repo = mkTmpGitRepo(); dirs.push(repo);
     runCli(['init', '--json'], { cwd: repo });

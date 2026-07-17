@@ -156,6 +156,20 @@ function renderTimeline(events: TimelineEvent[]): string[] {
  */
 function renderSections(data: Record<string, unknown> | undefined, lines: string[]): void {
   if (!data) return;
+  // Validation errors: the message says "fix the listed items/fields" and next_actions repeat
+  // it — so the human face MUST print that list, not bury it under --json where a raw-CLI user
+  // never sees it (golden-journey stranger breakpoint #1). Two producer shapes carry `errors`:
+  // plain strings (submit/verify/task drafts) and {path,message} issues (run import payload).
+  const errors = data.errors as unknown[] | undefined;
+  if (Array.isArray(errors)) {
+    for (const e of errors) {
+      if (typeof e === 'string') lines.push(`  - ${e}`);
+      else if (e && typeof e === 'object' && 'message' in e) {
+        const path = (e as { path?: string }).path;
+        lines.push(`  - ${path ? `${path}: ` : ''}${(e as { message: string }).message}`);
+      }
+    }
+  }
   // The external state machine (deriveUserState): one user-facing state + next step per requirement.
   const us = data.user_state as { state: string; detail: string; command: string | null } | undefined;
   if (us?.state) {
