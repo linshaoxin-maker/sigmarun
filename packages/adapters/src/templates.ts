@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.6.2';
+export const TEMPLATE_VERSION = '0.6.3';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -469,10 +469,12 @@ Required flow:
      /team-plan <goal>"; ONE → use it; SEVERAL → print a one-line row each
      (RUN-ID · title · mode · status · progress) and detail the single
      ACTIVE one, or ask which to expand if several are active.
-2. \`sigmarun status <RUN-ID> --json\`. Report in the user's language:
-   progress_pct, per-task who-is-doing-what (\`sigmarun agent list\` joins
-   it), every risk (stale leases, unresolved blockers), open questions, and
-   the **Needs user** block — each item with its ready-to-copy command.
+2. \`sigmarun status <RUN-ID> --json\`. LEAD with \`data.user_state\` — one
+   plain sentence: "这个需求现在处于 <state>(<detail>),下一步:<command 或
+   对应的 /team-* 动作>"。Then report: progress_pct, per-task
+   who-is-doing-what (\`sigmarun agent list\` joins it), every risk (stale
+   leases, unresolved blockers), open questions, and the **Needs user**
+   block — each item with its ready-to-copy command.
    Phrase the gate items plainly: awaiting_review / awaiting_verify mean
    "open ANOTHER window and run /team-review (or /team-verify) — the window
    that wrote the code cannot review its own work (INV-008)".
@@ -561,10 +563,16 @@ ${versionHeader}
 ${RULES_BLOCK}
 
 This is the REQUIREMENT list: each run IS one requirement (one /team-plan
-goal), and the RUN-ID is its number. Run \`sigmarun run list --json\` and
-present a table in the user's language: RUN-ID · goal/title · lightweight or
-full · status · progress. End with the pointer: "work on one:
-/team-do <RUN-ID>" (and /team-status <RUN-ID> to inspect). Mutates nothing.
+goal), and the RUN-ID is its number. Run \`sigmarun run list --json\`; each
+row carries \`user_state\` — the requirement's user-facing state with its next
+step (the external state machine). Present a table: RUN-ID · goal ·
+user_state · progress, and PROACTIVELY phrase each row's next step:
+- ready_to_work → "开工: /team-do <RUN-ID>"
+- in_progress → "看进度: /team-status <RUN-ID>;再开一个窗口并行也行"
+- needs_you / awaiting_gates → run user_state.command (review/verify need a
+  DIFFERENT window); ready_to_integrate / ready_to_report → same
+- paused → resume it; closed → "交还 git(commit/PR);下一个需求 /team-plan"
+Mutates nothing.
 `;
 
 const TEAM_TASKS = `---
@@ -797,11 +805,12 @@ ${RULES_BLOCK}
 
 No RUN-ID needed: resolve via \`sigmarun run list --json\` (none → "start with
 team-plan"; one → use it; several → one-line row each, detail the active one).
-Then \`sigmarun status <RUN-ID> --json\` and report progress, who-is-doing-what,
-risks, open questions, and the Needs-user list with copyable commands.
-awaiting_review / awaiting_verify mean: open ANOTHER window and run team-review
-/ team-verify — the window that wrote the code cannot review it (INV-008).
-Read-only.
+Then \`sigmarun status <RUN-ID> --json\`; LEAD with \`data.user_state\` (the
+requirement's user-facing state + next step) in one plain sentence, then
+report progress, who-is-doing-what, risks, open questions, and the Needs-user
+list with copyable commands. awaiting_review / awaiting_verify mean: open
+ANOTHER window and run team-review / team-verify — the window that wrote the
+code cannot review it (INV-008). Read-only.
 `;
 
 const CODEX_PUBLISH_SKILL = `---
@@ -876,9 +885,12 @@ ${versionHeader}
 ${RULES_BLOCK}
 
 This is the REQUIREMENT list — each run is one requirement (one team-plan
-goal), RUN-ID is its number. Run \`sigmarun run list --json\` and summarize:
-RUN-ID, goal/title, lightweight or full, status, progress; end with "work on
-one: team-do <RUN-ID>". Read-only.
+goal), RUN-ID is its number. Run \`sigmarun run list --json\`; each row's
+\`user_state\` is the requirement's user-facing state + next step. Summarize
+RUN-ID · goal · user_state · progress and phrase each next step proactively
+(ready_to_work → "team-do <RUN-ID>"; in_progress → "team-status";
+needs_you/gates → run user_state.command, gates need ANOTHER window;
+closed → hand back to git, next team-plan). Read-only.
 `;
 
 const CODEX_TASKS_SKILL = `---

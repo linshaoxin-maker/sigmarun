@@ -140,6 +140,20 @@ function renderTimeline(events: TimelineEvent[]): string[] {
  */
 function renderSections(data: Record<string, unknown> | undefined, lines: string[]): void {
   if (!data) return;
+  // The external state machine (deriveUserState): one user-facing state + next step per requirement.
+  const us = data.user_state as { state: string; detail: string; command: string | null } | undefined;
+  if (us?.state) {
+    lines.push(`  state: ${us.state} — ${us.detail}`);
+    if (us.command) lines.push(`    -> ${us.command}`);
+  }
+  const runRows = data.runs as Array<{ run_id: string; title?: string; status: string; lightweight?: boolean; progress_pct?: number | null; user_state?: { state: string; detail: string; command: string | null } }> | undefined;
+  if (Array.isArray(runRows) && runRows.length > 0 && runRows[0]?.run_id) {
+    for (const r of runRows) {
+      const pct = typeof r.progress_pct === 'number' ? `${String(r.progress_pct).padStart(3)}%` : '  —';
+      lines.push(`  ${r.run_id}  ${pct}  ${(r.user_state?.state ?? r.status).padEnd(18)} ${r.title ?? ''}`.trimEnd());
+      if (r.user_state?.command) lines.push(`      -> ${r.user_state.command}`);
+    }
+  }
   const checks = data.checks as DoctorCheck[] | undefined;
   if (Array.isArray(checks)) for (const c of checks) lines.push(`  [${c.status}] ${c.name} — ${c.detail}`);
   const events = data.events as TimelineEvent[] | undefined;

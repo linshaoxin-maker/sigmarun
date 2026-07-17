@@ -317,6 +317,56 @@ export function computeProgress(runDir: string): Record<string, unknown> {
   };
 }
 
+/**
+ * The EXTERNAL state machine — the requirement (run) as the USER sees it. The internal machine
+ * (core/state-machine.ts) tracks fine-grained task/claim states for correctness; this fold maps
+ * that plus the needs_user channel onto ONE user-facing state with ONE suggested next step, so
+ * every surface (run list, status, /team-runs) can proactively guide instead of dumping raw
+ * states. This is the single place the internal→external map lives.
+ * Priority: closed > paused > awaiting_publish > needs_you/gates/finish (needs_user order) >
+ * in_progress > ready_to_work.
+ */
+export function deriveUserState(
+  runStatus: string,
+  runId: string,
+  snapshot: {
+    counts?: Record<string, number>;
+    needs_user?: Array<{ kind: string; detail: string; command: string }>;
+    agents?: { with_claims?: number };
+  } | null,
+): { state: string; detail: string; command: string | null } {
+  if (runStatus === 'reported' || runStatus === 'archived') {
+    return { state: 'closed', detail: 'requirement closed — hand the changes back to git (commit / open the PR), then plan the next one', command: null };
+  }
+  if (runStatus === 'cancelled') {
+    return { state: 'closed', detail: 'requirement cancelled — plan the next one', command: null };
+  }
+  if (runStatus === 'paused') {
+    return { state: 'paused', detail: 'on hold — nothing new can be claimed until resumed', command: `sigmarun run resume ${runId}` };
+  }
+  const counts = snapshot?.counts ?? {};
+  if (runStatus === 'planned' || (counts.draft ?? 0) > 0) {
+    return { state: 'awaiting_publish', detail: `${counts.draft ?? 0} draft task(s) not claimable yet`, command: `sigmarun task publish ${runId}` };
+  }
+  const needs = snapshot?.needs_user ?? [];
+  const first = needs[0];
+  if (first) {
+    const state =
+      first.kind === 'awaiting_review' || first.kind === 'awaiting_verify' ? 'awaiting_gates'
+      : first.kind === 'ready_to_integrate' || first.kind === 'ready_to_report' ? first.kind
+      : 'needs_you';
+    return { state, detail: first.detail, command: first.command };
+  }
+  const working = snapshot?.agents?.with_claims ?? 0;
+  if (working > 0) {
+    return { state: 'in_progress', detail: `${working} window(s) working; ${counts.ready ?? 0} piece(s) still claimable`, command: null };
+  }
+  if ((counts.ready ?? 0) > 0) {
+    return { state: 'ready_to_work', detail: `${counts.ready} piece(s) claimable — grab one`, command: null };
+  }
+  return { state: 'in_progress', detail: 'work is moving through the pipeline', command: null };
+}
+
 /** Persist the derived snapshot (no rev — progress.json is delete-and-recompute, docs/02 §Derived). */
 export function writeProgress(runDir: string, snapshot: Record<string, unknown>): void {
   const target = join(runDir, 'progress.json');
@@ -334,9 +384,14 @@ export function statusRun(opts: StatusOptions): Envelope {
     const snapshot = computeProgress(ctx.runDir);
     writeProgress(ctx.runDir, snapshot);
     const needs = snapshot.needs_user as unknown[];
+    const userState = deriveUserState(
+      snapshot.run_status as string,
+      opts.runId,
+      snapshot as Parameters<typeof deriveUserState>[2],
+    );
     return okEnvelope({
       message: `${opts.runId} ${snapshot.run_status as string}: ${snapshot.progress_pct as number}% by weight; ${(snapshot.risks as unknown[]).length} risk(s), ${needs.length} item(s) need you.`,
-      data: snapshot,
+      data: { ...snapshot, user_state: userState },
       nextActions: needs.length > 0 ? [(needs[0] as { command: string }).command] : [],
       startedAt,
     });
@@ -361,10 +416,16 @@ export function runList(opts: ResolveOptions): Envelope {
         const run = readJsonState(runFile).doc as Record<string, unknown>;
         // lightweight + progress let front ends (/team-do run selection) pick the right run —
         // 'mode' stays the payload work mode (feature/bugfix/...), not the run mode kind.
-        const pct = (() => {
-          try { return computeProgress(join(runsDir, entry)).progress_pct as number; } catch { return null; }
+        const snap = (() => {
+          try { return computeProgress(join(runsDir, entry)); } catch { return null; }
         })();
-        runs.push({ run_id: run.run_id, status: run.status, title: run.title, mode: run.mode, lightweight: run.lightweight === true, progress_pct: pct });
+        runs.push({
+          run_id: run.run_id, status: run.status, title: run.title, mode: run.mode,
+          lightweight: run.lightweight === true,
+          progress_pct: (snap?.progress_pct as number | undefined) ?? null,
+          // the requirement's user-facing state — /team-runs leads each row with it
+          user_state: deriveUserState(run.status as string, run.run_id as string, snap as Parameters<typeof deriveUserState>[2]),
+        });
       }
     }
     return okEnvelope({

@@ -30,6 +30,39 @@ function expireLease(minutes: number): void {
 }
 
 describe('status (Slice 7 acceptance; M32 Needs-user; INV-006 derived progress)', () => {
+  it('external state machine: user_state folds internal state into one guided step per surface', async () => {
+    const { runList } = await import('@sigmarun/watch');
+    const { runPause } = await import('@sigmarun/core');
+    const state = () => {
+      const rows = (runList({ cwd: repo }).data as { runs: Array<{ user_state: { state: string; command: string | null } }> }).runs;
+      return rows[0]!.user_state;
+    };
+    // fresh fixture: task b carries requires_approval → the user must grant paths first
+    const fresh = state();
+    expect(fresh.state).toBe('needs_you');
+    expect(fresh.command).toContain('approve-paths');
+    // grant the approval → nothing blocks, pieces claimable
+    const { approvePaths } = await import('@sigmarun/dispatch');
+    approvePaths({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0002', paths: ['src/users/**'] });
+    expect(state().state).toBe('ready_to_work');
+    // one window claims → in_progress
+    claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent });
+    expect(state().state).toBe('in_progress');
+    // an unanswered blocker → needs_you, command = the answer command
+    postMessage({ cwd: repo, runId: 'RUN-0001', fromAgentId: agent, type: 'blocker', body: 'need a decision', taskId: 'TASK-0001' });
+    const blocked = state();
+    expect(blocked.state).toBe('needs_you');
+    expect(blocked.command).toContain('msg post');
+    // paused wins over everything below terminal
+    runPause({ cwd: repo, runId: 'RUN-0001' });
+    const paused = state();
+    expect(paused.state).toBe('paused');
+    expect(paused.command).toContain('run resume');
+    // status carries the same fold at top level
+    const st = statusRun({ cwd: repo, runId: 'RUN-0001' });
+    expect((st.data as { user_state: { state: string } }).user_state.state).toBe('paused');
+  });
+
   it('surfaces a damaged ledger (torn line) as a ledger_broken needs_user (corner #3/#4)', () => {
     appendFileSync(join(runDir(), 'events.jsonl'), '{ this line is torn\n');
     const status = statusRun({ cwd: repo, runId: 'RUN-0001' });
