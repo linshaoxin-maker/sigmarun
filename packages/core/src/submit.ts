@@ -191,7 +191,7 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
     }
     for (const c of commands) {
       if (c.output_file && !existsSync(c.output_file)) {
-        errors.push(`command ${c.cmd_id}: declared output file does not exist: ${c.output_file} (resolved from the invocation cwd; absolute paths are accepted)`);
+        errors.push(`command ${c.cmd_id}: declared commands[].output_file does not exist: ${c.output_file} (resolved from the invocation cwd; absolute paths are accepted)`);
       }
     }
     for (const r of checkResults) {
@@ -200,8 +200,19 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
       if (r.status !== 'skipped') {
         const cmd = r.cmd_ref ? byCmdId.get(r.cmd_ref) : undefined;
         if (!cmd) errors.push(`check "${r.check}": cmd_ref ${r.cmd_ref ?? '(missing)'} does not match any command`);
-        else if (!cmd.output_file || !existsSync(cmd.output_file)) {
-          errors.push(`check "${r.check}": raw output file missing for ${cmd.cmd_id} (D8; paths resolve from the invocation cwd — absolute paths are accepted)`);
+        // Field-name clarity (P0-4): docs/14 §2.1 showed the *stored* names (output_ref); the DRAFT
+        // an agent submits uses commands[].output_file. Naming the field — and calling out a copied
+        // output_ref — turns an evidence_invalid into a one-read fix instead of an infinite path retry.
+        else if (!cmd.output_file) {
+          const usedStoredName = typeof (cmd as unknown as Record<string, unknown>).output_ref === 'string';
+          errors.push(
+            `check "${r.check}": command ${cmd.cmd_id} is missing commands[].output_file — a required check must capture its raw output` +
+              (usedStoredName
+                ? `. You set output_ref; rename it to output_file in the draft (output_ref is the stored/output name the gateway writes, not a draft input; docs/14 §2.1, D8).`
+                : ` (the draft field is commands[].output_file, a path to the captured raw output; docs/14 §2.1, D8).`),
+          );
+        } else if (!existsSync(cmd.output_file)) {
+          errors.push(`check "${r.check}": commands[].output_file for ${cmd.cmd_id} does not exist: ${cmd.output_file} (D8; paths resolve from the invocation cwd — absolute paths are accepted)`);
         }
       }
     }
@@ -223,7 +234,17 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
     if (!handoffContent && draft.handoff_file && existsSync(draft.handoff_file)) {
       handoffContent = readFileSync(draft.handoff_file, 'utf8');
     }
-    if (!handoffContent.trim()) errors.push('handoff content is required (the gateway writes context/tasks/<TASK>.md for you)');
+    // Field-name clarity (P0-4): docs/14 §2.1 showed the *stored* name (handoff_ref); the DRAFT uses
+    // `handoff` (inline) or `handoff_file` (path). Call out a copied handoff_ref so it is a one-read fix.
+    if (!handoffContent.trim()) {
+      const usedStoredName = typeof (draft as unknown as Record<string, unknown>).handoff_ref === 'string';
+      errors.push(
+        `handoff content is required: put it inline in the draft field \`handoff\`, or point \`handoff_file\` at a file` +
+          (usedStoredName
+            ? ` — you set \`handoff_ref\`, the stored/output name the gateway writes (it emits context/tasks/${opts.taskId}.md from your \`handoff\`), not a draft input.`
+            : ` (the gateway writes context/tasks/${opts.taskId}.md from it).`),
+      );
+    }
 
     if (errors.length > 0) return emitInvalid();
 
