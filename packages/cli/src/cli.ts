@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
-import { setVerbose } from '@sigmarun/storage';
+import { setVerbose, resolveTeamRoot } from '@sigmarun/storage';
 import { initProject, doctorProject, importRun, publishTasks, runShow, readEvents, migrateState, backupList, restoreBackup, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, runReopen, taskAdd, taskCancel, taskDone, failEnvelope, type Envelope, type DoctorCheck, GATEWAY_VERSION } from '@sigmarun/core';
 import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, blockTask, verifySubmit, listWorktrees, pruneWorktrees } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, showGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
-import { installAdapters } from '@sigmarun/adapters';
+import { installAdapters, installedTemplateVersion, TEMPLATE_VERSION } from '@sigmarun/adapters';
 import { statusRun, runList, taskShow, taskList, evidenceShow, agentList, watchOnce } from '@sigmarun/watch';
 import { auditRun, repairRun } from '@sigmarun/audit';
 
@@ -257,12 +257,35 @@ const HELP_TEXT = [
   'Every command accepts --json (single-envelope machine face) and --verbose (step trace to stderr). Exit codes: docs/17 §2.2.',
 ].join('\n');
 
+/**
+ * `--version` output. First line stays a bare gateway semver so scripts can still `--version | head -1`.
+ * The second line surfaces the adapter template generation this gateway ships (TEMPLATE_VERSION moves
+ * on its own cadence from the gateway semver and was invisible to every CLI face before). Inside a repo
+ * with adapters installed it also names the installed generation and whether it drifts from the bundled
+ * one — so "which generation am I on / did my upgrade take effect" is answerable without diffing files.
+ */
+function versionReport(opts: { cwd?: string; env?: Record<string, string | undefined> }, teamRootFlag?: string): string {
+  let installedNote = '';
+  try {
+    const { repoRoot } = resolveTeamRoot({ cwd: opts.cwd, env: opts.env, teamRootFlag });
+    const installed = installedTemplateVersion(repoRoot);
+    if (installed) {
+      installedNote = installed === TEMPLATE_VERSION
+        ? `; installed here: ${installed} (up to date)`
+        : `; installed here: ${installed} (drift — run \`sigmarun adapter install\` to move to ${TEMPLATE_VERSION})`;
+    }
+  } catch {
+    // Not inside a git repo (or the repo is unreadable): report only the bundled generation.
+  }
+  return `${GATEWAY_VERSION}\nadapter templates: ${TEMPLATE_VERSION} (bundled)${installedNote}`;
+}
+
 export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string, string | undefined>; onTick?: (line: string) => void } = {}): CliResult {
   if (argv.includes('--help') || argv.includes('-h') || argv[0] === 'help') {
     return { exitCode: 0, stdout: HELP_TEXT };
   }
   if (argv.includes('--version') || argv.includes('-v') || argv[0] === 'version') {
-    return { exitCode: 0, stdout: GATEWAY_VERSION };
+    return { exitCode: 0, stdout: versionReport(opts, flag(argv, 'team-root')) };
   }
   setVerbose(argv.includes('--verbose'));
   const json = argv.includes('--json');
