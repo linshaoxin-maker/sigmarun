@@ -47,6 +47,22 @@ const EXIT_BY_CODE: Record<string, number> = {
   unsupported_schema_version: 8,
 };
 
+/**
+ * P1-7 / P1-12: diagnostic commands (doctor, audit run) run to completion — their envelope stays a
+ * truthful success (audit findings are data per docs/18 §7; doctor keeps code:OK) — yet they exist
+ * to SURFACE trouble. When they find it, exit 0 lets `sigmarun audit run && deploy` or
+ * `sigmarun doctor && ...` treat a torn ledger / dead lock as green. This dedicated exit sits
+ * outside the 1..8 GatewayError rows so CI can distinguish "diagnostic found problems" from
+ * "diagnostic could not run"; it is applied at the CLI seam and leaves the --json/human face intact.
+ */
+const HEALTH_GATE_EXIT = 9;
+
+/** True when an audit envelope carries at least one error-severity finding. */
+function hasErrorFindings(env: Envelope): boolean {
+  const findings = (env.data as { findings?: Array<{ severity?: string }> } | undefined)?.findings;
+  return Array.isArray(findings) && findings.some((f) => f.severity === 'error');
+}
+
 /** Read + parse a user-supplied JSON file, tolerating a leading UTF-8 BOM (editors add it). */
 function readJsonFileBom(file: string): unknown {
   let raw = readFileSync(file, 'utf8');
@@ -240,6 +256,13 @@ function render(env: Envelope, json: boolean): string {
  */
 const HELP_TEXT = [
   'sigmarun — repo-local multi-agent collaboration gateway (.team/)',
+  '',
+  'Start here (first time in a repo):',
+  '  1. sigmarun init                                     — create the .team/ coordination dir',
+  '  2. sigmarun adapter install --tool=claude-code|codex — install the /team-* agent commands',
+  '  3. In Claude Code or Codex, run: /team-plan <goal>   — decompose the goal and drive the run',
+  '  The real workflow lives in those agent slash commands (/team-plan, /team-dispatch, /team-review);',
+  '  the CLI below is the plumbing they call — reach for it directly only to inspect or repair state.',
   '',
   'Setup:      init [--example] | doctor [--fix] | adapter install --tool=claude-code|codex|all',
   'Lightweight: run import <payload.json> --lightweight  (tasks claimable now; no review/verify/integrate) -> claim-next -> done',
@@ -731,5 +754,14 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       nextActions: ['See all commands: sigmarun help'],
     });
   }
-  return { exitCode: EXIT_BY_CODE[env.code] ?? 1, stdout: render(env, json) };
+  let exitCode = EXIT_BY_CODE[env.code] ?? 1;
+  // Health gates: a diagnostic that ran clean (exit 0) but surfaced the very corruption it exists
+  // to catch must not report success to a shell `&&` chain. The envelope is left untouched — audit
+  // keeps ok:true/code:OK with findings as data (docs/18 §7), doctor keeps its checks + warnings;
+  // only the process exit reflects the verdict (P1-7 doctor, P1-12 audit run).
+  if (exitCode === 0) {
+    if (cmd === 'audit' && args[1] === 'run' && hasErrorFindings(env)) exitCode = HEALTH_GATE_EXIT;
+    else if (cmd === 'doctor' && !env.ok) exitCode = HEALTH_GATE_EXIT;
+  }
+  return { exitCode, stdout: render(env, json) };
 }

@@ -69,4 +69,13 @@ describe('sigmarun init (contract: docs/17 §8, docs/16 §1, docs/02 §6)', () =
     expect(env.code).toBe('not_a_git_repo');
     expect(env.next_actions.length).toBeGreaterThan(0);
   });
+
+  // P1-4: the first-experience breadcrumb must not dead-end at `doctor`; it has to point the user
+  // at the adapter install and the real /team-plan agent entry (the CLI is only the plumbing).
+  it('P1-4: a fresh init points onward to adapter install and the /team-plan agent entry', () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    const next = initProject({ cwd: repo }).next_actions.join('\n');
+    expect(next).toContain('adapter install');
+    expect(next).toContain('/team-plan');
+  });
 });
