@@ -449,7 +449,8 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       const op = { pause: runPause, resume: runResume, cancel: runCancel, archive: runArchive, reopen: runReopen }[
         args[1] as 'pause' | 'resume' | 'cancel' | 'archive' | 'reopen'
       ];
-      env = op({ ...base, runId });
+      // cancel alone takes --yes: without it the call is an impact preview, not a cancellation
+      env = args[1] === 'cancel' ? runCancel({ ...base, runId, yes: argv.includes('--yes') }) : op({ ...base, runId });
     }
   } else if (cmd === 'task' && args[1] === 'add') {
     const runId = args[2];

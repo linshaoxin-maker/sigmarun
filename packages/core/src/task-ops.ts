@@ -259,7 +259,14 @@ export function taskDone(opts: TaskDoneOptions): Envelope {
     const task = readJsonState(taskFile);
     const status = (task.doc as { status: string }).status;
     if (!DONE_FROM.has(status)) {
-      return failEnvelope('invalid_transition', `Task ${opts.taskId} is ${status}; done applies to a claimed/in-progress task.`, { startedAt });
+      // A task back at `ready` almost always means the caller's lease expired and was swept —
+      // tell the honest returning agent what happened and how to recover, not just "wrong state".
+      return failEnvelope('invalid_transition', `Task ${opts.taskId} is ${status}; done applies to a claimed/in-progress task.`, {
+        nextActions: status === 'ready'
+          ? [`This task went back to ready — your lease likely expired and was swept. Re-claim it: sigmarun claim-next ${opts.runId} --agent=${opts.agentId}`]
+          : undefined,
+        startedAt,
+      });
     }
 
     // Only the claim holder completes it (the anti-collision guarantee extends to completion).

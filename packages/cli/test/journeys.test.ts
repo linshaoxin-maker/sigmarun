@@ -200,7 +200,11 @@ describe('user journeys — executable, terminal, tangle-free (product-axis reco
     w.cli(['run', 'pause', 'RUN-0001']);
     expect(w.cli(['claim-next', 'RUN-0001', '--agent=win-1']).code).toBe('run_paused');
     w.cli(['run', 'resume', 'RUN-0001']);
-    expect(w.cli(['run', 'cancel', 'RUN-0001']).ok).toBe(true);
+    // cancel is a red line: bare call = impact preview (mutates nothing), --yes executes
+    const preview = w.cli(['run', 'cancel', 'RUN-0001']);
+    expect(preview.ok).toBe(true);
+    expect((preview.data as { preview: boolean }).preview).toBe(true);
+    expect(w.cli(['run', 'cancel', 'RUN-0001', '--yes']).ok).toBe(true);
     return w;
   });
 

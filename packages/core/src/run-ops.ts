@@ -105,23 +105,67 @@ export function runReopen(opts: RunOpOptions): Envelope {
  * and can only be archived (2026-07-10 adjudication). Cascades every live claim and non-terminal task
  * (BDD-007-09); the integration branch, if any, is left for manual handling.
  */
-export function runCancel(opts: RunOpOptions): Envelope {
+export interface RunCancelOptions extends RunOpOptions {
+  /** Cancel is irreversible and kills every window's in-flight work. Without this flag the
+   * command is a read-only IMPACT PREVIEW (who loses what) and mutates nothing. */
+  yes?: boolean;
+}
+
+export function runCancel(opts: RunCancelOptions): Envelope {
   const startedAt = Date.now();
   return withRunTransaction(opts, startedAt, (runDir) => {
-    const flip = flipRun(runDir, ['planned', 'active', 'paused', 'integrating'], 'cancelled');
-    if (!flip.ok) {
-      const hint = flip.was === 'reported' ? ' Reported results are frozen; archive instead.' : '';
-      return failEnvelope('invalid_transition', `Run ${opts.runId} is ${flip.was}; cancel is not allowed.${hint}`, {
-        nextActions: flip.was === 'reported' ? [`Archive it: sigmarun run archive ${opts.runId}`] : [],
+    const runStatus = (readJsonState(join(runDir, 'run.json')).doc as { status: string }).status;
+    if (!['planned', 'active', 'paused', 'integrating'].includes(runStatus)) {
+      const hint = runStatus === 'reported' ? ' Reported results are frozen; archive instead.' : '';
+      return failEnvelope('invalid_transition', `Run ${opts.runId} is ${runStatus}; cancel is not allowed.${hint}`, {
+        nextActions: runStatus === 'reported' ? [`Archive it: sigmarun run archive ${opts.runId}`] : [],
         startedAt,
       });
     }
 
-    const cascaded: string[] = [];
     // detail -> index -> claims -> events (docs/17 §5.3)
     const listFile = join(runDir, 'team-task-list.json');
     const list = readJsonState(listFile);
     const rows = (list.doc as { tasks: Array<{ task_id: string; status: string; owner_agent_id: string | null; claim_id: string | null }> }).tasks;
+
+    // Survey the blast radius BEFORE touching anything: which open tasks die, and which windows
+    // are mid-flight on them (join claims with the agents' window labels for human-readable "who").
+    const doomed = rows.filter((r) => !TASK_TERMINAL.has(r.status));
+    const LIVE = new Set(['active', 'submitted']);
+    const windowLabel = (agentId: string): string | null => {
+      const f = join(runDir, 'agents', `${agentId}.json`);
+      if (!existsSync(f)) return null;
+      try { return ((readJsonState(f).doc as { label?: string }).label) ?? null; } catch { return null; }
+    };
+    const taskClaimsFile = join(runDir, 'claims', 'task-claims.json');
+    const inFlight = existsSync(taskClaimsFile)
+      ? (((readJsonState(taskClaimsFile).doc as { claims?: Array<{ claim_id: string; task_id: string; agent_id: string; status: string }> }).claims) ?? [])
+          .filter((c) => LIVE.has(c.status))
+          .map((c) => ({ claim_id: c.claim_id, task_id: c.task_id, agent_id: c.agent_id, window: windowLabel(c.agent_id) }))
+      : [];
+
+    if (!opts.yes) {
+      const who = inFlight.map((c) => `${c.task_id} (${c.window ?? c.agent_id})`).join(', ');
+      return okEnvelope({
+        message: `Preview — cancelling ${opts.runId} would kill ${doomed.length} open task(s) and ${inFlight.length} in-flight claim(s)${who ? ` [${who}]` : ''}. Nothing has been cancelled.`,
+        data: {
+          preview: true,
+          run_status: runStatus,
+          would_cancel_tasks: doomed.map((r) => ({ task_id: r.task_id, status: r.status, owner_agent_id: r.owner_agent_id })),
+          in_flight: inFlight,
+        },
+        nextActions: [`Confirm: sigmarun run cancel ${opts.runId} --yes`],
+        startedAt,
+      });
+    }
+
+    const flip = flipRun(runDir, ['planned', 'active', 'paused', 'integrating'], 'cancelled');
+    if (!flip.ok) {
+      // raced away between the survey and the flip — same refusal, minus the (now stale) hint
+      return failEnvelope('invalid_transition', `Run ${opts.runId} is ${flip.was}; cancel is not allowed.`, { startedAt });
+    }
+
+    const cascaded: string[] = [];
     const cancelledTasks: Array<{ task_id: string; released: string[] }> = [];
     for (const row of rows) {
       if (TASK_TERMINAL.has(row.status)) continue;
@@ -138,7 +182,6 @@ export function runCancel(opts: RunOpOptions): Envelope {
     }
     writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
 
-    const LIVE = new Set(['active', 'submitted']);
     for (const rel of ['claims/task-claims.json', 'claims/path-claims.json', 'claims/review-claims.json']) {
       const file = join(runDir, rel);
       if (!existsSync(file)) continue;

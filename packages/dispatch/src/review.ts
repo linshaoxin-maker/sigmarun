@@ -523,7 +523,17 @@ export function blockTask(opts: BlockOptions): Envelope {
     const task = readJsonState(taskFile);
     const status = (task.doc as { status: string }).status;
     if (status !== 'working') {
-      return failEnvelope('invalid_transition', `Task ${opts.taskId} is ${status}; block applies to working.`, { startedAt });
+      // Most common real hit: the task is still `claimed` (no worktree yet) — block is then
+      // unreachable and the agent needs a path, not just a state name (boundary scan, B-family).
+      return failEnvelope('invalid_transition', `Task ${opts.taskId} is ${status}; block applies to working.`, {
+        nextActions: status === 'claimed'
+          ? [
+              `Enter working first by registering the worktree: sigmarun worktree register ${runId} ${opts.taskId} --agent=${opts.agentId} --path=<dir> --branch=<branch>`,
+              `Just waiting on an answer? Keep the lease alive instead: sigmarun heartbeat ${runId} ${opts.taskId} --agent=${opts.agentId}`,
+            ]
+          : undefined,
+        startedAt,
+      });
     }
     const msgFile = join(runDir, 'context', 'messages.jsonl');
     const lines = existsSync(msgFile)

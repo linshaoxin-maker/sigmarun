@@ -30,11 +30,27 @@ describe('run lifecycle ops (docs/15 §2.3; events #3/#4/#5/#6)', () => {
     expect(runResume({ cwd: repo, runId: 'RUN-0001' }).code).toBe('invalid_transition'); // active -> resume refused
   });
 
+  it('cancel without --yes is an impact preview and mutates nothing (G-a red line)', async () => {
+    repo = mkClaimRepo([{ key: 'a' }, { key: 'b' }]);
+    const agent = registerDefault(repo);
+    await setupWorking(repo, agent);
+    const preview = runCancel({ cwd: repo, runId: 'RUN-0001' });
+    expect(preview.ok).toBe(true);
+    const p = preview.data as { preview: boolean; would_cancel_tasks: Array<{ task_id: string }>; in_flight: Array<{ task_id: string; agent_id: string }> };
+    expect(p.preview).toBe(true);
+    expect(p.would_cancel_tasks.map((t) => t.task_id)).toEqual(['TASK-0001', 'TASK-0002']);
+    expect(p.in_flight.some((c) => c.task_id === 'TASK-0001' && c.agent_id === agent)).toBe(true);
+    expect(preview.next_actions.some((a) => a.includes('--yes'))).toBe(true);
+    // nothing changed on disk
+    expect(readJson('run.json').status).toBe('active');
+    expect(readJson('tasks/TASK-0001/task.json').status).toBe('working');
+  });
+
   it('cancel cascades live claims and non-terminal tasks (BDD-007-09)', async () => {
     repo = mkClaimRepo([{ key: 'a' }, { key: 'b' }]);
     const agent = registerDefault(repo);
     await setupWorking(repo, agent); // TASK-0001 working with task+path claims
-    const env = runCancel({ cwd: repo, runId: 'RUN-0001' });
+    const env = runCancel({ cwd: repo, runId: 'RUN-0001', yes: true });
     expect(env.ok).toBe(true);
     const data = env.data as { cancelled_tasks: string[]; cascaded_claim_ids: string[] };
     expect(data.cancelled_tasks).toEqual(['TASK-0001', 'TASK-0002']);

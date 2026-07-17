@@ -47,7 +47,10 @@ const DEFAULT_NEXT_ACTIONS: Record<string, string[]> = {
   invalid_transition: ['See where the task/run actually is: sigmarun status <RUN>'],
   mode_mismatch: ['See the run mode: sigmarun run show <RUN> — lightweight runs complete via `done`; full runs via the pipeline.'],
   // claims & gates
-  claim_not_found: ['See live claims and the owner: sigmarun task show <RUN> <TASK>'],
+  claim_not_found: [
+    'If you held this task, your lease likely expired and was swept back — re-claim it: sigmarun claim-next <RUN> --agent=<A> (task show lists previous_attempts).',
+    'See live claims and the owner: sigmarun task show <RUN> <TASK>',
+  ],
   not_claim_owner: ['Only the claim holder may do this; see the owner: sigmarun task show <RUN> <TASK>'],
   task_already_claimed: ['Pick other work: sigmarun claim-next <RUN> --agent=<A>'],
   no_claimable_task: ['See the queue: sigmarun status <RUN>'],

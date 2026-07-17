@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.5.2';
+export const TEMPLATE_VERSION = '0.6.0';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -67,15 +67,40 @@ RED LINES — pause for an explicit yes even on AUTOPILOT, because they are
 irreversible or affect other windows/people:
 - merging work onto the shared integration branch,
 - taking over another window's unfinished work (adopt-and-continue vs restart),
-- widening a task's scope to write files outside its paths.allow.`;
+- widening a task's scope to write files outside its paths.allow,
+- cancelling a whole run (it kills every window's in-flight work).`;
+
+/**
+ * Mid-run change handling — the loop must not dead-end when the user changes
+ * their mind halfway ("add a piece", "drop X", "scrap it"). Injected into the
+ * commands where such asks actually land (plan / do / dispatch).
+ */
+export const MIDRUN_BLOCK = `MID-RUN CHANGES (the user says "add a piece" / "drop X" / "scrap it all"):
+- Add a piece: treat it as a mini plan — draft the task (title, objective, one
+  testable acceptance line, paths.allow), PAUSE for their OK, then
+  \`sigmarun task add <RUN> --file=<task.json> --json\`; on a full run publish
+  it right after (\`sigmarun task publish <RUN> --tasks=<TASK-ID> --json\`) —
+  their OK was the release decision.
+- Drop a piece: show what depends on it first (\`sigmarun task show\` /
+  \`sigmarun graph show\`), get their yes, then
+  \`sigmarun task cancel <RUN> <TASK> --reason="..." --json\`.
+- Scrap the whole run: RED LINE. \`sigmarun run cancel <RUN> --json\` returns an
+  IMPACT PREVIEW (which tasks die, who is mid-flight on them) without
+  cancelling; show it, and only on their explicit yes re-run with \`--yes\`.
+  Then back to /team-plan for the next goal.`;
 
 /** docs/19 §3.2 steps 1–10 (shared by the Claude command and the Codex skill). */
 const DISPATCH_FLOW = (tool: string) => `Required flow:
 1. \`sigmarun run show <RUN-ID> --json\`; stop with next_actions if not ok.
 2. \`sigmarun agent register <RUN-ID> --tool=${tool} --role=<role>
    [--label="<window-name from --as>"] --json\`; label makes
-   registration idempotent (same window = same AGENT-ID, D17).
-   Remember your AGENT-ID for every later call.
+   registration idempotent (same window = same AGENT-ID, D17). No --as?
+   GENERATE a fresh unique label like \`win-<4 random chars>\` — never a
+   guessable default like win-1 (two windows on the same label become ONE
+   agent and jam each other). Remember your AGENT-ID for every later call.
+   RESUME CHECK: \`sigmarun agent list <RUN-ID> --json\` — if your label
+   already holds an active claim, offer to CONTINUE that task (the lease is
+   yours) instead of claiming new work.
 3. PAUSE FOR THE HUMAN (task pick) — unless they passed --task or set
    AUTOPILOT. Preview WITHOUT claiming: \`sigmarun claim-next <RUN-ID>
    --agent=<AGENT-ID> [--role=<role>] --dry-run --json\` returns
@@ -155,7 +180,10 @@ const DISPATCH_FLOW = (tool: string) => `Required flow:
      is ignored by git).
    If \`evidence_invalid\`: fix exactly what \`data\` lists and retry.
 9. Report to the user: TASK-ID, what changed, check results,
-   submit status, and what the run needs next (from status).
+   submit status, and what the run needs next (from status). If the task is
+   now submitted, say plainly: review must come from a DIFFERENT window —
+   this window wrote the code and cannot approve it (INV-008); "open another
+   window and run /team-review <RUN-ID>".
 10. STOP here unless \`--loop\` was given; with \`--loop\`, go to step 3
     until \`no_claimable_task\` or \`run_paused\`.  [D5]`;
 
@@ -206,13 +234,20 @@ Flow:
    and that they can now run \`/team-do\` (here or in another window) to have
    a tool pick one up. You may mention the RUN-ID once; they won't need it.
 
-If the user asks for review / verification / integration (a quality-gated
-pipeline), omit \`--lightweight\` and set up the fuller flow with
-\`/team-dispatch\`, \`/team-review\`, \`/team-verify\`, \`/team-integrate\` instead.
+FULL PIPELINE instead? Default is lightweight. Only when the goal itself
+smells high-stakes (payments, auth, a release) ask ONE plain question at the
+step-4 pause: "want independent review + verification on this? usually not
+needed". If they want it (or said --full / "要评审"): import WITHOUT
+\`--lightweight\`, and — because their step-4 confirmation IS the release
+decision — publish immediately: \`sigmarun task publish <RUN-ID> --json\`.
+Then still point them at \`/team-do\`: it reads the run mode and routes full
+runs through the evidence pipeline by itself.
+
+${MIDRUN_BLOCK}
 `;
 
 const TEAM_DO = `---
-description: Pick up one task from a lightweight run, do it, mark it done
+description: Pick up the next piece of work in a run (any mode), do it, finish it
 allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
 argument-hint: [<RUN-ID>] [--as <name>]
 ---
@@ -220,7 +255,9 @@ ${versionHeader}
 
 # Team Do
 
-Grab the next available piece of work, do it, mark it done.
+THE one "do work" command. It reads the run's mode and adapts: lightweight
+runs finish via \`done\`; full-pipeline runs go through worktree + evidence +
+submit. The user never needs to know which mode they are in.
 
 RULES: every \`sigmarun\` call uses \`--json\`; branch only on \`ok\` /
 \`code\` / \`next_actions\`. Never edit \`.team/\` by hand. Work ONLY inside
@@ -228,36 +265,63 @@ the task's \`paths.allow\`.
 
 ${COLLAB_BLOCK}
 
+${MIDRUN_BLOCK}
+
 Flow:
 1. Find the run:
    - \`$ARGUMENTS\` names a RUN-ID → use it.
-   - else \`sigmarun run list --json\`; among runs that are \`active\` AND
-     \`lightweight: true\`: EXACTLY ONE → use it; MORE THAN ONE → PAUSE FOR THE
-     HUMAN — several plans are open and "the most recent" would be a silent
-     guess (they may be from other sessions/windows); list them (RUN-ID, title,
-     status) and ask which to work on, do NOT guess. NONE → say so, and if only
-     full-pipeline runs exist, point at /team-dispatch.
-2. PAUSE FOR THE HUMAN (task pick) — unless they set AUTOPILOT. Preview the
-   next piece without claiming: \`sigmarun claim-next <RUN> --agent=<name>
-   --dry-run --json\` (returns \`would_claim\`); tell them which piece you'd
-   take and offer [take it] / [take a specific TASK-ID] / [something else].
-   Then claim: \`sigmarun claim-next <RUN> --agent=<name> --json\` (name = the
-   \`--as\` value, or a short window name like \`win-1\`; a fresh name
-   self-registers). If \`code\` is \`no_claimable_task\`, everything is taken or
-   done — tell the user and stop.
-3. Read the brief (\`.team/runs/<RUN>/tasks/<TASK>/task.md\`) and do the actual
-   work in the repo, only inside the task's allowed paths. Run the project's
-   tests if it has them.
-   - STUCK FORK — if you can't get it working after ~2-3 honest attempts,
-     don't burn turns: PAUSE FOR THE HUMAN with a short diagnosis and offer
-     [keep trying] / [you look] / [skip and note the risk].
-   - SCOPE FORK — if you must touch files outside the task's paths.allow, stop
-     and ask the human first (RED LINE); lightweight runs have no
-     approve-paths, so the honest options are [take a different piece] / [ask
-     them to re-plan the split].
-4. Mark it done: \`sigmarun done <RUN> <TASK> --agent=<name> --json\`.
-5. Report what you built and the new progress (\`sigmarun status <RUN>\`).
-   Stop after ONE task unless the user asks for more.
+   - else \`sigmarun run list --json\`; among ACTIVE runs (any mode):
+     EXACTLY ONE → use it; MORE THAN ONE → PAUSE FOR THE HUMAN — list them
+     (RUN-ID · title · lightweight/full · status) and ask which; never guess
+     "newest" (they may belong to other sessions/windows). NONE → "nothing to
+     work on yet — start one: /team-plan <goal>".
+2. Window identity: use the \`--as\` name if given. Otherwise GENERATE a fresh
+   unique name like \`win-<4 random chars>\` — NEVER a guessable default like
+   \`win-1\`: two windows picking the same label become the SAME agent (labels
+   are idempotent identities) and jam each other's claims. Deliberately
+   reusing a name = resuming that window's identity.
+3. RESUME CHECK — \`sigmarun agent list <RUN> --json\`: if your name already
+   holds an active claim, you have work in flight from a previous session.
+   Say so and offer [continue TASK-X] (the lease is still yours — just keep
+   working) before ever claiming something new.
+4. Read the run's mode (\`lightweight: true|false\` on run list/show):
+   - lightweight → continue with steps 5-8 here.
+   - full pipeline → switch to the Required flow of /team-dispatch from its
+     claim step onward (worktree, evidence, submit; its TAKEOVER / SCOPE /
+     STUCK forks all apply). Read \`.claude/commands/team-dispatch.md\` if you
+     need the exact steps. Everything below is the lightweight path.
+5. PAUSE FOR THE HUMAN (task pick) — unless AUTOPILOT. Preview WITHOUT
+   claiming: \`sigmarun claim-next <RUN> --agent=<name> --dry-run --json\`
+   returns \`would_claim\`; say which piece you'd take and why (no deps /
+   unblocks others), offer [take it] / [a specific TASK-ID] / [something
+   else]. Then claim for real: \`sigmarun claim-next <RUN> --agent=<name>
+   --json\` (a fresh name self-registers).
+   If \`no_claimable_task\`: do NOT just stop — run \`sigmarun agent list
+   <RUN> --json\` and tell the user WHO is doing WHAT and what is blocked on
+   what ("TASK-2: win-a3f2 is on it; TASK-3 waits for TASK-2 — watch with
+   /team-status or come back when a piece frees up").
+6. TAKEOVER CHECK — lightweight windows share ONE working tree. Read
+   \`task.previous_attempts\` from \`sigmarun task show <RUN> <TASK> --json\`
+   (nested under \`data.task\`, NOT top-level). If non-empty, a dead window
+   worked this task before and may have left UNCOMMITTED edits sitting in the
+   repo: check \`git status --porcelain\` limited to the task's paths. If
+   dirty → PAUSE FOR THE HUMAN even on AUTOPILOT (RED LINE): summarize the
+   leftover edits and offer [keep them and continue] / [discard them:
+   git checkout -- <paths>] before touching anything.
+7. Read the brief (\`.team/runs/<RUN>/tasks/<TASK>/task.md\`) and do the real
+   work, only inside the task's allowed paths. Run the project's tests if any.
+   - STUCK FORK — 2-3 honest attempts failing → stop burning turns; PAUSE
+     with a short diagnosis and offer [keep trying] / [you look] / [skip and
+     note the risk].
+   - SCOPE FORK — need a file outside paths.allow → RED LINE, ask first;
+     lightweight has no approve-paths, so the honest options are [take a
+     different piece] / [re-plan the split].
+8. Finish: \`sigmarun done <RUN> <TASK> --agent=<name> --json\`, then report
+   what you built + progress. If that was the LAST open task the gateway
+   suggests \`report\` — run it, then HAND BACK in plain words: "all pieces
+   done; the changes are in your working tree — review, commit, open your PR.
+   Next goal: /team-plan <goal>". The loop must end at their repo, not at a
+   sigmarun status. Stop after ONE task unless the user asks for more.
 `;
 
 const TEAM_DISPATCH = `---
@@ -269,7 +333,10 @@ ${versionHeader}
 
 # Team Dispatch
 
-You are a dispatch agent joining an existing Team Run.
+You are a dispatch agent joining an existing Team Run. (/team-do auto-routes
+full-pipeline runs here — this direct entry exists for finer control: --task,
+--role, --loop. Window identity rule applies: --as name, or generate a fresh
+unique \`win-<4 random chars>\`; never a guessable default like win-1.)
 
 ${RULES_BLOCK}
 
@@ -369,10 +436,19 @@ ${versionHeader}
 ${RULES_BLOCK}
 
 Required flow:
-1. \`sigmarun status <RUN-ID> --json\`.
-2. Report in the user's language: progress_pct and counts; every risk
-   (stale leases, unresolved blockers); open questions; and the
-   **Needs user** block — list each item with its ready-to-copy command.
+1. Resolve the run — no RUN-ID needed:
+   - \`$ARGUMENTS\` names one → use it.
+   - else \`sigmarun run list --json\`: NONE → "nothing started yet —
+     /team-plan <goal>"; ONE → use it; SEVERAL → print a one-line row each
+     (RUN-ID · title · mode · status · progress) and detail the single
+     ACTIVE one, or ask which to expand if several are active.
+2. \`sigmarun status <RUN-ID> --json\`. Report in the user's language:
+   progress_pct, per-task who-is-doing-what (\`sigmarun agent list\` joins
+   it), every risk (stale leases, unresolved blockers), open questions, and
+   the **Needs user** block — each item with its ready-to-copy command.
+   Phrase the gate items plainly: awaiting_review / awaiting_verify mean
+   "open ANOTHER window and run /team-review (or /team-verify) — the window
+   that wrote the code cannot review its own work (INV-008)".
 3. Optionally deepen with \`sigmarun audit run <RUN-ID> --json\` (read-only;
    findings carry rule_id + next_action) and
    \`sigmarun task show / evidence show\` for specific tasks.
@@ -560,8 +636,14 @@ AUTOPILOT imports the best split and offers to redo ->
 \`sigmarun run import <file> --lightweight --json\` (lightweight = claimable
 now, no review/verify/integrate) -> tell the user in plain words what the
 pieces are and that they can run /team-do to pick one up. Do NOT claim.
-If the user wants review/verification/integration, omit --lightweight and
-use the /team-dispatch pipeline instead. (tool: codex)
+FULL PIPELINE: default is lightweight; only for high-stakes goals ask one
+plain question at the pause ("want independent review + verification?").
+If yes (or the user said so): import WITHOUT --lightweight and publish right
+away (\`sigmarun task publish <RUN> --json\`) — their confirmation was the
+release decision. Still point them at /team-do (it auto-routes full runs).
+
+${MIDRUN_BLOCK}
+(tool: codex)
 `;
 
 const CODEX_DO_SKILL = `---
@@ -578,24 +660,37 @@ ${RULES_BLOCK}
 
 ${COLLAB_BLOCK}
 
-Grab one piece, do it, mark it done. Flow:
+THE one "do work" skill — it reads the run's mode and adapts; the user never
+needs to know lightweight vs full. Flow:
 1. Find the run: RUN-ID from the user → use it; else \`sigmarun run list --json\`
-   and among \`active\` + \`lightweight\` runs: exactly one → use it; MORE THAN
-   ONE → PAUSE FOR THE HUMAN, list them (id/title/status) and ask which (do NOT
-   guess "newest" — they may be from other sessions); none → say so.
-2. PAUSE FOR THE HUMAN unless AUTOPILOT: preview with \`sigmarun claim-next
+   among ACTIVE runs (any mode): exactly one → use it; MORE THAN ONE → PAUSE
+   FOR THE HUMAN, list them (id · title · mode · status) and ask which (never
+   guess "newest"); none → "start one: team-plan <goal>".
+2. Window identity: --as name, or GENERATE a fresh unique \`win-<4 random
+   chars>\` (never win-1 — same label = same agent, two windows would jam).
+   RESUME CHECK: \`sigmarun agent list <RUN> --json\` — if your label already
+   holds an active claim, offer to CONTINUE that task before claiming new.
+3. Run mode \`lightweight: false\`? → switch to the team-run-dispatch skill
+   flow (worktree + evidence + submit; read
+   \`.codex/skills/team-run-dispatch/SKILL.md\`). Below is lightweight only.
+4. PAUSE FOR THE HUMAN unless AUTOPILOT: preview with \`sigmarun claim-next
    <RUN> --agent=<name> --dry-run --json\` (\`would_claim\`), say which piece
    you'd take, offer [take it] / [a specific TASK-ID] / [something else]; then
    \`sigmarun claim-next <RUN> --agent=<name> --json\` (fresh name
-   self-registers; code=no_claimable_task means everything's taken/done ->
-   report and stop).
-3. Read \`.team/runs/<RUN>/tasks/<TASK>/task.md\` and do the real work ONLY inside
-   the task's paths.allow; run the project's tests if any. If you're stuck
-   after 2-3 tries, or need a file outside paths.allow, PAUSE and ask the human
-   (a scope change is a RED LINE) instead of forcing it.
-4. \`sigmarun done <RUN> <TASK> --agent=<name> --json\`.
-5. Report what you built + progress (\`sigmarun status <RUN>\`). Stop after ONE
-   task unless the user asks for more. (tool: codex)
+   self-registers). no_claimable_task → do NOT just stop: \`sigmarun agent
+   list\` and tell the user who is doing what / what waits on what.
+5. TAKEOVER CHECK: \`task.previous_attempts\` non-empty on \`sigmarun task show\`
+   (under data.task) means a dead window may have left UNCOMMITTED edits in
+   this shared working tree — \`git status --porcelain\` on the task's paths;
+   if dirty, RED LINE: ask [keep the edits] / [discard: git checkout -- …].
+6. Read \`.team/runs/<RUN>/tasks/<TASK>/task.md\`, do the real work ONLY inside
+   paths.allow; run the project's tests if any. Stuck after 2-3 tries, or
+   need a file outside paths.allow → PAUSE and ask (scope change is a RED
+   LINE) instead of forcing it.
+7. \`sigmarun done <RUN> <TASK> --agent=<name> --json\`; report what you built
+   + progress. Last task closed → run \`sigmarun report <RUN>\`, then hand
+   back: "changes are in your working tree — commit / open the PR; next goal:
+   team-plan <goal>". Stop after ONE task unless asked for more. (tool: codex)
 `;
 
 const CODEX_REVIEW_SKILL = `---
@@ -662,8 +757,13 @@ ${versionHeader}
 
 ${RULES_BLOCK}
 
-Run \`sigmarun status <RUN-ID> --json\` and report progress, risks, open
-questions, and the Needs-user list with copyable commands. Read-only.
+No RUN-ID needed: resolve via \`sigmarun run list --json\` (none → "start with
+team-plan"; one → use it; several → one-line row each, detail the active one).
+Then \`sigmarun status <RUN-ID> --json\` and report progress, who-is-doing-what,
+risks, open questions, and the Needs-user list with copyable commands.
+awaiting_review / awaiting_verify mean: open ANOTHER window and run team-review
+/ team-verify — the window that wrote the code cannot review it (INV-008).
+Read-only.
 `;
 
 const CODEX_PUBLISH_SKILL = `---
