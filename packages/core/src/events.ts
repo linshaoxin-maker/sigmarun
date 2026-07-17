@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { currentStateGeneration, vlog } from '@sigmarun/storage';
 
@@ -66,15 +66,59 @@ function collectStateRevsForAppend(runDir: string): RevAfter {
 }
 
 /**
+ * The highest seq durably committed to events.jsonl, or 0 if none — the seq-allocation authority
+ * (P0-5), NOT events.meta.json. Events are appended in ascending seq order, so the last PARSEABLE
+ * line carries the max; a torn tail line is skipped (it never committed, matching readEventsSafe),
+ * so a half-written or lagged meta can never make a live seq be reused. Reads only a growing file
+ * tail (not the whole ledger) so append stays O(1) amortized as the run grows, not O(n) per event.
+ */
+function maxCommittedSeq(runDir: string): number {
+  const file = join(runDir, 'events.jsonl');
+  if (!existsSync(file)) return 0;
+  const size = statSync(file).size;
+  if (size === 0) return 0;
+  const fd = openSync(file, 'r');
+  try {
+    for (let window = 64 * 1024; ; window *= 2) {
+      const from = Math.max(0, size - window);
+      const buf = Buffer.allocUnsafe(size - from);
+      readSync(fd, buf, 0, buf.length, from);
+      let text = buf.toString('utf8');
+      // If the window did not reach byte 0, its first slice is probably cut mid-line — drop it.
+      if (from > 0) {
+        const nl = text.indexOf('\n');
+        text = nl === -1 ? '' : text.slice(nl + 1);
+      }
+      const lines = text.split('\n');
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const raw = lines[i]!;
+        if (raw.trim() === '') continue;
+        try {
+          const s = (JSON.parse(raw) as { seq?: unknown }).seq;
+          if (typeof s === 'number') return s;
+        } catch {
+          // torn / partial line — keep scanning backwards toward the last committed line
+        }
+      }
+      if (from === 0) return 0; // scanned the whole file; nothing parseable (empty or all-torn)
+    }
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
  * Append one audit event; the jsonl append is the transaction commit point.
- * @contract docs/18 §3 team.event.v1 · docs/17 §5.2 seq from events.meta.json (caller holds the lock) · §5.3 events-last write order
+ * @contract docs/18 §3 team.event.v1 · docs/17 §5.2 seq derived from the committed ledger tail, not
+ *   events.meta.json — P0-5 crash safety (caller holds the lock) · §5.3 events-last write order
  */
 export function appendEvent(runDir: string, evt: EventInput): number {
   const metaFile = join(runDir, 'events.meta.json');
-  const meta = existsSync(metaFile)
-    ? (JSON.parse(readFileSync(metaFile, 'utf8')) as { next_seq: number })
-    : { next_seq: 1 };
-  const seq = meta.next_seq;
+  // P0-5: derive seq from the committed ledger, not events.meta.json. appendFileSync (the commit
+  // point) and the meta bump are two non-atomic steps; a crash between them leaves meta lagging, and
+  // trusting a lagged meta reuses a live seq → a permanent duplicate the ledger can never shed.
+  // meta is still written below, so it stays a fast, in-sync cache (AUD-033 / repair drift check).
+  const seq = maxCommittedSeq(runDir) + 1;
   const payload = evt.payload ?? {};
   const manualRevAfter = typeof payload.rev_after === 'object' && payload.rev_after !== null
     ? (payload.rev_after as Record<string, unknown>)

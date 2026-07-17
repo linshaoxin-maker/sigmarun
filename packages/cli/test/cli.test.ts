@@ -159,6 +159,24 @@ describe('cli front-end (contract: docs/17 §1/§2.2 — parse, delegate, map ex
     const watch = runCli(['watch', 'RUN-0001', '--once', '--json'], { cwd: repo });
     expect(watch.exitCode).toBe(0);
   });
+
+  it('renders repair string findings without "undefined" (P1-11: the findings key has two producer shapes)', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    const { writeFileSync, appendFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    runCli(['init', '--json'], { cwd: repo });
+    writeFileSync(join(repo, 'payload.json'), JSON.stringify(validPayload()));
+    runCli(['run', 'import', join(repo, 'payload.json'), '--json'], { cwd: repo });
+    runCli(['task', 'publish', 'RUN-0001', '--json'], { cwd: repo });
+    // a torn tail line makes repair emit a PLAIN-STRING finding (audit emits objects for the same key)
+    appendFileSync(join(repo, '.team', 'runs', 'RUN-0001', 'events.jsonl'), '{"event":"task_don');
+
+    const r = runCli(['repair', 'RUN-0001'], { cwd: repo }); // no --json -> human render path
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('undefined'); // used to print "[undefined] undefined undefined -> undefined"
+    expect(r.stdout).toContain('unparseable'); // the finding string is rendered verbatim
+  });
 });
 
 describe('remediation R0-7: CLI experience group (docs/16 §2; docs/17 §1)', () => {

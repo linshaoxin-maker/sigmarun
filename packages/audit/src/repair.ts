@@ -71,6 +71,7 @@ export function repairRun(opts: RepairOptions): Envelope {
     const rows = (list.doc as { tasks: Array<{ task_id: string; status: string; owner_agent_id: string | null; claim_id: string | null }> }).tasks;
     let listDirty = false;
     const taskFixes: Array<{ file: string; to: string }> = [];
+    const corruptTaskFiles: string[] = [];
     for (const [taskId, expect] of ledger) {
       const row = rows.find((r) => r.task_id === taskId);
       if (row && row.status !== expect.status) {
@@ -81,21 +82,40 @@ export function repairRun(opts: RepairOptions): Envelope {
         listDirty = true;
       }
       const taskFile = join(runDir, 'tasks', taskId, 'task.json');
-      if (existsSync(taskFile)) {
-        const detail = readJsonState(taskFile).doc as { status: string };
-        if (detail.status !== expect.status) {
-          plan.push({ target: `tasks/${taskId}/task.json`, field: 'status', from: detail.status, to: expect.status });
-          taskFixes.push({ file: taskFile, to: expect.status });
-        }
-      } else {
+      if (!existsSync(taskFile)) {
         findings.push(`tasks/${taskId}/ directory missing but the ledger knows the task — manual restore needed.`);
+        continue;
+      }
+      let detail: { status: string };
+      try {
+        detail = readJsonState(taskFile).doc as { status: string };
+      } catch (err) {
+        // P0-6: one unparseable task.json must NOT abort the whole repair (readJsonState throws
+        // io_error on bad JSON). Report it, back it up, and keep repairing the rest. The ledger says
+        // this task should be `${expect.status}`, so a human (or a restore) has a concrete target;
+        // we can't rev-check an unreadable file, so we deliberately don't auto-rewrite it.
+        if (err instanceof GatewayError && err.code === 'io_error') {
+          corruptTaskFiles.push(taskFile);
+          findings.push(
+            `tasks/${taskId}/task.json is not valid JSON — repair backed it up but left it as-is (the ledger expects status "${expect.status}"): restore it from the backup or fix the JSON by hand, then re-run repair.`,
+          );
+          continue;
+        }
+        throw err; // unrelated failures (e.g. unsupported_schema_version) still surface as before
+      }
+      if (detail.status !== expect.status) {
+        plan.push({ target: `tasks/${taskId}/task.json`, field: 'status', from: detail.status, to: expect.status });
+        taskFixes.push({ file: taskFile, to: expect.status });
       }
     }
 
     if (plan.length === 0) {
+      // Nothing mechanical to fix, but a corrupt task.json still gets snapshotted so the human has a
+      // copy to restore — a recovery exit, not a silent no-op (P0-6).
+      const backup = corruptTaskFiles.length > 0 ? writeBackup(teamRoot, 'repair', corruptTaskFiles) : undefined;
       return okEnvelope({
-        message: `Nothing to repair on ${opts.runId}${findings.length > 0 ? ` (${findings.length} manual finding(s))` : ''}.`,
-        data: { repaired: [], findings },
+        message: `Nothing to repair on ${opts.runId}${findings.length > 0 ? ` (${findings.length} manual finding(s))` : ''}${backup ? `; backup ${backup} (restore with: sigmarun restore ${backup})` : ''}.`,
+        data: { repaired: [], findings, ...(backup ? { backup } : {}) },
         startedAt,
       });
     }
@@ -110,6 +130,7 @@ export function repairRun(opts: RepairOptions): Envelope {
     const backupTargets = [
       ...['team-task-list.json', 'progress.json'].map((rel) => join(runDir, rel)),
       ...taskFixes.map((fix) => fix.file),
+      ...corruptTaskFiles, // P0-6: snapshot unreadable task.json files too, before we report them
     ];
     const backupId = writeBackup(teamRoot, 'repair', backupTargets);
 
