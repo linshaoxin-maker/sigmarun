@@ -469,7 +469,7 @@ repo/
     team-gateway/
   .claude/
     commands/
-  .codex/
+  .agents/
     skills/
 ../.team-worktrees/
   RUN-0001/

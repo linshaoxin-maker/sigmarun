@@ -10,7 +10,7 @@
 - **`run show <RUN>`**（只读）：run 概要 + 任务 rollup + 状态计数——**从 FEAT-008 查询面提前**（改派理由：19 §3.2 dispatch 流程第 1 步硬依赖；其余查询命令 run list/task list/show/evidence show 仍归 FEAT-008）。
 - **新包 `@sigmarun/adapters`** + `adapter install --tool claude-code|codex [--update]`（22 §133，MVP 仅 repo scope）：
   - claude-code → `.claude/commands/team-{plan,dispatch,publish}.md`（19 §3.1/3.2 全文模板 + RULES 十诫逐字块，含 --as/--task/--role/--loop 语义与 D5 单任务停机第 8/10 条）。
-  - codex → `.codex/skills/team-run-dispatch/SKILL.md`（19 §4.1，触发词 D13 实测定稿版）。
+  - codex → `.agents/skills/team-run-dispatch/SKILL.md`（19 §4.1，触发词 D13 实测定稿版；Codex 官方扫 `.agents/skills`，非 `.codex/skills`）。
   - 两工具均追加 `shared/AGENTS-SECTION.md` 进仓库 `AGENTS.md`（标记对幂等，重装不重复）。
   - 文件头 `template_version` 注释；重装默认跳过 + 警告，`--update` 覆盖（漂移检测归 doctor/P1）。
 - `--loop` 连跑语义按 D5 落在模板第 10 步（adapter 侧循环，gateway 永远单任务返回）——不新增 gateway 面。

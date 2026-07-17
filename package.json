@@ -14,7 +14,7 @@
     "test:coverage": "vitest run --coverage",
     "build": "tsc -b packages/storage packages/core packages/dispatch packages/context packages/adapters packages/watch packages/audit packages/cli",
     "typecheck": "tsc -b packages/storage packages/core packages/dispatch packages/context packages/adapters packages/watch packages/audit packages/cli --force",
-    "release": "npm run build && node scripts/build-release.mjs",
+    "release": "node scripts/build-release.mjs",
     "release:prepare": "node scripts/release-prepare.mjs"
   },
   "devDependencies": {

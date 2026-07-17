@@ -161,7 +161,11 @@ const DISPATCH_FLOW = (tool: string) => `Required flow:
    failure. Before running checks, provision deps in the worktree: either
    install them there (\`npm install\` / \`pnpm install\`; can be slow on a big
    monorepo) or symlink the main checkout's folder
-   (\`ln -s <main-repo>/node_modules node_modules\`). Never record a check that
+   (\`ln -s <main-repo>/node_modules node_modules\`). CAVEAT: in a workspace
+   monorepo (like sigmarun itself), prefer installing — a symlinked root
+   \`node_modules\` makes internal workspace packages resolve back to the MAIN
+   checkout, so a check can silently pass against unmodified code (a false pass
+   that defeats the evidence). Never record a check that
    only failed for missing \`node_modules\` as a real \`fail\` in evidence —
    fix the environment and re-run first. (P1-5)
 6. Implement ONLY the claimed task, inside paths.allow. Commit in small steps

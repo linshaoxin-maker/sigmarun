@@ -295,7 +295,7 @@ export function synthesizeReview(runDir: string, runId: string, agentId: string,
       {
         data: { filtered_by_independence: excludedByIndependence },
         nextActions: filtered
-          ? [`Have a different window claim it: sigmarun claim-next ${runId} --agent=<other> --role=reviewer`]
+          ? [`Have a different window claim it: sigmarun claim-next ${runId} --agent="<the reviewer's AGENT-ID>" --role=reviewer`]
           : [`Check the queue: sigmarun status ${runId}`],
         startedAt,
       },
