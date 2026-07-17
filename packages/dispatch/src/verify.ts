@@ -69,8 +69,14 @@ export function verifySubmit(opts: VerifyOptions): Envelope {
       });
     }
     if (!existsSync(join(runDir, 'agents', `${opts.agentId}.json`))) {
+      // P1-6: full runs do not self-register (by design). `${opts.agentId}` is a window label, but
+      // register MINTS its own AGENT-<tool>-NNN id — it never adopts the label; re-submitting under the
+      // label loops on this same wall. Name the returned id so the window switches to it.
       return failEnvelope('agent_not_registered', `Agent ${opts.agentId} is not registered on ${runId}.`, {
-        nextActions: [`Register first: sigmarun agent register ${runId} --tool=<tool> --label=<window>`],
+        nextActions: [
+          `Full runs need one explicit register; it returns an AGENT-ID (e.g. AGENT-<tool>-001) — NOT the "${opts.agentId}" label you passed: sigmarun agent register ${runId} --tool=<tool> --label=${opts.agentId}`,
+          `Then act with that returned AGENT-ID, not "${opts.agentId}": sigmarun verify submit ${runId} --agent=<AGENT-ID> --verify=<file>`,
+        ],
         startedAt,
       });
     }

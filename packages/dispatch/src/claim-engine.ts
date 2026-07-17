@@ -549,8 +549,15 @@ export function claimNext(opts: ClaimOptions): Envelope {
     const agentFile = join(runDir, 'agents', `${opts.agentId}.json`);
     if (!existsSync(agentFile)) {
       if (!lightweight) {
+        // P1-6: full runs do not self-register (by design). But `${opts.agentId}` is a window label, and
+        // register MINTS its own AGENT-<tool>-NNN id — it never adopts the label. A window that re-runs
+        // claim-next with its label after registering loops on this same error. Name the returned id so the
+        // window switches to it instead of the label it typed.
         return failEnvelope('agent_not_registered', `Agent ${opts.agentId} is not registered on ${runId}.`, {
-          nextActions: [`Register first: sigmarun agent register ${runId} --tool=<tool> --label=<window>`],
+          nextActions: [
+            `Full runs need one explicit register; it returns an AGENT-ID (e.g. AGENT-<tool>-001) — NOT the "${opts.agentId}" label you passed: sigmarun agent register ${runId} --tool=<tool> --label=${opts.agentId}`,
+            `Then claim with that returned AGENT-ID, not "${opts.agentId}": sigmarun claim-next ${runId} --agent=<AGENT-ID>`,
+          ],
           startedAt,
         });
       }

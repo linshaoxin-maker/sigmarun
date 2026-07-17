@@ -139,8 +139,15 @@ export function postMessage(opts: PostMessageOptions): Envelope {
   }
   // Smoke-test L3: the human answering a blocker must not need to borrow an agent identity.
   if (opts.fromAgentId !== 'user' && !existsSync(join(runDir, 'agents', `${opts.fromAgentId}.json`))) {
+    // P1-6: full runs do not self-register (by design). `${opts.fromAgentId}` is a window label, but
+    // register MINTS its own AGENT-<tool>-NNN id — it never adopts the label; re-posting under the label
+    // loops on this same wall. Name the returned id so the window switches to it (the human still uses --from=user).
     return failEnvelope('agent_not_registered', `Agent ${opts.fromAgentId} is not registered on ${runId}.`, {
-      nextActions: [`Register first: sigmarun agent register ${runId} --tool=<tool> --label=<window>`, 'Posting as the human? Use --from=user.'],
+      nextActions: [
+        `Full runs need one explicit register; it returns an AGENT-ID (e.g. AGENT-<tool>-001) — NOT the "${opts.fromAgentId}" label you passed: sigmarun agent register ${runId} --tool=<tool> --label=${opts.fromAgentId}`,
+        `Then post with that returned AGENT-ID, not "${opts.fromAgentId}": sigmarun msg post ${runId} --from=<AGENT-ID> ...`,
+        'Posting as the human? Use --from=user.',
+      ],
       startedAt,
     });
   }
