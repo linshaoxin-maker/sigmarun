@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.6.1';
+export const TEMPLATE_VERSION = '0.6.2';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -293,10 +293,11 @@ Flow:
      several runs have that task id, ask which run they mean.
    - RUN-ID given → use it.
    - neither → \`sigmarun run list --json\`; among ACTIVE runs (any mode):
-     EXACTLY ONE → use it; MORE THAN ONE → PAUSE FOR THE HUMAN — list them
-     (RUN-ID · title · lightweight/full · status) and ask which; never guess
-     "newest" (they may belong to other sessions/windows). NONE → "nothing to
-     work on yet — start one: /team-plan <goal>".
+     EXACTLY ONE → use it; MORE THAN ONE → PAUSE FOR THE HUMAN — show the
+     requirement list (RUN-ID · goal · lightweight/full · status; each run is
+     one /team-plan requirement, same view as /team-runs) and ask which; never
+     guess "newest" (they may belong to other sessions/windows). NONE →
+     "nothing to work on yet — start one: /team-plan <goal>".
 2. Window identity: use the \`--as\` name if given. Otherwise GENERATE a fresh
    unique name like \`win-<4 random chars>\` — NEVER a guessable default like
    \`win-1\`: two windows picking the same label become the SAME agent (labels
@@ -559,8 +560,11 @@ ${versionHeader}
 
 ${RULES_BLOCK}
 
-Run \`sigmarun run list --json\` and present run_id / status / title / mode
-as a table in the user's language. This command mutates nothing.
+This is the REQUIREMENT list: each run IS one requirement (one /team-plan
+goal), and the RUN-ID is its number. Run \`sigmarun run list --json\` and
+present a table in the user's language: RUN-ID · goal/title · lightweight or
+full · status · progress. End with the pointer: "work on one:
+/team-do <RUN-ID>" (and /team-status <RUN-ID> to inspect). Mutates nothing.
 `;
 
 const TEAM_TASKS = `---
@@ -871,8 +875,10 @@ ${versionHeader}
 
 ${RULES_BLOCK}
 
-Run \`sigmarun run list --json\` and summarize: run id, title, status,
-lightweight or full, progress. Read-only.
+This is the REQUIREMENT list — each run is one requirement (one team-plan
+goal), RUN-ID is its number. Run \`sigmarun run list --json\` and summarize:
+RUN-ID, goal/title, lightweight or full, status, progress; end with "work on
+one: team-do <RUN-ID>". Read-only.
 `;
 
 const CODEX_TASKS_SKILL = `---
