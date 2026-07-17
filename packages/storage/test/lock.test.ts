@@ -85,4 +85,52 @@ describe('mkdir lock (contract: docs/17 §4)', () => {
     expect(existsSync(lock)).toBe(true);
     release();
   });
+
+  it('takes over a dead-pid holder PROMPTLY even when the mtime is still fresh (P1-10 crash-freeze fix)', () => {
+    const dir = mkTmpDir(); dirs.push(dir);
+    const lock = join(dir, 'project.lock');
+    mkdirSync(lock);
+    // Holder crashed with the lock a moment ago: meta names a dead pid but mtime is FRESH (~now),
+    // so age is far below staleMs. Pre-fix, liveness was probed only after age>staleMs, so a crashed
+    // holder froze the lock for the whole staleMs window (~30s). Liveness must decide first here.
+    writeFileSync(join(lock, 'meta.json'), JSON.stringify({ pid: 424242, token: 'dead', acquired_at: new Date().toISOString() }));
+    const t0 = Date.now();
+    const release = acquireLock(lock, { timeoutMs: 1000, staleMs: 30_000 });
+    expect(existsSync(lock)).toBe(true);
+    expect(Date.now() - t0).toBeLessThan(1000); // sub-second takeover, not a staleMs-long freeze
+    release();
+  });
+
+  it('does NOT seize an alive holder with a fresh mtime (pid-first probe must not steal a live in-flight lock)', () => {
+    const dir = mkTmpDir(); dirs.push(dir);
+    const lock = join(dir, 'project.lock');
+    mkdirSync(lock);
+    // A live in-flight holder (this process), lock just taken: probing pid-first must still refuse to
+    // seize it — only a provably dead holder is seizable ahead of staleMs, never a live one.
+    writeFileSync(join(lock, 'meta.json'), JSON.stringify({ pid: process.pid, token: 'alive', acquired_at: new Date().toISOString() }));
+    const t0 = Date.now();
+    try {
+      acquireLock(lock, { timeoutMs: 300, staleMs: 30_000 });
+      expect.unreachable('a live in-flight holder must not be seized');
+    } catch (e) {
+      expect((e as GatewayError).code).toBe('lock_timeout');
+    }
+    expect(Date.now() - t0).toBeLessThan(3000);
+  });
+
+  it('a fresh lock still mid-creation (no meta yet) is NOT seized as dead (mkdir→meta write race)', () => {
+    const dir = mkTmpDir(); dirs.push(dir);
+    const lock = join(dir, 'project.lock');
+    mkdirSync(lock); // meta.json not written yet — a holder between mkdir and its meta write
+    // Absent meta must read as "unknown holder", not "dead": with a fresh mtime it is NOT seizable,
+    // otherwise the pid-first probe would steal a lock a live process is still initialising.
+    const t0 = Date.now();
+    try {
+      acquireLock(lock, { timeoutMs: 300, staleMs: 30_000 });
+      expect.unreachable('a fresh meta-less lock (mid-creation) must not be seized');
+    } catch (e) {
+      expect((e as GatewayError).code).toBe('lock_timeout');
+    }
+    expect(Date.now() - t0).toBeLessThan(3000);
+  });
 });
