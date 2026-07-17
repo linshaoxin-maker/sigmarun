@@ -126,3 +126,22 @@ export function installAdapters(opts: InstallOptions): Envelope {
     startedAt,
   });
 }
+
+/**
+ * The adapter template generation currently installed in `repoRoot`, or null if no managed adapter
+ * file is present. Reads the same `template_version:` marker `installOne` writes; returns the first
+ * one found across every tool's files. The CLI version face compares this against the bundled
+ * TEMPLATE_VERSION so "which generation is installed / did my upgrade take effect" is answerable.
+ */
+export function installedTemplateVersion(repoRoot: string): string | null {
+  for (const files of Object.values(TEMPLATES)) {
+    for (const rel of Object.keys(files)) {
+      const target = join(repoRoot, rel);
+      if (existsSync(target)) {
+        const v = versionOf(readFileSync(target, 'utf8'));
+        if (v) return v;
+      }
+    }
+  }
+  return null;
+}

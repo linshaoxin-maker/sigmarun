@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { runCli } from '../src/cli.js';
+import { TEMPLATE_VERSION } from '@sigmarun/adapters';
 import { mkTmpGitRepo, cleanup } from '../../storage/test/helpers.js';
 
 const dirs: string[] = [];
@@ -295,12 +298,41 @@ describe('smoke-test fixes: help surface (L15) and project-scoped worktree root 
 });
 
 describe('OSS-readiness: version flag and crash-safety', () => {
-  it('--version, -v, and version print the gateway version at exit 0', () => {
+  it('--version, -v, and version print the gateway version on the first line at exit 0', () => {
     for (const argv of [['--version'], ['-v'], ['version']]) {
       const r = runCli(argv);
       expect(r.exitCode).toBe(0);
-      expect(r.stdout).toMatch(/^\d+\.\d+\.\d+$/);
+      // The first line stays a bare gateway semver so scripts can still do `--version | head -1`.
+      expect(r.stdout.split('\n')[0]).toMatch(/^\d+\.\d+\.\d+$/);
     }
+  });
+
+  it('--version also surfaces the adapter template generation this gateway ships (P1-1)', () => {
+    // TEMPLATE_VERSION moves with capability, on its own cadence from the gateway semver; before this
+    // it was invisible to every CLI face, so "which generation am I on" was unanswerable.
+    const r = runCli(['--version']);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain(TEMPLATE_VERSION);
+    expect(r.stdout.toLowerCase()).toContain('template');
+  });
+
+  it('--version reports installed-template drift so "did my upgrade take effect" is answerable (P1-1)', () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init'], { cwd: repo });
+    runCli(['adapter', 'install', '--tool=claude-code'], { cwd: repo });
+
+    // A fresh install matches the bundled generation -> up to date.
+    const fresh = runCli(['--version'], { cwd: repo });
+    expect(fresh.stdout).toContain(TEMPLATE_VERSION);
+    expect(fresh.stdout.toLowerCase()).toContain('up to date');
+
+    // Simulate an installed-but-never-reinstalled repo: roll one managed file's marker back a
+    // generation. The gateway must now report drift and name the stale installed generation.
+    const planFile = join(repo, '.claude', 'commands', 'team-plan.md');
+    writeFileSync(planFile, readFileSync(planFile, 'utf8').replace(/template_version: [\d.]+/, 'template_version: 0.0.1'));
+    const drifted = runCli(['--version'], { cwd: repo });
+    expect(drifted.stdout.toLowerCase()).toContain('drift');
+    expect(drifted.stdout).toContain('0.0.1');
   });
 
   it('every surveyed bad invocation returns a single JSON envelope, never a throw', () => {

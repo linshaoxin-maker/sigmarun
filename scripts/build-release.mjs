@@ -64,6 +64,9 @@ writeFileSync(join(out, 'package.json'), JSON.stringify({
 
 cpSync(join(root, 'CHANGELOG.md'), join(out, 'CHANGELOG.md'));
 cpSync(join(root, 'LICENSE'), join(out, 'LICENSE'));
-cpSync(join(root, 'scripts/release-readme.md'), join(out, 'README.md'));
+// Single source: the npm README is the repo-root README (the honest, walked-back product story).
+// A second frozen copy under scripts/ silently drifted (self-approval firewalls / "no self-reported
+// done" / doctor 9-vs-10) and shipped stale walk-back language to npm users — never re-fork it.
+cpSync(join(root, 'README.md'), join(out, 'README.md'));
 
 console.log('release/ assembled: sigmarun@' + rootPkg.version);
