@@ -129,9 +129,21 @@ export function initProject(opts: ResolveOptions & { example?: boolean } = {}): 
     message: created.length > 0 ? 'Initialized .team coordination directory.' : 'Already initialized; nothing to do.',
     data: { teamRoot: root.teamRoot, created, skipped, gitignoreUpdated },
     warnings,
+    // P1-4: the breadcrumb must not dead-end at `doctor`. Hand over the whole onboarding chain —
+    // verify -> install the agent adapter -> drive the run from the /team-plan slash command, which
+    // is where the actual UX lives (the raw CLI is the plumbing those commands call).
     nextActions: opts.example
-      ? ['Edit sigmarun-plan.example.json, then: sigmarun run import sigmarun-plan.example.json --lightweight', 'Run `sigmarun doctor` to verify the setup.']
-      : ['Run `sigmarun doctor` to verify the setup.'],
+      ? [
+          'Verify the environment: sigmarun doctor',
+          'Install the agent commands: sigmarun adapter install --tool=claude-code|codex',
+          'Edit sigmarun-plan.example.json, then import it: sigmarun run import sigmarun-plan.example.json --lightweight',
+          'Then drive it from your agent — open Claude Code or Codex in this repo and run /team-plan <goal> (or /team-dispatch <RUN-ID>). The real workflow lives in those slash commands, not the CLI.',
+        ]
+      : [
+          'Verify the environment: sigmarun doctor',
+          'Install the agent commands: sigmarun adapter install --tool=claude-code|codex',
+          'Then start from your agent — open Claude Code or Codex in this repo and run /team-plan <goal>. That slash command is the real entry point, not the CLI.',
+        ],
   });
 }
 
@@ -159,7 +171,15 @@ function buildChecks(root: Resolved): DoctorCheck[] {
   if (initialized) {
     const locksDir = join(root.teamRoot, 'locks');
     const lockOk = existsSync(locksDir) && probeLockCapability(locksDir);
-    add('lock_capability', lockOk ? 'pass' : 'fail', lockOk ? 'mkdir lock probe ok' : 'cannot create lock directories under .team/locks');
+    // P1-7: name the consequence, not just the symptom — a dead lock means concurrent commands
+    // lose their collision guard (crash-safety), so this cannot read as a passing green check.
+    add(
+      'lock_capability',
+      lockOk ? 'pass' : 'fail',
+      lockOk
+        ? 'mkdir lock probe ok'
+        : 'cannot create lock directories under .team/locks — the run lock is unavailable, so concurrent commands lose crash-safety (no collision guard); fix write permissions on .team/locks',
+    );
   }
 
   const gitignore = join(root.repoRoot, '.gitignore');
@@ -291,7 +311,15 @@ export function doctorProject(opts: DoctorOptions = {}): Envelope {
 
   const failed = checks.filter((c) => c.status === 'fail');
   const fixedNote = fixed.length > 0 ? ` Auto-fixed ${fixed.length}: ${fixed.join('; ')}.` : '';
-  return okEnvelope({
+  // P1-4: an all-green doctor is a waypoint, not the finish line — point onward to the adapter
+  // install and the /team-plan agent entry instead of leaving the user on a bare checkmark. On
+  // failures, each check's detail IS the next step (they carry their own remediation, including
+  // the lock crash-safety cost surfaced above).
+  const ONWARD = [
+    'Install the agent commands if you have not: sigmarun adapter install --tool=claude-code|codex',
+    'Then start from your agent — open Claude Code or Codex in this repo and run /team-plan <goal>. That slash command is the real entry point, not the CLI.',
+  ];
+  const env = okEnvelope({
     startedAt,
     message:
       failed.length === 0
@@ -299,6 +327,10 @@ export function doctorProject(opts: DoctorOptions = {}): Envelope {
         : `Doctor: ${failed.length} of ${checks.length} checks ${opts.fix ? 'still fail after auto-fix' : 'failed'}.${fixedNote}`,
     data: { checks, ...(opts.fix ? { fixed } : {}) },
     warnings: failed.map((c) => ({ code: `doctor_${c.name}_failed`, message: c.detail })),
-    nextActions: failed.length === 0 ? [] : failed.map((c) => c.detail),
+    nextActions: failed.length === 0 ? ONWARD : failed.map((c) => c.detail),
   });
+  // P1-7: doctor is a health gate, not a status printer. okEnvelope always stamps ok:true, so a
+  // failed check (e.g. an unusable .team/locks — crash-safety gone) still read green. Pull the
+  // aggregate ok down when any check fails; the CLI maps ok:false here to a non-zero exit.
+  return failed.length === 0 ? env : { ...env, ok: false };
 }

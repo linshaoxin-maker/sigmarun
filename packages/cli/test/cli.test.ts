@@ -294,6 +294,62 @@ describe('smoke-test fixes: help surface (L15) and project-scoped worktree root 
   });
 });
 
+describe('P1-4 / P1-7 / P1-12: onboarding breadcrumbs + health-gate exit codes', () => {
+  it('P1-4: --help opens with a start-here path into the agent /team-plan entry', () => {
+    const r = runCli(['--help']);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('adapter install');
+    expect(r.stdout).toContain('/team-plan'); // the real UX lives in the agent slash command
+  });
+
+  it('P1-7: doctor with a failing check does not exit 0 — a broken lock must gate, not pass', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const { rmSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    rmSync(join(repo, '.team', 'locks'), { recursive: true, force: true }); // lock probe fails
+    const r = runCli(['doctor', '--json'], { cwd: repo });
+    const env = JSON.parse(r.stdout);
+    expect(env.ok).toBe(false);
+    expect(r.exitCode).not.toBe(0);
+  });
+
+  it('P1-12: audit run with an error finding exits non-zero yet keeps the success envelope (findings are data)', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const { writeFileSync, readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    writeFileSync(join(repo, 'payload.json'), JSON.stringify(validPayload()));
+    runCli(['run', 'import', join(repo, 'payload.json'), '--lightweight', '--json'], { cwd: repo });
+    // tear the ledger: drop a middle event so seqs gap -> AUD-033 error
+    const ev = join(repo, '.team', 'runs', 'RUN-0001', 'events.jsonl');
+    const lines = readFileSync(ev, 'utf8').trim().split('\n');
+    writeFileSync(ev, [lines[0], ...lines.slice(2)].join('\n') + '\n');
+    const r = runCli(['audit', 'run', 'RUN-0001', '--json'], { cwd: repo });
+    const env = JSON.parse(r.stdout);
+    // envelope semantics unchanged: audit ran fine, findings are data
+    expect(env.ok).toBe(true);
+    expect(env.code).toBe('OK');
+    expect((env.data.findings as Array<{ severity: string }>).some((f) => f.severity === 'error')).toBe(true);
+    // but the process exit blocks `sigmarun audit run && ...`
+    expect(r.exitCode).not.toBe(0);
+  });
+
+  it('P1-12: audit run on a clean run still exits 0 (no error findings, no false gate)', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const { writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    writeFileSync(join(repo, 'payload.json'), JSON.stringify(validPayload()));
+    runCli(['run', 'import', join(repo, 'payload.json'), '--lightweight', '--json'], { cwd: repo });
+    const r = runCli(['audit', 'run', 'RUN-0001', '--json'], { cwd: repo });
+    expect(r.exitCode).toBe(0);
+    expect((JSON.parse(r.stdout).data.findings as Array<{ severity: string }>).filter((f) => f.severity === 'error')).toEqual([]);
+  });
+});
+
 describe('OSS-readiness: version flag and crash-safety', () => {
   it('--version, -v, and version print the gateway version at exit 0', () => {
     for (const argv of [['--version'], ['-v'], ['version']]) {
