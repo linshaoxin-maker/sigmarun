@@ -201,9 +201,16 @@ function renderSections(data: Record<string, unknown> | undefined, lines: string
     }
   }
 
-  const findings = data.findings as Array<{ rule_id: string; severity: string; message: string; next_action: string }> | undefined;
+  // The `findings` key has two producer shapes: audit emits {rule_id,severity,message,next_action}
+  // objects, repair emits plain strings (P1-11). Render each verbatim; treating a string as an
+  // object printed "[undefined] undefined undefined -> undefined".
+  const findings = data.findings as Array<string | { rule_id: string; severity: string; message: string; next_action: string }> | undefined;
   if (Array.isArray(findings)) {
     for (const f of findings) {
+      if (typeof f === 'string') {
+        lines.push(`  ${f}`);
+        continue;
+      }
       lines.push(`  [${f.severity}] ${f.rule_id} ${f.message}`);
       lines.push(`      -> ${f.next_action}`);
     }

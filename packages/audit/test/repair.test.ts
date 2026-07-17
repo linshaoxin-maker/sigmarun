@@ -52,6 +52,22 @@ describe('repair (docs/17 §5.3: ledger-driven, backup first, idempotent; BDD-00
     expect(meta.next_seq).toBeGreaterThan(maxSeq);
   });
 
+  it('does not crash on a corrupt task.json — backs it up, reports it as a finding, returns ok (P0-6)', () => {
+    // Any task.json turning into non-JSON used to abort the whole repair with io_error (readJsonState
+    // throws) — no backup, no findings, no recovery exit. Per-file tolerance keeps repair usable.
+    const taskFile = join(runDir(), 'tasks', 'TASK-0001', 'task.json');
+    writeFileSync(taskFile, '{ this is not valid json ');
+
+    const env = repairRun({ cwd: repo, runId: 'RUN-0001' });
+    expect(env.ok).toBe(true); // not an io_error crash
+    const data = env.data as { findings: string[]; backup?: string };
+    expect(data.findings.some((f) => f.includes('TASK-0001') && f.toLowerCase().includes('json'))).toBe(true);
+    // the unreadable file is snapshotted before repair reports it, so the human has a copy to restore
+    const backups = join(repo, '.team', 'backups');
+    expect(existsSync(backups)).toBe(true);
+    expect(readdirSync(backups).length).toBeGreaterThan(0);
+  });
+
   it('is idempotent: a second run repairs nothing and writes no event', () => {
     const listFile = join(runDir(), 'team-task-list.json');
     const { doc, rev } = readJsonState(listFile);
