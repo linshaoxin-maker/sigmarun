@@ -61,7 +61,7 @@ const DEFAULT_NEXT_ACTIONS: Record<string, string[]> = {
   parallel_limit_reached: ['Wait for an in-flight task to finish, or raise max_parallel_tasks in the run policy.'],
   capability_mismatch: ['Claim with the matching role, or pick other work: sigmarun claim-next <RUN> --agent=<A>'],
   self_approval_forbidden: ['Another identity must take this gate: sigmarun claim-next <RUN> --agent=<other> --role=reviewer'],
-  agent_not_registered: ['Register first: sigmarun agent register <RUN> --tool=<tool> --label=<window>'],
+  agent_not_registered: ['Full runs need one explicit register; it returns an AGENT-ID (e.g. AGENT-<tool>-001) that is NOT the window label you pass: sigmarun agent register <RUN> --tool=<tool> --label=<window>', 'Then claim with that returned AGENT-ID, not the window label: sigmarun claim-next <RUN> --agent=<AGENT-ID>'],
   // lookups
   run_not_found: ['List runs: sigmarun run list'],
   task_not_found: ['List the run tasks: sigmarun run show <RUN>'],
