@@ -109,6 +109,127 @@ export function repairRun(opts: RepairOptions): Envelope {
       }
     }
 
+    // ----- claims reconciliation (P1-9): ghost task/path claims a crash left ACTIVE -----------------
+    // claim-engine writes claims/*.json BEFORE the task's own commit event (claim-engine.ts finishClaim),
+    // and a torn claim-deactivation on release can strand an ACTIVE task-claim on a task the ledger has
+    // since moved OFF (ready/draft/terminal). Such a ghost is still counted by the run-wide parallel-slot
+    // and per-agent limits (claim-engine.ts:604,690), so it wedges claim-next with parallel_limit_reached /
+    // agent_claim_limit until the ~3xTTL sweep. repair never read claims/ before P1-9, so it could not
+    // clear what `audit run` already flags (AUD-005/006/009/010). It now reconciles claims against the
+    // SAME event ledger it trusts for every other repair.
+    //
+    // RED LINE: a claim the ledger still names as the holder of an OCCUPIED task is LIVE — never
+    // deactivate it. Double-claiming is the single failure mode this whole system exists to prevent, so
+    // repair only ever cleans an UNAMBIGUOUS residue; every borderline case is a finding, not a mutation.
+    // Statuses in which an ACTIVE owner task-claim is legitimate: claimed/working/blocked, plus
+    // changes_requested — request_changes revives the owner's claim in place for rework (review.ts:465).
+    const OCCUPANCY = new Set(['claimed', 'working', 'blocked', 'changes_requested']);
+    const CLEANABLE = new Set(['ready', 'draft', 'done', 'integrated', 'verified', 'cancelled']); // no live task-claim can exist
+    const nowIso = new Date().toISOString();
+    const MISSING = '<<missing>>';
+    const claimPlan: RepairAction[] = [];
+    const ghostTaskIds = new Set<string>();
+
+    // Authoritative status of a task: the event ledger is the commit point (docs/17 §5.3), so it wins;
+    // fall back to task.json only when the ledger has NO state-bearing event for the task. Returns null
+    // when task.json exists but is unreadable — the caller then leaves the claim untouched (can't verify).
+    const authoritativeStatus = (taskId: string): string | null => {
+      const exp = ledger.get(taskId);
+      if (exp) return exp.status;
+      const tf = join(runDir, 'tasks', taskId, 'task.json');
+      if (!existsSync(tf)) return MISSING;
+      try {
+        return String((readJsonState(tf).doc as { status: string }).status);
+      } catch {
+        return null;
+      }
+    };
+
+    type ClaimLite = { claim_id: string; task_id: string; agent_id: string; status: string; [k: string]: unknown };
+    const readClaimsSafe = (file: string, label: string): { doc: { claims: ClaimLite[] } & Record<string, unknown>; rev: number } | null => {
+      if (!existsSync(file)) return null;
+      try {
+        const s = readJsonState(file);
+        return { doc: s.doc as { claims: ClaimLite[] } & Record<string, unknown>, rev: s.rev };
+      } catch (err) {
+        if (err instanceof GatewayError && err.code === 'io_error') {
+          findings.push(`claims/${label} is not valid JSON — repair left the claims ledger untouched; fix the JSON by hand, then re-run repair.`);
+          return null;
+        }
+        throw err;
+      }
+    };
+
+    const taskClaimsFile = join(runDir, 'claims', 'task-claims.json');
+    const pathClaimsFile = join(runDir, 'claims', 'path-claims.json');
+    const taskClaimsState = readClaimsSafe(taskClaimsFile, 'task-claims.json');
+    const pathClaimsState = readClaimsSafe(pathClaimsFile, 'path-claims.json');
+    let taskClaimsDirty = false;
+    let pathClaimsDirty = false;
+
+    if (taskClaimsState) {
+      for (const c of taskClaimsState.doc.claims) {
+        if (c.status !== 'active') continue; // only ACTIVE claims occupy a slot / a quota
+        const exp = ledger.get(c.task_id);
+        const status = authoritativeStatus(c.task_id);
+        if (status === null) {
+          findings.push(`claims/task-claims.json: ${c.claim_id} is ACTIVE on ${c.task_id} but its task.json is unreadable — repair could not verify it and left it untouched.`);
+          continue;
+        }
+        // RED LINE: the ledger names this exact claim as the holder of an occupied task -> LIVE. Untouchable.
+        if (exp && exp.claim === c.claim_id && OCCUPANCY.has(status)) continue;
+        if (OCCUPANCY.has(status)) {
+          // The task IS occupied, but the ledger does not name THIS claim as the holder — a rival/second
+          // ACTIVE claim. repair must not guess which one is real (that is `reclaim`'s job); report only.
+          findings.push(
+            `claims/task-claims.json: ${c.claim_id} is ACTIVE on ${c.task_id}, but the ledger shows ${c.task_id} is ${status}${exp?.claim ? ` under ${exp.claim}` : ''} — a rival active claim repair will NOT adjudicate. Resolve the double-claim with: sigmarun reclaim ${opts.runId} ${c.task_id}.`,
+          );
+          continue;
+        }
+        if (status === MISSING || CLEANABLE.has(status)) {
+          // Unambiguous ghost: no agent can be holding a ready/draft/terminal/missing task.
+          claimPlan.push({ target: 'claims/task-claims.json', field: `${c.claim_id}.status`, from: 'active', to: 'reclaimed' });
+          c.status = 'reclaimed';
+          c.released_at = nowIso;
+          c.release_reason = 'ghost_claim_repaired';
+          taskClaimsDirty = true;
+          ghostTaskIds.add(c.task_id);
+          findings.push(
+            `claims/task-claims.json: deactivated ghost claim ${c.claim_id} on ${c.task_id} (task is ${status === MISSING ? 'gone' : status}; no agent can be holding it) — it was occupying a parallel slot / ${c.agent_id}'s claim quota until the 3xTTL sweep. Restore from the backup if this was wrong.`,
+          );
+        } else {
+          // submitted / reviewing / approved: a gate state that expects a SUBMITTED (not active) claim.
+          // Delicate; repair reports rather than mutates (AUD-007 territory), never guesses.
+          findings.push(
+            `claims/task-claims.json: ${c.claim_id} is ACTIVE on ${c.task_id} which is ${status} — a gate/review state expects a submitted claim, not an active one; repair left it untouched. Inspect the submit/review transaction.`,
+          );
+        }
+      }
+    }
+
+    if (pathClaimsState) {
+      for (const c of pathClaimsState.doc.claims) {
+        if (c.status !== 'active') continue;
+        const status = authoritativeStatus(c.task_id);
+        if (status === null) continue; // unreadable task -> leave the path hold alone
+        if (OCCUPANCY.has(status)) continue; // a live path hold on an occupied task -> never touch
+        // Clean a path hold only when its task-claim was just cleaned as a ghost, or the task is plainly
+        // unheld (ready/draft/missing). submitted/reviewing/approved path holds are legitimate (docs/15 §4.2).
+        const unheld = ghostTaskIds.has(c.task_id) || status === MISSING || status === 'ready' || status === 'draft';
+        if (!unheld) continue;
+        claimPlan.push({ target: 'claims/path-claims.json', field: `${c.claim_id}.status`, from: 'active', to: 'reclaimed' });
+        c.status = 'reclaimed';
+        pathClaimsDirty = true;
+        if (!ghostTaskIds.has(c.task_id)) {
+          findings.push(
+            `claims/path-claims.json: deactivated dangling path claim ${c.claim_id} on ${c.task_id} (task is ${status === MISSING ? 'gone' : status}) — it was reserving overlapping paths against live tasks. Restore from the backup if this was wrong.`,
+          );
+        }
+      }
+    }
+
+    plan.push(...claimPlan);
+
     if (plan.length === 0) {
       // Nothing mechanical to fix, but a corrupt task.json still gets snapshotted so the human has a
       // copy to restore — a recovery exit, not a silent no-op (P0-6).
@@ -131,6 +252,8 @@ export function repairRun(opts: RepairOptions): Envelope {
       ...['team-task-list.json', 'progress.json'].map((rel) => join(runDir, rel)),
       ...taskFixes.map((fix) => fix.file),
       ...corruptTaskFiles, // P0-6: snapshot unreadable task.json files too, before we report them
+      ...(taskClaimsDirty ? [taskClaimsFile] : []), // P1-9: snapshot the claims ledger before deactivating ghosts
+      ...(pathClaimsDirty ? [pathClaimsFile] : []),
     ];
     const backupId = writeBackup(teamRoot, 'repair', backupTargets);
 
@@ -145,6 +268,14 @@ export function repairRun(opts: RepairOptions): Envelope {
     }
     if (listDirty) {
       writeJsonStateAtomic(listFile, list.doc as Record<string, unknown>, { expectedRev: list.rev });
+    }
+    // P1-9: persist the reconciled claims ledger. Written AFTER the task/list roll-forward and BEFORE the
+    // state_repaired events below, keeping "events.jsonl last = commit point" true (docs/17 §5.3).
+    if (taskClaimsDirty && taskClaimsState) {
+      writeJsonStateAtomic(taskClaimsFile, taskClaimsState.doc as Record<string, unknown>, { expectedRev: taskClaimsState.rev });
+    }
+    if (pathClaimsDirty && pathClaimsState) {
+      writeJsonStateAtomic(pathClaimsFile, pathClaimsState.doc as Record<string, unknown>, { expectedRev: pathClaimsState.rev });
     }
     for (const action of plan) {
       appendEvent(runDir, {
