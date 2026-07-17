@@ -1,9 +1,20 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { backupList, restoreBackup, migrateState, initProject } from '@sigmarun/core';
-import { registerMigration, clearMigrations, writeBackup } from '@sigmarun/storage';
+import { backupList, restoreBackup, migrateState, initProject, importRun, publishTasks } from '@sigmarun/core';
+import { registerMigration, clearMigrations, writeBackup, runLockPath } from '@sigmarun/storage';
 import { mkTmpGitRepo, cleanup } from '../../storage/test/helpers.js';
+
+/** Minimal single-task plan payload for standing up a real run in these tests. */
+function onePayload(): Record<string, unknown> {
+  return {
+    schema_version: 'team.plan_payload.v1',
+    source: { tool: 'claude-code', command: '/team-plan', prompt: 'backup-test', agent_id: 'AGENT-claude-001' },
+    run: { title: 'Backup lock run', mode: 'feature', goal: 'exercise restore locking' },
+    plan: { summary: 'one task' },
+    tasks: [{ client_task_key: 'a', title: 'A', type: 'implementation', objective: 'do a', acceptance: ['a done'], paths: { allow: ['src/a/**'] } }],
+  };
+}
 
 const dirs: string[] = [];
 afterEach(() => { clearMigrations(); while (dirs.length) cleanup(dirs.pop()!); });
@@ -58,5 +69,32 @@ describe('backup list + restore — closed recovery loop (roadmap Phase 2)', () 
     const repo = mkTmpGitRepo(); dirs.push(repo);
     initProject({ cwd: repo });
     expect((backupList({ cwd: repo }).data as { backups: unknown[] }).backups.length).toBe(0);
+  });
+
+  it('restore honours the run write lock: a held lock blocks it with lock_timeout and it does NOT write through (P1-8)', () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    initProject({ cwd: repo });
+    importRun({ cwd: repo, payload: onePayload() });
+    publishTasks({ cwd: repo, runId: 'RUN-0001' });
+
+    const teamRoot = join(repo, '.team');
+    const runDir = join(teamRoot, 'runs', 'RUN-0001');
+    const listFile = join(runDir, 'team-task-list.json');
+
+    // Snapshot the current list as a backup, then simulate an in-flight, uncommitted edit (sentinel)
+    // that a running transaction is mid-way through writing under the run lock.
+    const backupId = writeBackup(teamRoot, 'manual', [listFile]);
+    const SENTINEL = '{"in_flight_uncommitted":true}\n';
+    writeFileSync(listFile, SENTINEL);
+
+    // A live in-flight holder owns the run lock (this process's pid, fresh mtime → genuinely held).
+    const lockDir = runLockPath(runDir);
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'meta.json'), JSON.stringify({ pid: process.pid, token: 'inflight', acquired_at: new Date().toISOString() }));
+
+    const env = restoreBackup({ cwd: repo, backupId });
+    expect(env.ok).toBe(false);
+    expect(env.code).toBe('lock_timeout'); // restore must serialize behind the in-flight transaction
+    expect(readFileSync(listFile, 'utf8')).toBe(SENTINEL); // the in-flight write survived — no tear-through
   });
 });
