@@ -407,7 +407,13 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
           if (d.terminal) return `${stamp}  ${e.message}`;
           return `${stamp}  tick: ${(d.swept ?? []).length} reclaimed, progress ${d.progress?.progress_pct ?? '?'}%, ${(d.progress?.needs_user ?? []).length} need(s) you`;
         };
-        env = watchOnce({ ...base, runId, force: argv.includes('--force') });
+        // Hold the single-instance lock for the WHOLE loop: the first tick keeps it (holdLock), and
+        // later ticks use force:true to skip re-locking. Previously the first tick released the lock
+        // immediately and every later tick skipped it, so two `watch` processes could run at once and
+        // the "already held" error never fired. On exit the lock lingers until the 60s stale takeover
+        // self-heals it — same as a kill -9'd watcher.
+        const forced = argv.includes('--force');
+        env = watchOnce({ ...base, runId, force: forced, holdLock: !forced });
         emit(tickLine(env));
         while (env.ok && !(env.data as { terminal?: boolean }).terminal) {
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(5, intervalSec) * 1000);

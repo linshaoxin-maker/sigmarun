@@ -101,8 +101,14 @@ export function repairRun(opts: RepairOptions): Envelope {
     }
 
     // ----- backup, then apply ----- (unified backup store so `restore` works across producers)
+    // events.meta.json is DELIBERATELY not backed up. Repair appends state_repaired events to
+    // events.jsonl AFTER this snapshot, and events.jsonl is not in the backup set. If meta were
+    // snapshotted too, a later `restore` would roll next_seq back below those appended events' seq,
+    // and the next append would reuse a live seq → duplicate seq / AUD-033 (this was the bug).
+    // Leaving meta out keeps it consistent with on-disk events.jsonl after a restore — the same
+    // discipline migrate already follows.
     const backupTargets = [
-      ...['team-task-list.json', 'events.meta.json', 'progress.json'].map((rel) => join(runDir, rel)),
+      ...['team-task-list.json', 'progress.json'].map((rel) => join(runDir, rel)),
       ...taskFixes.map((fix) => fix.file),
     ];
     const backupId = writeBackup(teamRoot, 'repair', backupTargets);

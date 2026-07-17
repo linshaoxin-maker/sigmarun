@@ -8,7 +8,10 @@ import { computeProgress, writeProgress } from './progress.js';
 export interface WatchOptions extends ResolveOptions {
   runId: string;
   force?: boolean;
-  /** test hook: keep the advisory lock after the tick to simulate a long-running watcher */
+  /** Keep the advisory lock held after the tick returns. The looped `watch` sets this so the
+   * single-instance lock spans the WHOLE loop, not just the first tick — otherwise the lock was
+   * released immediately and every later (force:true) tick skipped locking, letting two watchers
+   * run at once. Also a test hook for simulating a long-running watcher. */
   holdLock?: boolean;
 }
 

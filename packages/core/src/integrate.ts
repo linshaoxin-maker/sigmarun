@@ -157,6 +157,12 @@ export function integrateRecord(opts: IntegrateRecordOptions): Envelope {
     const list = readJsonState(listFile);
     const row = (list.doc as { tasks: Array<{ task_id: string; status: string }> }).tasks.find((r) => r.task_id === opts.taskId);
 
+    // --merge-commit (success) and --failed (revert) are opposite outcomes. Passing both used to
+    // silently take the failed branch and DROP the merge-commit, quietly bouncing an already-merged
+    // task back to changes_requested. Reject the conflict instead of guessing.
+    if (opts.failed && opts.mergeCommit) {
+      return failEnvelope('usage_error', '--merge-commit (record a success) and --failed (record a revert) are mutually exclusive — pass exactly one.', { startedAt });
+    }
     if (opts.failed) {
       // Minimal VERIFY record keeps event #38's verify_id contract honest.
       const countersFile = join(runDir, 'counters.json');

@@ -64,4 +64,28 @@ describe('repair (docs/17 §5.3: ledger-driven, backup first, idempotent; BDD-00
     expect((second.data as { repaired: unknown[] }).repaired.length).toBe(0);
     expect(events().length).toBe(eventsBefore);
   });
+
+  it('restoring a repair backup keeps the ledger consistent — meta stays ahead of events (no seq reuse)', async () => {
+    const { restoreBackup } = await import('@sigmarun/core');
+    // create drift so repair appends a state_repaired event AND rolls events.meta.json forward
+    const listFile = join(runDir(), 'team-task-list.json');
+    const { doc, rev } = readJsonState(listFile);
+    const row = (doc as { tasks: Array<{ status: string; owner_agent_id: string | null }> }).tasks[0]!;
+    row.status = 'ready';
+    row.owner_agent_id = null;
+    writeJsonStateAtomic(listFile, doc, { expectedRev: rev });
+
+    const rep = repairRun({ cwd: repo, runId: 'RUN-0001' });
+    expect(rep.ok).toBe(true);
+    const backupId = (rep.data as { backup: string }).backup;
+
+    restoreBackup({ cwd: repo, backupId });
+
+    // The bug: repair backed up events.meta.json but not events.jsonl, so restore rolled next_seq
+    // BACK below the appended state_repaired event's seq → the next append reused a live seq
+    // (duplicate seq / AUD-033). After the fix, meta is left out of the backup, so it stays ahead.
+    const maxSeq = Math.max(...events().map((e) => e.seq as number));
+    const nextSeq = JSON.parse(readFileSync(join(runDir(), 'events.meta.json'), 'utf8')).next_seq as number;
+    expect(nextSeq).toBeGreaterThan(maxSeq);
+  });
 });

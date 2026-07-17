@@ -132,6 +132,18 @@ describe('review claim + D15 synthesis (BDD-006-01/02/05; INV-008)', () => {
     }
   });
 
+  it('approve carrying a must_fix finding is rejected (no "approved yet with open change demands" state)', () => {
+    reviewClaim({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: reviewer });
+    const bad = reviewDecide({
+      cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: reviewer,
+      decision: 'approve', review: { findings: [{ must_fix: true, message: 'blocking issue' }] },
+    });
+    expect(bad.ok).toBe(false);
+    expect(bad.code).toBe('schema_invalid');
+    // task must NOT have advanced, and no open request_changes message should have been mirrored
+    expect(readJson('tasks/TASK-0001/task.json').status).toBe('reviewing');
+  });
+
   it('reclaim --force: the human takes a live lease request-changes gave a dead owner (S4/B4)', async () => {
     const { reclaimTask } = await import('@sigmarun/dispatch');
     reviewClaim({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: reviewer });

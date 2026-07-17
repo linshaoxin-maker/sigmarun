@@ -348,6 +348,13 @@ export function reviewDecide(opts: ReviewDecideOptions): Envelope {
     if (opts.decision === 'request_changes' && mustFix.length === 0) {
       return failEnvelope('schema_invalid', 'request_changes requires at least one must_fix finding (docs/14 §3.2).', { startedAt });
     }
+    // A must_fix finding is a blocking objection. Approving while carrying one would push the task
+    // to `approved` AND (below) mirror an open request_changes message → a contradictory state
+    // (approved yet with unresolved change demands, visible in msg list --open / hydrate). Reject
+    // the contradiction here instead of silently producing it.
+    if (opts.decision === 'approve' && mustFix.length > 0) {
+      return failEnvelope('schema_invalid', `approve cannot carry ${mustFix.length} must_fix finding(s) — use request_changes, or clear the must_fix flag if they are non-blocking.`, { startedAt });
+    }
 
     // Mirror must_fix findings into the message pool first so records can back-link message_ref (docs/12 §6).
     // A block decision mirrors a blocker message too — AUD-024 requires every blocked task to carry one.

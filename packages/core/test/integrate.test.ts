@@ -56,6 +56,15 @@ describe('integrate + report (16 §4; BDD-008-01/02/03)', () => {
     expect(events().some((e) => e.event === 'integration_started')).toBe(true);
   });
 
+  it('record rejects --merge-commit together with --failed (conflicting outcomes, no silent revert)', () => {
+    integrateStart({ cwd: repo, runId: 'RUN-0001' });
+    const conflict = integrateRecord({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', mergeCommit: 'deadbeef', failed: true, reason: 'x' });
+    expect(conflict.ok).toBe(false);
+    expect(conflict.code).toBe('usage_error');
+    // the task must NOT have been bounced to changes_requested by a silently-won --failed
+    expect(readJson('tasks/TASK-0001/task.json').status).not.toBe('changes_requested');
+  });
+
   it('record: merge success -> integrated + path claims released; --failed -> minimal VERIFY + changes_requested', () => {
     integrateStart({ cwd: repo, runId: 'RUN-0001' });
     const ok = integrateRecord({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0003', mergeCommit: 'abc1234' });
