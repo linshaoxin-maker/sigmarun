@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.6.0';
+export const TEMPLATE_VERSION = '0.6.1';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -87,7 +87,17 @@ export const MIDRUN_BLOCK = `MID-RUN CHANGES (the user says "add a piece" / "dro
 - Scrap the whole run: RED LINE. \`sigmarun run cancel <RUN> --json\` returns an
   IMPACT PREVIEW (which tasks die, who is mid-flight on them) without
   cancelling; show it, and only on their explicit yes re-run with \`--yes\`.
-  Then back to /team-plan for the next goal.`;
+  Then back to /team-plan for the next goal.
+- Hold everything ("先停一下"): \`sigmarun run pause <RUN> --json\` freezes new
+  claims (in-flight work may still finish); \`sigmarun run resume <RUN> --json\`
+  reopens. Pausing is reversible — prefer it over cancel when they just need
+  to think.
+- Switch mode (add review to a lightweight run, or drop the ceremony)? Modes
+  are BIRTH-FIXED — there is no switch. The honest path: cancel (preview +
+  their yes) and re-plan the remaining work in the other mode; carry the
+  unfinished task list into the new plan payload.
+- Run already reported/closed (\`run_not_active\`)? The shelf is frozen —
+  start the extra piece as a fresh /team-plan instead.`;
 
 /** docs/19 §3.2 steps 1–10 (shared by the Claude command and the Codex skill). */
 const DISPATCH_FLOW = (tool: string) => `Required flow:
@@ -100,7 +110,10 @@ const DISPATCH_FLOW = (tool: string) => `Required flow:
    agent and jam each other). Remember your AGENT-ID for every later call.
    RESUME CHECK: \`sigmarun agent list <RUN-ID> --json\` — if your label
    already holds an active claim, offer to CONTINUE that task (the lease is
-   yours) instead of claiming new work.
+   yours) instead of claiming new work. If that task is \`changes_requested\`,
+   first \`sigmarun resume <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --json\` to
+   flip it back to working, read the reviewer's request_changes messages,
+   then rework and resubmit (evidence revision bumps automatically).
 3. PAUSE FOR THE HUMAN (task pick) — unless they passed --task or set
    AUTOPILOT. Preview WITHOUT claiming: \`sigmarun claim-next <RUN-ID>
    --agent=<AGENT-ID> [--role=<role>] --dry-run --json\` returns
@@ -200,6 +213,8 @@ ${versionHeader}
 
 \`$ARGUMENTS\` is the user's goal. Break it into independent pieces so this
 window and other AI windows can each grab one and work in parallel.
+Empty \`$ARGUMENTS\`? Ask them what they want to build — one plain question,
+never an error.
 
 RULES: every \`sigmarun\` call uses \`--json\`; branch only on \`ok\` /
 \`code\` / \`next_actions\`. Never edit files under \`.team/\` by hand.
@@ -208,10 +223,13 @@ ${COLLAB_BLOCK}
 
 Flow:
 1. \`sigmarun doctor --json\`; if not ok, report its \`next_actions\` and stop.
-2. Read enough of the repo to split the goal into 2–6 INDEPENDENT tasks
+2. Read enough of the repo to split the goal into 1–6 INDEPENDENT tasks
    (pieces with no ordering dependency, so different tools can do them at
    once). Each task needs: a title, a one-line objective, at least one
    testable acceptance line, and \`paths.allow\` (the files it may touch).
+   A goal that is genuinely ONE small piece is fine as a single-task run —
+   never invent an artificial split; instead say so and offer: [single-task
+   run] / [just do it directly without sigmarun — a run may be overkill].
 3. Write a \`team.plan_payload.v1\` JSON to a temp file — do NOT invent
    run_id / task_id / status. Minimal shape:
    \`{ "schema_version":"team.plan_payload.v1",
@@ -268,9 +286,13 @@ ${COLLAB_BLOCK}
 ${MIDRUN_BLOCK}
 
 Flow:
-1. Find the run:
-   - \`$ARGUMENTS\` names a RUN-ID → use it.
-   - else \`sigmarun run list --json\`; among ACTIVE runs (any mode):
+1. Parse \`$ARGUMENTS\` — it may carry a RUN-ID, a TASK-ID, or both:
+   - TASK-ID given → a DIRECTED pick: the user already chose, so skip the
+     task-pick pause and claim exactly that task (\`--task=<TASK-ID>\`). Task
+     numbers repeat across runs — resolve the run first (below) and, if
+     several runs have that task id, ask which run they mean.
+   - RUN-ID given → use it.
+   - neither → \`sigmarun run list --json\`; among ACTIVE runs (any mode):
      EXACTLY ONE → use it; MORE THAN ONE → PAUSE FOR THE HUMAN — list them
      (RUN-ID · title · lightweight/full · status) and ask which; never guess
      "newest" (they may belong to other sessions/windows). NONE → "nothing to
@@ -282,8 +304,12 @@ Flow:
    reusing a name = resuming that window's identity.
 3. RESUME CHECK — \`sigmarun agent list <RUN> --json\`: if your name already
    holds an active claim, you have work in flight from a previous session.
-   Say so and offer [continue TASK-X] (the lease is still yours — just keep
-   working) before ever claiming something new.
+   Say so and offer [continue TASK-X] (the lease is still yours) before ever
+   claiming something new. One nuance on full runs: if that task's status is
+   \`changes_requested\` (review bounced it), first flip it back with
+   \`sigmarun resume <RUN> <TASK> --agent=<name> --json\`, read the reviewer's
+   request_changes messages (\`sigmarun msg list <RUN> --task=<TASK> --json\`),
+   then rework and resubmit.
 4. Read the run's mode (\`lightweight: true|false\` on run list/show):
    - lightweight → continue with steps 5-8 here.
    - full pipeline → switch to the Required flow of /team-dispatch from its
@@ -626,7 +652,10 @@ ${RULES_BLOCK}
 
 ${COLLAB_BLOCK}
 
-Break the goal into 2-6 INDEPENDENT pieces any tool can pick up. Flow:
+Break the goal into 1-6 INDEPENDENT pieces any tool can pick up (a genuinely
+single-piece goal is fine as a single-task run — never invent an artificial
+split; offer [single-task run] / [just do it directly]). No goal given? Ask
+what they want to build — one plain question, never an error. Flow:
 doctor -> read the repo (and docs/team/MEMORY.md if present) -> build a
 team.plan_payload.v1 (each task: title, one-line objective, >=1 testable
 acceptance line, paths.allow; do not invent run_id/task_id/status) ->
@@ -662,14 +691,19 @@ ${COLLAB_BLOCK}
 
 THE one "do work" skill — it reads the run's mode and adapts; the user never
 needs to know lightweight vs full. Flow:
-1. Find the run: RUN-ID from the user → use it; else \`sigmarun run list --json\`
-   among ACTIVE runs (any mode): exactly one → use it; MORE THAN ONE → PAUSE
-   FOR THE HUMAN, list them (id · title · mode · status) and ask which (never
-   guess "newest"); none → "start one: team-plan <goal>".
+1. Find the run: RUN-ID from the user → use it; a TASK-ID in the ask = a
+   DIRECTED pick (skip the pick pause, claim it via \`--task=<TASK-ID>\`; task
+   numbers repeat across runs — resolve the run first, ask if ambiguous);
+   else \`sigmarun run list --json\` among ACTIVE runs (any mode): exactly one
+   → use it; MORE THAN ONE → PAUSE FOR THE HUMAN, list them (id · title ·
+   mode · status) and ask which (never guess "newest"); none → "start one:
+   team-plan <goal>".
 2. Window identity: --as name, or GENERATE a fresh unique \`win-<4 random
    chars>\` (never win-1 — same label = same agent, two windows would jam).
    RESUME CHECK: \`sigmarun agent list <RUN> --json\` — if your label already
-   holds an active claim, offer to CONTINUE that task before claiming new.
+   holds an active claim, offer to CONTINUE that task before claiming new;
+   if it is \`changes_requested\`, first \`sigmarun resume <RUN> <TASK>
+   --agent=<name> --json\`, read the request_changes messages, rework, resubmit.
 3. Run mode \`lightweight: false\`? → switch to the team-run-dispatch skill
    flow (worktree + evidence + submit; read
    \`.codex/skills/team-run-dispatch/SKILL.md\`). Below is lightweight only.

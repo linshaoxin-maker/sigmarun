@@ -332,7 +332,12 @@ export function reviewDecide(opts: ReviewDecideOptions): Envelope {
     const rc = loadReviewClaims(runDir, runId);
     const claim = rc.doc.claims.find((c) => c.task_id === opts.taskId && c.status === 'active');
     if (!claim) {
-      return failEnvelope('claim_not_found', `No active review claim on ${opts.taskId}.`, { startedAt });
+      // The registry's claim_not_found guidance is implementer-flavored (claim-next); a review
+      // decision needs the review gate claimed — point at the precise command.
+      return failEnvelope('claim_not_found', `No active review claim on ${opts.taskId}.`, {
+        nextActions: [`Claim the review first: sigmarun review claim ${runId} ${opts.taskId} --agent=${opts.agentId}`],
+        startedAt,
+      });
     }
     if (claim.reviewer_agent_id !== opts.agentId) {
       return failEnvelope('not_claim_owner', `Review claim ${claim.claim_id} belongs to ${claim.reviewer_agent_id}.`, { startedAt });

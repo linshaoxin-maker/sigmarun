@@ -37,6 +37,8 @@ You don't watch every step, but you're not cut out of the decisions either. The 
 
 You control how much it checks in, in one sentence at any time: *"you drive it"* (autopilot — act and report), the default (pause at the forks above), or *"ask me each step"*. Note this is a property of how the **agent is instructed**, not something the gateway enforces — the gateway has no intelligence to know a fork is happening. It behaves the same in Claude Code and Codex.
 
+One boundary to know: this pause-and-ask model assumes **one operator** driving all the windows. Several people operating the same run works at the coordination layer (claims and path locks don't care who you are), but "pause for the human" has no notion of *which* human — multi-person operation of a single run is outside the current design.
+
 ---
 
 ## 2. Installation and project onboarding
