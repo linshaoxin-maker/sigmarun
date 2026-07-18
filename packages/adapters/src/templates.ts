@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.6.4';
+export const TEMPLATE_VERSION = '0.6.5';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -687,8 +687,10 @@ single-piece goal is fine as a single-task run — never invent an artificial
 split; offer [single-task run] / [just do it directly]). No goal given? Ask
 what they want to build — one plain question, never an error. Flow:
 doctor -> read the repo (and docs/team/MEMORY.md if present) -> build a
-team.plan_payload.v1 (each task: title, one-line objective, >=1 testable
-acceptance line, paths.allow; do not invent run_id/task_id/status) ->
+team.plan_payload.v1 JSON: top-level \`schema_version\`:"team.plan_payload.v1",
+\`source\`, \`run\` {title, mode, goal}, \`plan\` {summary}, \`tasks\`; each task
+carries \`client_task_key\`, title, \`type\`, one-line objective, >=1 testable
+acceptance line, paths.allow (do not invent run_id/task_id/status) ->
 PAUSE FOR THE HUMAN: show the numbered split (titles, objectives, the files
 each touches, ordering) and get their go or edits BEFORE importing —
 AUTOPILOT imports the best split and offers to redo ->
@@ -777,7 +779,8 @@ Follow the /team-review flow with --tool=codex:
    \`sigmarun claim-next <RUN-ID> --agent=<AGENT-ID> --role=reviewer --json\` (data.kind=review_work).
 3. Read evidence (\`sigmarun evidence show <RUN-ID> <TASK-ID> --json\`) + the diff; RERUN the checks.
 4. Decide: \`sigmarun review approve|request-changes|block <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --review=<file> --json\`
-   (request-changes needs >=1 must_fix finding). self_approval_forbidden means STOP.
+   The --review file is \`{ "findings": [{ "must_fix": true|false, "message": "..", .. }] }\`;
+   request-changes needs >=1 finding with must_fix:true. self_approval_forbidden means STOP.
 `;
 
 const CODEX_VERIFY_SKILL = `---
