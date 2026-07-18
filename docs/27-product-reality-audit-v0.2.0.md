@@ -124,3 +124,19 @@
 7. `git`(在你确认后):合并 `prodfix/integration`→main、`git tag v0.2.0`、push。
 
 > 我不执行 4-7 的 publish/tag/push(需你的 OTP 与授权);其余已就绪。
+
+---
+
+## 9. 后续:字段协议一致性审计(skill 模板 ↔ 底层分发/存储)
+
+系统性核对"skill 模板教 AI 构造的 JSON 字段"与"dispatch/core 代码真正读/校验的字段",防 P0-4 那类 drift。
+
+**核对面(全部逐一比对)**:plan payload(payload.ts PayloadSchema)、evidence draft(submit.ts)、verify draft(verify.ts)、review draft(review.ts)、msg 类型(context-plane.ts MESSAGE_TYPES)、CLI flag 白名单、读路径字段(previous_attempts/must_read)。
+
+**结论:核心协议大体一致**(P0-4 的 output_file/handoff 修复守住;verify 5 个 gate 键、review must_fix、plan 枚举全对;`changes_requested`/`verification_failed` 澄清为**事件类型**非 msg 类型,skill 的 `events --type=` 用法正确)。**找到并修 2 处 drift**:
+1. **evidence `cmd_id`**:skill 讲了"cmd_ref 指向 commands[]"却没点名每个 command 要有 `cmd_id`(submit.ts:179 强制格式)→ 已在模板点名。
+2. **Codex plan/review skill 比 Claude 薄**:CODEX_PLAN 漏 `schema_version`/`client_task_key`、CODEX_REVIEW 漏 `findings[]` 结构 → Codex AI 会构造漏字段的 payload → 已补齐到 Claude 完整度。
+
+**根因与持久修复**:此前**无一道测试把 skill 字段和代码校验绑一起**(命令面/退出码/旅程/架构都有对账,唯独 draft schema 没有)——这就是 drift 能溜进来的原因。新增 **`adapters/field-protocol-reconciliation.test.ts`(8 用例,×Claude/Codex × plan/evidence/verify/review)**:代码要求的每个字段,skill 语料必须点名。**它当场就逮住了上面 Codex 的 3 个漏字段**(人工审计漏掉的),现为永久守卫。
+
+TEMPLATE_VERSION 0.6.4→**0.6.5**(模板实质变化)。全量 **385→393 绿**(+8 对账)。测试地图见 [docs/28](28-test-journey-and-cases.md)。
