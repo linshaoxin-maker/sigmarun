@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.1 — 2026-07-18
+
+- **claim 故障可发现性 + worktree 本地/隔离建议**(GATEWAY 0.2.0→**0.2.1**,TEMPLATE 0.6.5→**0.6.6**)。深入项目、排查 claim × run.lock × 事件账本 的故障面时收的两项:
+  - **幽灵 claim 现在指向 repair**:崩溃可能留下一条 `active` 但事件账本无对应 `task_claimed` 的 task-claim(claim-engine 先写 claims 文件、后写事件)。它照样被并行槽 / per-agent 配额计数,让 `claim-next` 撞 `parallel_limit_reached` / `agent_claim_limit`,而原指引只说"等在途任务完成 / 提交你的任务"——那个"在途任务"是幽灵、永不完成,用户干等到 3×TTL(~90min)。现在这两条限额**只在真有幽灵占坑时**(某 `active` claim 落在非占用态任务上)追加"疑似崩溃残留 → `sigmarun audit run` / `repair`"提示(真满载不误报,带对照测试);两侧 DISPATCH_FLOW 也告诉 AI 照此 repair 后重试。P1-9 让 `repair` 能清幽灵,这条补上"发现 → 动手"的闭环。
+  - **worktree 本地 vs 隔离建议**:`claim-next` 成功返回 `data.worktree.recommend` + reason——full run(review/integrate 需分支)或有其它任务在飞(共享 checkout 会互踩)→ `isolated`;单人、顺序的轻量任务 → `local`(本地 checkout 直接做,不必建 worktree)。两侧轻量 DO 路线(team-do / team-run-do)据此选择在哪干活。gateway 只建议,AI / 人定夺。
+  - 均只读/输出层改动,不碰认领 / 锁 / 写的热路径(防撞车不变)。各带回归测试(幽灵→repair 提示 + 真满载不提示;full/并行 → isolated、轻量单人 → local);两侧渲染输出对齐验证。全量 395 绿。
+
 ## 0.2.0 — 2026-07-18
 
 - **产品现实审计 + 字段协议审计**(GATEWAY 0.1.0→**0.2.0**,TEMPLATE→**0.6.5**,393/393)。7 只读子代理黑盒审计判「工程成熟、产品未上市」→ 6 P0 + 12 P1 逐项独立 worktree 修复,**实现者不验自己的活、每项独立 verifier 从 tarball 黑盒复跑**,只有验过的进合并。关键修复:①发布线——版本 bump 避撞号、npm README 单源(删 `scripts/release-readme.md`)、`--version` 吐模板代际+漂移;②Codex adapter 装 `.agents/skills`(官方路径,`.codex/` 不再建);③evidence 字段名 docs↔code 对齐 + 报错点名字段(拆 submit 死循环);④events.jsonl 崩溃安全 seq(从盘上最大已提交 seq 推,不再永久重复);⑤坏 task.json → repair 备份+恢复出口不再崩;⑥锁 `Atomics.wait` 非忙等 + pid-first 抢占(30 路 lock_timeout 归零、崩溃接管 30s→亚秒);⑦restore 上锁不穿透在途;⑧幽灵 claim 对账(**红线:repair 以事件账本为准、绝不清活 claim → 绝不双认领**);⑨doctor 对坏锁诚实变红;⑩audit error→exit 9(CI 可拦)而 envelope 不变;⑪注册指引点名返回的 AGENT-ID(4 emitter)。**根治「陈旧包」**:`tsc -b` 增量空转会发出不含修复的包而 `npm test` 照绿——`build-release` 改自清+重建。**golden journey** 陌生人 clean-install 端到端验通两条旅途、无绿灯欺骗,并修其 #1 断点(人面校验报错现打印字段列表)。**字段协议对账守卫**(`adapters/field-protocol-reconciliation.test.ts`):skill 教 AI 构造的字段必被代码校验器对上——当场逮住 Codex plan/review skill 漏 `schema_version`/`client_task_key`/`findings` 并补齐。**tarball 冒烟**(`npm run smoke` + CI job):打真包→装→驱动装出来的 CLI,补上单测测不出的发布产物完整性。报告 docs/27,测试地图 docs/28。
