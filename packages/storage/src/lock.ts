@@ -11,9 +11,16 @@ export interface LockOptions {
   onTakeover?: (info: { age_ms: number; stale_pid?: number; stale_token?: string }) => void;
 }
 
+/**
+ * Block the calling thread for `ms` WITHOUT burning a core. Node has no synchronous sleep, but
+ * Atomics.wait parks the thread on a never-signalled SharedArrayBuffer word until the timeout — a
+ * real CPU yield. The old `while (Date.now() < end) {}` busy-spin pinned one core per waiter and,
+ * under fan-out, the spinners starved the very holder they were all waiting on: superlinear
+ * lock_timeout collapse (P1-10). Same idiom the watch loop already uses (cli.ts).
+ */
+const PARK = new Int32Array(new SharedArrayBuffer(4));
 function sleepSync(ms: number): void {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { /* short busy wait; CLI-scale contention only */ }
+  if (ms > 0) Atomics.wait(PARK, 0, 0, ms);
 }
 
 /**
@@ -62,24 +69,34 @@ function releaseIfMine(lockDir: string, token: string): void {
  */
 const HARD_STALE_MULTIPLE = 20;
 
+type Holder = 'alive' | 'dead' | 'unknown';
+
 /**
- * Is the process recorded in the lock's meta.json still alive? Best-effort and same-host only —
- * sigmarun locks are repo-local, so probing the pid is valid. Returns false (⇒ seizable) when meta
- * is unreadable or the pid is gone, so a genuinely crashed holder is still taken over. EPERM means
- * the process exists but isn't ours to signal — that counts as alive (do not seize).
+ * Classify the process recorded in the lock's meta.json. Best-effort and same-host only — sigmarun
+ * locks are repo-local, so probing the pid is valid:
+ *   'alive'   — the pid is running, or EPERM (exists but not ours to signal). Never seizable early.
+ *   'dead'    — meta names a pid and it is PROVABLY gone (ESRCH). Seizable at once: a crashed holder
+ *               must not freeze the run for the whole staleMs window (P1-10).
+ *   'unknown' — meta is absent/torn or has no numeric pid. This is NOT proof of death: a holder still
+ *               between its mkdir and its meta write looks exactly like this, so we must not seize it
+ *               early — fall back to age (only a staleMs-old meta-less lock is genuinely stale).
+ * The distinction between 'dead' and 'unknown' is the crux: seizing 'unknown' early would steal a
+ * lock a live process is still initialising (the mkdir→meta-write race in acquireLock itself).
  */
-function holderAlive(lockDir: string): boolean {
+function probeHolder(lockDir: string): Holder {
+  let pid: unknown;
   try {
-    const meta = JSON.parse(readFileSync(join(lockDir, 'meta.json'), 'utf8')) as { pid?: unknown };
-    if (typeof meta.pid !== 'number') return false;
-    try {
-      process.kill(meta.pid, 0);
-      return true;
-    } catch (err) {
-      return (err as NodeJS.ErrnoException).code === 'EPERM';
-    }
+    pid = (JSON.parse(readFileSync(join(lockDir, 'meta.json'), 'utf8')) as { pid?: unknown }).pid;
   } catch {
-    return false;
+    return 'unknown'; // absent or torn meta — cannot prove death; may be mid-creation
+  }
+  if (typeof pid !== 'number') return 'unknown';
+  try {
+    process.kill(pid, 0);
+    return 'alive';
+  } catch (err) {
+    // ESRCH ⇒ no such process (crashed). Anything else (EPERM, unexpected) ⇒ treat as alive: do not seize.
+    return (err as NodeJS.ErrnoException).code === 'ESRCH' ? 'dead' : 'alive';
   }
 }
 
@@ -104,12 +121,17 @@ export function acquireLock(lockDir: string, opts: LockOptions = {}): () => void
       let ageMs = 0;
       try {
         ageMs = Date.now() - statSync(lockDir).mtimeMs;
-        if (ageMs > staleMs) {
-          // An old mtime is AMBIGUOUS — it is never refreshed, so a crashed holder and a legitimately
-          // long transaction look identical by age. Probe the holder: seize only if its process is
-          // truly gone, or once the hard ceiling is passed (recycled-pid safety net).
-          stale = ageMs > staleMs * HARD_STALE_MULTIPLE || !holderAlive(lockDir);
-        }
+        // Pid-FIRST, not age-first (P1-10). The lock mtime is stamped once and never refreshed, so a
+        // crashed holder and a legitimately long transaction are indistinguishable by age. Probe the
+        // holder up front: a provably dead one is seized at once (no waiting out staleMs — that was
+        // the crash-freeze); a live one is protected until the hard ceiling (a long transaction we
+        // must not steal — recycled pids still get seized past the ceiling); an unprovable holder
+        // (absent/torn meta, possibly mid-creation) falls back to plain age staleness.
+        const holder = probeHolder(lockDir);
+        stale =
+          holder === 'dead' ||
+          ageMs > staleMs * HARD_STALE_MULTIPLE ||
+          (holder === 'unknown' && ageMs > staleMs);
       } catch { /* raced away between attempts; retry immediately */ }
       if (stale) {
         // Exclusive takeover: rename is atomic, so only ONE contender wins it — the losers
@@ -132,7 +154,11 @@ export function acquireLock(lockDir: string, opts: LockOptions = {}): () => void
         vlog('lock', `timeout on ${shortPath(lockDir)} after ${timeoutMs}ms`);
         throw new GatewayError('lock_timeout', `Could not acquire lock within ${timeoutMs}ms: ${lockDir}`);
       }
-      sleepSync(Math.min(wait, 1000));
+      // Exponential backoff with bounded random jitter: [cap/2, cap). The jitter de-synchronises
+      // contenders so N waiters don't wake in lockstep and collide on the same mkdir (thundering
+      // herd) — with the busy-wait gone, this is what keeps high fan-out from re-stampeding.
+      const cap = Math.min(wait, 1000);
+      sleepSync(Math.floor(cap / 2 + Math.random() * (cap / 2)));
       wait *= 2;
     }
   }

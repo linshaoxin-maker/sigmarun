@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { runCli } from '../src/cli.js';
+import { TEMPLATE_VERSION } from '@sigmarun/adapters';
 import { mkTmpGitRepo, cleanup } from '../../storage/test/helpers.js';
 
 const dirs: string[] = [];
@@ -54,6 +57,18 @@ describe('cli front-end (contract: docs/17 §1/§2.2 — parse, delegate, map ex
     const r = runCli(['run', 'import', '--json'], { cwd: repo });
     expect(r.exitCode).toBe(2);
     expect(JSON.parse(r.stdout).code).toBe('usage_error');
+  });
+
+  it('a HUMAN-face validation failure prints the error list, not just "fix the listed fields" (golden-journey stranger breakpoint #1)', () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const f = join(repo, 'bad.json');
+    writeFileSync(f, JSON.stringify({ tasks: [{ objective: 'x' }] })); // missing schema_version/source/run/plan/task fields
+    const r = runCli(['run', 'import', f], { cwd: repo }); // human mode — no --json
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stdout).toMatch(/failed validation with \d+ error/); // the summary line…
+    expect(r.stdout).toMatch(/^\s+- .+/m);                        // …and the actual list is printed
+    expect(r.stdout).toContain('Required');                      // a concrete field-level message a user can act on
   });
 
   it('register -> claim-next -> release roundtrip via argv (FEAT-004)', async () => {
@@ -155,6 +170,24 @@ describe('cli front-end (contract: docs/17 §1/§2.2 — parse, delegate, map ex
 
     const watch = runCli(['watch', 'RUN-0001', '--once', '--json'], { cwd: repo });
     expect(watch.exitCode).toBe(0);
+  });
+
+  it('renders repair string findings without "undefined" (P1-11: the findings key has two producer shapes)', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    const { writeFileSync, appendFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    runCli(['init', '--json'], { cwd: repo });
+    writeFileSync(join(repo, 'payload.json'), JSON.stringify(validPayload()));
+    runCli(['run', 'import', join(repo, 'payload.json'), '--json'], { cwd: repo });
+    runCli(['task', 'publish', 'RUN-0001', '--json'], { cwd: repo });
+    // a torn tail line makes repair emit a PLAIN-STRING finding (audit emits objects for the same key)
+    appendFileSync(join(repo, '.team', 'runs', 'RUN-0001', 'events.jsonl'), '{"event":"task_don');
+
+    const r = runCli(['repair', 'RUN-0001'], { cwd: repo }); // no --json -> human render path
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('undefined'); // used to print "[undefined] undefined undefined -> undefined"
+    expect(r.stdout).toContain('unparseable'); // the finding string is rendered verbatim
   });
 });
 
@@ -294,13 +327,98 @@ describe('smoke-test fixes: help surface (L15) and project-scoped worktree root 
   });
 });
 
+describe('P1-4 / P1-7 / P1-12: onboarding breadcrumbs + health-gate exit codes', () => {
+  it('P1-4: --help opens with a start-here path into the agent /team-plan entry', () => {
+    const r = runCli(['--help']);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('adapter install');
+    expect(r.stdout).toContain('/team-plan'); // the real UX lives in the agent slash command
+  });
+
+  it('P1-7: doctor with a failing check does not exit 0 — a broken lock must gate, not pass', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const { rmSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    rmSync(join(repo, '.team', 'locks'), { recursive: true, force: true }); // lock probe fails
+    const r = runCli(['doctor', '--json'], { cwd: repo });
+    const env = JSON.parse(r.stdout);
+    expect(env.ok).toBe(false);
+    expect(r.exitCode).not.toBe(0);
+  });
+
+  it('P1-12: audit run with an error finding exits non-zero yet keeps the success envelope (findings are data)', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const { writeFileSync, readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    writeFileSync(join(repo, 'payload.json'), JSON.stringify(validPayload()));
+    runCli(['run', 'import', join(repo, 'payload.json'), '--lightweight', '--json'], { cwd: repo });
+    // tear the ledger: drop a middle event so seqs gap -> AUD-033 error
+    const ev = join(repo, '.team', 'runs', 'RUN-0001', 'events.jsonl');
+    const lines = readFileSync(ev, 'utf8').trim().split('\n');
+    writeFileSync(ev, [lines[0], ...lines.slice(2)].join('\n') + '\n');
+    const r = runCli(['audit', 'run', 'RUN-0001', '--json'], { cwd: repo });
+    const env = JSON.parse(r.stdout);
+    // envelope semantics unchanged: audit ran fine, findings are data
+    expect(env.ok).toBe(true);
+    expect(env.code).toBe('OK');
+    expect((env.data.findings as Array<{ severity: string }>).some((f) => f.severity === 'error')).toBe(true);
+    // but the process exit blocks `sigmarun audit run && ...`
+    expect(r.exitCode).not.toBe(0);
+  });
+
+  it('P1-12: audit run on a clean run still exits 0 (no error findings, no false gate)', async () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init', '--json'], { cwd: repo });
+    const { writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { validPayload } = await import('../../core/test/payload-fixture.js');
+    writeFileSync(join(repo, 'payload.json'), JSON.stringify(validPayload()));
+    runCli(['run', 'import', join(repo, 'payload.json'), '--lightweight', '--json'], { cwd: repo });
+    const r = runCli(['audit', 'run', 'RUN-0001', '--json'], { cwd: repo });
+    expect(r.exitCode).toBe(0);
+    expect((JSON.parse(r.stdout).data.findings as Array<{ severity: string }>).filter((f) => f.severity === 'error')).toEqual([]);
+  });
+});
+
 describe('OSS-readiness: version flag and crash-safety', () => {
-  it('--version, -v, and version print the gateway version at exit 0', () => {
+  it('--version, -v, and version print the gateway version on the first line at exit 0', () => {
     for (const argv of [['--version'], ['-v'], ['version']]) {
       const r = runCli(argv);
       expect(r.exitCode).toBe(0);
-      expect(r.stdout).toMatch(/^\d+\.\d+\.\d+$/);
+      // The first line stays a bare gateway semver so scripts can still do `--version | head -1`.
+      expect(r.stdout.split('\n')[0]).toMatch(/^\d+\.\d+\.\d+$/);
     }
+  });
+
+  it('--version also surfaces the adapter template generation this gateway ships (P1-1)', () => {
+    // TEMPLATE_VERSION moves with capability, on its own cadence from the gateway semver; before this
+    // it was invisible to every CLI face, so "which generation am I on" was unanswerable.
+    const r = runCli(['--version']);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain(TEMPLATE_VERSION);
+    expect(r.stdout.toLowerCase()).toContain('template');
+  });
+
+  it('--version reports installed-template drift so "did my upgrade take effect" is answerable (P1-1)', () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    runCli(['init'], { cwd: repo });
+    runCli(['adapter', 'install', '--tool=claude-code'], { cwd: repo });
+
+    // A fresh install matches the bundled generation -> up to date.
+    const fresh = runCli(['--version'], { cwd: repo });
+    expect(fresh.stdout).toContain(TEMPLATE_VERSION);
+    expect(fresh.stdout.toLowerCase()).toContain('up to date');
+
+    // Simulate an installed-but-never-reinstalled repo: roll one managed file's marker back a
+    // generation. The gateway must now report drift and name the stale installed generation.
+    const planFile = join(repo, '.claude', 'commands', 'team-plan.md');
+    writeFileSync(planFile, readFileSync(planFile, 'utf8').replace(/template_version: [\d.]+/, 'template_version: 0.0.1'));
+    const drifted = runCli(['--version'], { cwd: repo });
+    expect(drifted.stdout.toLowerCase()).toContain('drift');
+    expect(drifted.stdout).toContain('0.0.1');
   });
 
   it('every surveyed bad invocation returns a single JSON envelope, never a throw', () => {

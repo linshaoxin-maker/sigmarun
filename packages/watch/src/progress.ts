@@ -110,6 +110,10 @@ export function computeProgress(runDir: string): Record<string, unknown> {
   const now = Date.now();
   const risks: Array<Record<string, unknown>> = [];
   const needsUser: Array<{ kind: string; task_id?: string; detail: string; command: string }> = [];
+  // A task in `blocked` (docs/15 §3.3) has its lease deliberately FROZEN while a human decision is
+  // pending — it is not progressing. Track those ids so a frozen claim is neither counted as live
+  // "working" work (agentsWithWork below) nor left silent on the needs_user channel (P1-2).
+  const blockedTaskIds = new Set(rows.filter((r) => r.status === 'blocked').map((r) => r.task_id));
 
   const claimsFile = join(runDir, 'claims', 'task-claims.json');
   const taskClaims = existsSync(claimsFile)
@@ -148,7 +152,36 @@ export function computeProgress(runDir: string): Record<string, unknown> {
       command: `sigmarun msg post ${run.run_id} --from=user --type=answer --reply-to=${b.message_id} --body="<answer>"`,
     });
   }
-  const openQuestions = messages.filter((m) => m.type === 'question' && !answered.has(m.message_id)).length;
+  // P1-2: a task frozen in `blocked` is a wait on the human, not progress. The unanswered-blocker
+  // item above tells the user to ANSWER; but answering does not lift the freeze (answer != unblock),
+  // and with the answered blocker filtered out of needsUser nothing else surfaced — status read
+  // "in_progress, 0 need you" while only `task show` told the truth. Surface the unblock step so the
+  // frozen requirement reaches a person.
+  for (const r of rows) {
+    if (r.status !== 'blocked') continue;
+    const pending = messages.some((m) => m.type === 'blocker' && m.task_id === r.task_id && !answered.has(m.message_id));
+    if (pending) continue; // the unanswered-blocker item already says "answer it"; unblock comes after the answer
+    needsUser.push({
+      kind: 'blocked_unblock',
+      task_id: r.task_id,
+      detail: `${r.task_id} is blocked and its blocker is answered — lift the freeze so its owner resumes (answering the blocker does not unblock the task).`,
+      command: `sigmarun unblock ${run.run_id} ${r.task_id} --agent=user`,
+    });
+  }
+
+  // P1-2: an open question is a wait on the human just like a blocker. The old code only COUNTED it
+  // (open_questions), so a window that asked and is waiting read as "in_progress, 0 need you". Push
+  // the answer command — same clearing shape as the blocker item (S11), quoted body (P1-3).
+  const openQuestionMsgs = messages.filter((m) => m.type === 'question' && !answered.has(m.message_id));
+  for (const q of openQuestionMsgs) {
+    needsUser.push({
+      kind: 'open_question',
+      task_id: q.task_id ?? undefined,
+      detail: `${q.message_id}: ${q.body.slice(0, 120)}`,
+      command: `sigmarun msg post ${run.run_id} --from=user --type=answer --reply-to=${q.message_id} --body="<answer>"`,
+    });
+  }
+  const openQuestions = openQuestionMsgs.length;
 
   const approvalsFile = join(runDir, 'claims', 'path-approvals.json');
   const approvals = existsSync(approvalsFile)
@@ -193,16 +226,18 @@ export function computeProgress(runDir: string): Record<string, unknown> {
         needsUser.push({
           kind: 'awaiting_review',
           task_id: r.task_id,
-          detail: `${r.task_id} awaits an independent review.`,
-          command: `sigmarun claim-next ${run.run_id} --agent=<other-window> --role=reviewer`,
+          // P1-3: the old command's bare `--agent=<other-window>` was a shell redirect that errored
+          // on paste, and it omitted the register step / the INV-008 "different window" requirement.
+          detail: `${r.task_id} awaits an INDEPENDENT review — in a second window register a different agent first (sigmarun agent register ${run.run_id} --tool="<your tool>" --role=reviewer), because a reviewer must not review its own work (INV-008), then run the command below.`,
+          command: `sigmarun claim-next ${run.run_id} --agent="<the reviewer's AGENT-ID>" --role=reviewer`,
         });
       }
       if (r.status === 'approved' && verifyOn && !activeGate(r.task_id, 'verify')) {
         needsUser.push({
           kind: 'awaiting_verify',
           task_id: r.task_id,
-          detail: `${r.task_id} awaits independent verification.`,
-          command: `sigmarun claim-next ${run.run_id} --agent=<other-window> --role=verifier`,
+          detail: `${r.task_id} awaits INDEPENDENT verification — in a second window register a different agent first (sigmarun agent register ${run.run_id} --tool="<your tool>" --role=verifier); the verifier must not be the submitter (INV-008), then run the command below.`,
+          command: `sigmarun claim-next ${run.run_id} --agent="<the verifier's AGENT-ID>" --role=verifier`,
         });
       }
       if (r.status === 'changes_requested') {
@@ -281,7 +316,9 @@ export function computeProgress(runDir: string): Record<string, unknown> {
     const a = readJsonState(join(agentsDir, f)).doc as { agent_id: string; last_heartbeat_at?: string; registered_at?: string };
     const hb = Date.parse(a.last_heartbeat_at ?? a.registered_at ?? '') || 0;
     if (now - hb > ttlMs) agentsStale += 1;
-    if (taskClaims.some((c) => c.agent_id === a.agent_id && c.status === 'active')) agentsWithWork += 1;
+    // P1-2: a claim on a BLOCKED task is a frozen lease, not live work — excluding it keeps
+    // "N window(s) working" honest and stops a blocked task from reading as in_progress.
+    if (taskClaims.some((c) => c.agent_id === a.agent_id && c.status === 'active' && !blockedTaskIds.has(c.task_id))) agentsWithWork += 1;
   }
 
   // Ledger integrity → human handoff. Torn lines or duplicate seq are damage the gateway CANNOT

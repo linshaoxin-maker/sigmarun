@@ -3,16 +3,28 @@
  * Assemble the publishable single-package `sigmarun` (docs/22 §4.1: MVP 单包发布，
  * bundle 全部 workspace 包 + 单 bin；@sigmarun/* 九包是内部结构，不随发布拆包).
  *
- * Run `npm run build` first — the bundle consumes each package's dist/ via
- * workspace resolution, so the tarball always matches what the suite verified.
+ * `npm run release` is self-contained: it force-cleans every package's dist/ +
+ * tsconfig.tsbuildinfo and does one full `tsc -b` rebuild before bundling, so the
+ * tarball can never lag the source. (A stale incremental build — leftover build info
+ * after a worktree/git op left mtimes looking current — would otherwise pack a bundle
+ * MISSING fixes the suite verified, while every test stays green because vitest compiles
+ * source, not the bundle.)
  */
 import { build } from 'esbuild';
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const out = join(root, 'release');
+
+// Never trust a pre-existing build for a release: wipe dist/ + tsbuildinfo, then full rebuild.
+for (const name of readdirSync(join(root, 'packages'))) {
+  rmSync(join(root, 'packages', name, 'dist'), { recursive: true, force: true });
+  rmSync(join(root, 'packages', name, 'tsconfig.tsbuildinfo'), { force: true });
+}
+execSync('npm run build', { cwd: root, stdio: 'inherit' });
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, 'dist'), { recursive: true });
@@ -32,7 +44,6 @@ await build({
 });
 
 const rootPkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const { readdirSync } = await import('node:fs');
 const workspaceDeps = {};
 for (const name of readdirSync(join(root, 'packages'))) {
   const manifest = join(root, 'packages', name, 'package.json');
@@ -64,6 +75,9 @@ writeFileSync(join(out, 'package.json'), JSON.stringify({
 
 cpSync(join(root, 'CHANGELOG.md'), join(out, 'CHANGELOG.md'));
 cpSync(join(root, 'LICENSE'), join(out, 'LICENSE'));
-cpSync(join(root, 'scripts/release-readme.md'), join(out, 'README.md'));
+// Single source: the npm README is the repo-root README (the honest, walked-back product story).
+// A second frozen copy under scripts/ silently drifted (self-approval firewalls / "no self-reported
+// done" / doctor 9-vs-10) and shipped stale walk-back language to npm users — never re-fork it.
+cpSync(join(root, 'README.md'), join(out, 'README.md'));
 
 console.log('release/ assembled: sigmarun@' + rootPkg.version);

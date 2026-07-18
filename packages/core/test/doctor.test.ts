@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { execSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { doctorProject, initProject } from '@sigmarun/core';
 import { mkTmpGitRepo, mkTmpDir, cleanup } from '../../storage/test/helpers.js';
@@ -55,6 +55,30 @@ describe('sigmarun doctor (contract: docs/17 §8; BDD-001 background)', () => {
     const c = checkByName(env, 'project_schema');
     expect(c.status).toBe('fail');
     expect(c.detail).toContain('unsupported_schema_version');
+  });
+});
+
+describe('doctor onboarding + health-gate honesty (P1-4 / P1-7)', () => {
+  it('P1-4: an all-green doctor still points onward to adapter install and the /team-plan entry', () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    initProject({ cwd: repo });
+    const env = doctorProject({ cwd: repo });
+    expect(env.ok).toBe(true);
+    const next = env.next_actions.join('\n');
+    expect(next).toContain('adapter install');
+    expect(next).toContain('/team-plan');
+  });
+
+  it('P1-7: a broken lock capability lowers the overall ok (no green signal) and names the crash-safety cost', () => {
+    const repo = mkTmpGitRepo(); dirs.push(repo);
+    initProject({ cwd: repo });
+    rmSync(join(repo, '.team', 'locks'), { recursive: true, force: true }); // probe now fails
+    const env = doctorProject({ cwd: repo });
+    expect(checkByName(env, 'lock_capability').status).toBe('fail');
+    expect(env.ok).toBe(false); // the fix: one failed check pulls down the aggregate ok
+    const text = [...env.next_actions, ...env.warnings.map((w) => w.message)].join('\n');
+    expect(text).toMatch(/\.team\/locks/);
+    expect(text.toLowerCase()).toMatch(/crash|collision|concurren/);
   });
 });
 

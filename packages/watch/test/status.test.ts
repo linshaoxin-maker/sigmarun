@@ -22,6 +22,9 @@ afterEach(() => cleanup(repo));
 
 const runDir = () => join(repo, '.team', 'runs', 'RUN-0001');
 
+/** strip double-quoted spans so a leftover `<` reveals a BARE shell redirect (the P1-3 bug). */
+const stripQuoted = (cmd: string): string => cmd.replace(/"[^"]*"/g, '');
+
 function expireLease(minutes: number): void {
   const file = join(runDir(), 'claims', 'task-claims.json');
   const { doc, rev } = readJsonState(file);
@@ -116,6 +119,69 @@ describe('status (Slice 7 acceptance; M32 Needs-user; INV-006 derived progress)'
     writeJsonStateAtomic(join(runDir(), 'team-task-list.json'), lf.doc as Record<string, unknown>, { expectedRev: lf.rev });
     needs = (statusRun({ cwd: repo, runId: 'RUN-0001' }).data as { needs_user: Array<{ kind: string; command: string }> }).needs_user;
     expect(needs.some((n) => n.kind === 'awaiting_verify' && n.command.includes('--role=verifier'))).toBe(true);
+  });
+
+  it('P1-2a: an open question is a needs-you item with a usable answer command, not a silent count', async () => {
+    const { approvePaths } = await import('@sigmarun/dispatch');
+    // clear the fixture's standing approval item so the question is the SOLE needs_user driver
+    approvePaths({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0002', paths: ['src/users/**'] });
+    claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent });
+    const posted = postMessage({ cwd: repo, runId: 'RUN-0001', fromAgentId: agent, type: 'question', body: 'which db driver do we target?', taskId: 'TASK-0001' });
+    const msgId = (posted.data as { message_id: string }).message_id;
+    const data = statusRun({ cwd: repo, runId: 'RUN-0001' }).data as {
+      needs_user: Array<{ kind: string; command: string }>;
+      user_state: { state: string };
+      open_questions: number;
+    };
+    const q = data.needs_user.find((n) => n.kind === 'open_question');
+    expect(q).toBeTruthy();
+    expect(q!.command).toContain('--type=answer');
+    expect(q!.command).toContain(`--reply-to=${msgId}`);
+    expect(stripQuoted(q!.command)).not.toContain('<'); // pasteable, not a shell redirect
+    expect(data.open_questions).toBe(1); // the count is still reported
+    // the run no longer reads as silently in_progress while a window waits on the human
+    expect(data.user_state.state).toBe('needs_you');
+  });
+
+  it('P1-2b: a blocked task whose blocker was answered still needs you (unblock), never bare in_progress', async () => {
+    const { approvePaths, blockTask } = await import('@sigmarun/dispatch');
+    approvePaths({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0002', paths: ['src/users/**'] });
+    await setupWorking(repo, agent); // TASK-0001 -> working (claim + worktree)
+    const posted = postMessage({ cwd: repo, runId: 'RUN-0001', fromAgentId: agent, type: 'blocker', body: 'schema undecided', taskId: 'TASK-0001' });
+    const msgId = (posted.data as { message_id: string }).message_id;
+    blockTask({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, msgId });
+    // the user ANSWERS the blocker but nobody unblocks — the task stays `blocked` (answer != unblock)
+    postMessage({ cwd: repo, runId: 'RUN-0001', fromAgentId: 'user', type: 'answer', inReplyTo: msgId, body: 'use postgres' });
+    const data = statusRun({ cwd: repo, runId: 'RUN-0001' }).data as {
+      needs_user: Array<{ kind: string; command: string }>;
+      user_state: { state: string };
+      agents: { with_claims: number };
+    };
+    // the false green light is gone
+    expect(data.user_state.state).not.toBe('in_progress');
+    // the surfaced next step is the unblock, aimed at the blocked task
+    const unblock = data.needs_user.find((n) => n.command.includes('sigmarun unblock'));
+    expect(unblock).toBeTruthy();
+    expect(unblock!.command).toContain('TASK-0001');
+    expect(stripQuoted(unblock!.command)).not.toContain('<');
+    // a frozen (blocked) lease is not live "working" work
+    expect(data.agents.with_claims).toBe(0);
+  });
+
+  it('P1-3: review/verify next-step commands are pasteable (no bare <) and name the independent-reviewer step', async () => {
+    await setupWorking(repo, agent);
+    const { submitEvidence } = await import('@sigmarun/core');
+    submitEvidence({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, evidencePath: validDraft(repo) });
+    const needs = (statusRun({ cwd: repo, runId: 'RUN-0001' }).data as { needs_user: Array<{ kind: string; detail: string; command: string }> }).needs_user;
+    const review = needs.find((n) => n.kind === 'awaiting_review');
+    expect(review).toBeTruthy();
+    // the old `--agent=<other-window>` was a bare shell redirect on paste — no unquoted '<' may survive
+    expect(stripQuoted(review!.command)).not.toContain('<');
+    expect(review!.command).toContain('--role=reviewer');
+    // it must point at registering a DIFFERENT agent (INV-008: a reviewer can't review its own work)
+    expect(`${review!.detail} ${review!.command}`.toLowerCase()).toContain('register');
+    // sweep: EVERY needs_user command must be free of a bare '<' placeholder
+    for (const n of needs) expect(stripQuoted(n.command)).not.toContain('<');
   });
 
   it('changes_requested splits: fresh owner -> awaiting_rework(resume); silent owner -> stale_owner(force) (B4)', () => {

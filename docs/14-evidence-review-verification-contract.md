@@ -67,7 +67,7 @@
       "cwd": "worktree",
       "exit_code": 0,
       "duration_ms": 42180,
-      "output_ref": "outputs/check-01.log",
+      "output_file": "outputs/check-01.log",
       "output_truncated": false
     }
   ],
@@ -83,20 +83,25 @@
   "deviations": [],
   "follow_ups": ["Consider rate-limit test in a follow-up task."],
   "context_ack": ["context/tasks/TASK-0001.md", "evidence/TASK-0001/evidence.md"],
-  "handoff_ref": "context/tasks/TASK-0003.md"
+  "handoff": "# TASK-0003 handoff\n\n- Added auth API tests; session.ts hardened. Source: cmd-01.\n"
 }
 ```
 
-字段规则：
+> **草案（输入）vs 落盘（权威记录）——照抄本例前必读。** 上面是你传给 `sigmarun submit --evidence=<file>` 的**草案**，字段名以 gateway 实现为准（`packages/core/src/submit.ts`）：
+> - 命令原始输出用 **`commands[].output_file`**（你捕获到磁盘的原始输出路径，从调用 cwd 解析，绝对路径亦可）——**不是** `output_ref`。
+> - handoff 用顶层 **`handoff`**（inline 正文字符串）或 **`handoff_file`**（指向文件的路径）——**不是** `handoff_ref`。
+> - `output_ref` / `handoff_ref` / `in_scope` / `output_truncated` / `revision` / `submitted_at` / `claim_id` 是 gateway **落盘时**生成的字段：`output_file`→`output_ref`（截断+脱敏后的相对路径）、`handoff`→`handoff_ref`（`context/tasks/<TASK>.md`）、`in_scope` 按 path claim 重算。草案里写不写这些无所谓（gateway 忽略并覆盖），但**别用它们代替 `output_file`/`handoff`**，否则 submit 报 `evidence_invalid`。
+
+字段规则（草案输入字段）：
 
 | 字段 | 必填 | 机械校验 |
 |---|---|---|
 | `changed_files[]` | yes | 非空；`in_scope` 由 gateway 按 path claim glob 计算，不由 agent 自报 |
-| `commands[]` | yes | required check 对应的 command 必须存在且 `output_ref` 文件存在 |
+| `commands[]` | yes | required check 对应的 command 必须存在且 `output_file`（草案输入名）指向的文件存在；落盘后重写为 `output_ref` |
 | `required_checks_results[]` | yes | 必须覆盖 `task.json.required_checks` 的每一条；status ∈ pass/fail/skipped，skipped 必须带 note |
 | `acceptance[]` | yes | 必须与 `task.json.acceptance` 逐条对应（数量与文本匹配）；status ∈ met/unmet/partial |
 | `context_ack[]` | yes（有上游时） | 每个 ref 必须是存在的文件/锚点；与 hydrate 时的 must_read 对比，缺失项记 warning（M22 的可执行版本） |
-| `handoff_ref` | yes | 指向本 task 的 handoff memory，文件必须已写 |
+| `handoff` / `handoff_file` | yes | 草案输入名：`handoff` 为 inline 正文，或 `handoff_file` 指向文件；gateway 落盘为 `handoff_ref`（`context/tasks/<TASK>.md`） |
 | `revision` | yes | 返工后 +1，旧版归档到 `history/` |
 
 ### 2.2 原始输出策略（D8 落地）
@@ -223,7 +228,7 @@
       "name": "focused tests",
       "cmd": "npm test -- auth-api",
       "exit_code": 0,
-      "output_ref": "outputs/verify-0002-01.log",
+      "output_file": "outputs/verify-0002-01.log",
       "status": "pass"
     }
   ],
@@ -234,16 +239,19 @@
     "scope_check": "pass",
     "evidence_complete": "pass"
   },
+  "skip_reasons": { "regression_tests": "covered by run-level verification" },
   "verdict": "pass",
   "failures_mapped": []
 }
 ```
 
+> **草案 vs 落盘**（同 §2.1 约定，以 `packages/dispatch/src/verify.ts` 为准）：`sigmarun verify submit --verify=<file>` 收的是**草案**，check 原始输出用 **`checks[].output_file`**（不是 `output_ref`）；gateway 落盘时才把它重写为 `output_ref`。
+
 规则：
 
 1. `target.kind` ∈ `task` / `run`。task 级记录驱动 `approved -> verified` 转换；run 级记录（integration 阶段的全量验证）必须把失败映射回 TASK-ID（`failures_mapped[]`），对应任务转 `changes_requested`（15 §3.3）。
-2. 五个最小 gate 沿用 [04](04-command-workflows.md) §9；`skipped` 必须带原因（如 review-mode run 无代码变更）。
-3. **命令由 agent/integrator 执行，gateway 校验结构、落盘、推状态**（D11）。gateway 唯一的"验证"是：exit_code 与 status 一致性、output_ref 存在。
+2. 五个最小 gate（`build` / `focused_tests` / `regression_tests` / `scope_check` / `evidence_complete`）沿用 [04](04-command-workflows.md) §9；每个 gate 值 ∈ `pass` / `fail` / `skipped`（**合法值是 `skipped`，不是 `skip`**）；`skipped` 必须在 `skip_reasons[gate]` 带原因（如 review-mode run 无代码变更）。`checks[].status` 同为 `pass` / `fail` / `skipped`。
+3. **命令由 agent/integrator 执行，gateway 校验结构、落盘、推状态**（D11）。gateway 唯一的"验证"是：exit_code 与 status 一致性、草案输入名 `checks[].output_file` 指向的文件存在（落盘后重写为 `output_ref`）。
 4. `verdict: pass` 要求所有非 skipped gate 均 pass。
 5. `verification.md` 降级为从 `verification/*.json` 生成的派生索引。
 

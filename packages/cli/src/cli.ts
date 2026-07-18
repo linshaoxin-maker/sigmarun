@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
-import { setVerbose } from '@sigmarun/storage';
+import { setVerbose, resolveTeamRoot } from '@sigmarun/storage';
 import { initProject, doctorProject, importRun, publishTasks, runShow, readEvents, migrateState, backupList, restoreBackup, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, runReopen, taskAdd, taskCancel, taskDone, failEnvelope, type Envelope, type DoctorCheck, GATEWAY_VERSION } from '@sigmarun/core';
 import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, blockTask, verifySubmit, listWorktrees, pruneWorktrees } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, showGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
-import { installAdapters } from '@sigmarun/adapters';
+import { installAdapters, installedTemplateVersion, TEMPLATE_VERSION } from '@sigmarun/adapters';
 import { statusRun, runList, taskShow, taskList, evidenceShow, agentList, watchOnce } from '@sigmarun/watch';
 import { auditRun, repairRun } from '@sigmarun/audit';
 
@@ -46,6 +46,22 @@ const EXIT_BY_CODE: Record<string, number> = {
   io_error: 8,
   unsupported_schema_version: 8,
 };
+
+/**
+ * P1-7 / P1-12: diagnostic commands (doctor, audit run) run to completion — their envelope stays a
+ * truthful success (audit findings are data per docs/18 §7; doctor keeps code:OK) — yet they exist
+ * to SURFACE trouble. When they find it, exit 0 lets `sigmarun audit run && deploy` or
+ * `sigmarun doctor && ...` treat a torn ledger / dead lock as green. This dedicated exit sits
+ * outside the 1..8 GatewayError rows so CI can distinguish "diagnostic found problems" from
+ * "diagnostic could not run"; it is applied at the CLI seam and leaves the --json/human face intact.
+ */
+const HEALTH_GATE_EXIT = 9;
+
+/** True when an audit envelope carries at least one error-severity finding. */
+function hasErrorFindings(env: Envelope): boolean {
+  const findings = (env.data as { findings?: Array<{ severity?: string }> } | undefined)?.findings;
+  return Array.isArray(findings) && findings.some((f) => f.severity === 'error');
+}
 
 /** Read + parse a user-supplied JSON file, tolerating a leading UTF-8 BOM (editors add it). */
 function readJsonFileBom(file: string): unknown {
@@ -140,6 +156,20 @@ function renderTimeline(events: TimelineEvent[]): string[] {
  */
 function renderSections(data: Record<string, unknown> | undefined, lines: string[]): void {
   if (!data) return;
+  // Validation errors: the message says "fix the listed items/fields" and next_actions repeat
+  // it — so the human face MUST print that list, not bury it under --json where a raw-CLI user
+  // never sees it (golden-journey stranger breakpoint #1). Two producer shapes carry `errors`:
+  // plain strings (submit/verify/task drafts) and {path,message} issues (run import payload).
+  const errors = data.errors as unknown[] | undefined;
+  if (Array.isArray(errors)) {
+    for (const e of errors) {
+      if (typeof e === 'string') lines.push(`  - ${e}`);
+      else if (e && typeof e === 'object' && 'message' in e) {
+        const path = (e as { path?: string }).path;
+        lines.push(`  - ${path ? `${path}: ` : ''}${(e as { message: string }).message}`);
+      }
+    }
+  }
   // The external state machine (deriveUserState): one user-facing state + next step per requirement.
   const us = data.user_state as { state: string; detail: string; command: string | null } | undefined;
   if (us?.state) {
@@ -201,9 +231,16 @@ function renderSections(data: Record<string, unknown> | undefined, lines: string
     }
   }
 
-  const findings = data.findings as Array<{ rule_id: string; severity: string; message: string; next_action: string }> | undefined;
+  // The `findings` key has two producer shapes: audit emits {rule_id,severity,message,next_action}
+  // objects, repair emits plain strings (P1-11). Render each verbatim; treating a string as an
+  // object printed "[undefined] undefined undefined -> undefined".
+  const findings = data.findings as Array<string | { rule_id: string; severity: string; message: string; next_action: string }> | undefined;
   if (Array.isArray(findings)) {
     for (const f of findings) {
+      if (typeof f === 'string') {
+        lines.push(`  ${f}`);
+        continue;
+      }
       lines.push(`  [${f.severity}] ${f.rule_id} ${f.message}`);
       lines.push(`      -> ${f.next_action}`);
     }
@@ -234,6 +271,13 @@ function render(env: Envelope, json: boolean): string {
 const HELP_TEXT = [
   'sigmarun — repo-local multi-agent collaboration gateway (.team/)',
   '',
+  'Start here (first time in a repo):',
+  '  1. sigmarun init                                     — create the .team/ coordination dir',
+  '  2. sigmarun adapter install --tool=claude-code|codex — install the /team-* agent commands',
+  '  3. In Claude Code or Codex, run: /team-plan <goal>   — decompose the goal and drive the run',
+  '  The real workflow lives in those agent slash commands (/team-plan, /team-dispatch, /team-review);',
+  '  the CLI below is the plumbing they call — reach for it directly only to inspect or repair state.',
+  '',
   'Setup:      init [--example] | doctor [--fix] | adapter install --tool=claude-code|codex|all',
   'Lightweight: run import <payload.json> --lightweight  (tasks claimable now; no review/verify/integrate) -> claim-next -> done',
   'Plan:       run import <payload.json> [--lightweight] [--force] | task publish <RUN> [--tasks=..] [--force]',
@@ -257,12 +301,35 @@ const HELP_TEXT = [
   'Every command accepts --json (single-envelope machine face) and --verbose (step trace to stderr). Exit codes: docs/17 §2.2.',
 ].join('\n');
 
+/**
+ * `--version` output. First line stays a bare gateway semver so scripts can still `--version | head -1`.
+ * The second line surfaces the adapter template generation this gateway ships (TEMPLATE_VERSION moves
+ * on its own cadence from the gateway semver and was invisible to every CLI face before). Inside a repo
+ * with adapters installed it also names the installed generation and whether it drifts from the bundled
+ * one — so "which generation am I on / did my upgrade take effect" is answerable without diffing files.
+ */
+function versionReport(opts: { cwd?: string; env?: Record<string, string | undefined> }, teamRootFlag?: string): string {
+  let installedNote = '';
+  try {
+    const { repoRoot } = resolveTeamRoot({ cwd: opts.cwd, env: opts.env, teamRootFlag });
+    const installed = installedTemplateVersion(repoRoot);
+    if (installed) {
+      installedNote = installed === TEMPLATE_VERSION
+        ? `; installed here: ${installed} (up to date)`
+        : `; installed here: ${installed} (drift — run \`sigmarun adapter install\` to move to ${TEMPLATE_VERSION})`;
+    }
+  } catch {
+    // Not inside a git repo (or the repo is unreadable): report only the bundled generation.
+  }
+  return `${GATEWAY_VERSION}\nadapter templates: ${TEMPLATE_VERSION} (bundled)${installedNote}`;
+}
+
 export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string, string | undefined>; onTick?: (line: string) => void } = {}): CliResult {
   if (argv.includes('--help') || argv.includes('-h') || argv[0] === 'help') {
     return { exitCode: 0, stdout: HELP_TEXT };
   }
   if (argv.includes('--version') || argv.includes('-v') || argv[0] === 'version') {
-    return { exitCode: 0, stdout: GATEWAY_VERSION };
+    return { exitCode: 0, stdout: versionReport(opts, flag(argv, 'team-root')) };
   }
   setVerbose(argv.includes('--verbose'));
   const json = argv.includes('--json');
@@ -701,5 +768,14 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
       nextActions: ['See all commands: sigmarun help'],
     });
   }
-  return { exitCode: EXIT_BY_CODE[env.code] ?? 1, stdout: render(env, json) };
+  let exitCode = EXIT_BY_CODE[env.code] ?? 1;
+  // Health gates: a diagnostic that ran clean (exit 0) but surfaced the very corruption it exists
+  // to catch must not report success to a shell `&&` chain. The envelope is left untouched — audit
+  // keeps ok:true/code:OK with findings as data (docs/18 §7), doctor keeps its checks + warnings;
+  // only the process exit reflects the verdict (P1-7 doctor, P1-12 audit run).
+  if (exitCode === 0) {
+    if (cmd === 'audit' && args[1] === 'run' && hasErrorFindings(env)) exitCode = HEALTH_GATE_EXIT;
+    else if (cmd === 'doctor' && !env.ok) exitCode = HEALTH_GATE_EXIT;
+  }
+  return { exitCode, stdout: render(env, json) };
 }
