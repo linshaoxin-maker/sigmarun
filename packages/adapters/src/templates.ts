@@ -200,7 +200,9 @@ const DISPATCH_FLOW = (tool: string) => `Required flow:
      its status enum is met/unmet/partial while required_checks_results[].status
      is pass/fail/skipped — two different enums by design.
    - \`required_checks_results[].check\` must equal the task's required_checks
-     string exactly, with cmd_ref pointing at the commands[] entry that ran it.
+     string exactly, with cmd_ref pointing at that command's \`cmd_id\`. Each
+     \`commands[]\` entry carries its own \`cmd_id\` (chars [A-Za-z0-9._-]; it
+     names the on-disk log), plus \`cmd\`, \`exit_code\`, and \`output_file\`.
    - output_file paths resolve from the CWD WHERE YOU INVOKE sigmarun
      (absolute paths always work — prefer them, or submit from the worktree).
    - Keep check logs out of git: put them under .evidence-out/ and append
