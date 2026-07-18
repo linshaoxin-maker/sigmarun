@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.6.5';
+export const TEMPLATE_VERSION = '0.6.6';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -129,6 +129,10 @@ const DISPATCH_FLOW = (tool: string) => `Required flow:
    - ok=false: report \`code\` + \`next_actions\` to the user and STOP.
      (\`run_paused\`, \`no_claimable_task\`, \`path_conflict\` etc. are
      normal outcomes, not errors of yours.)
+   - \`parallel_limit_reached\` / \`agent_claim_limit\` whose \`next_actions\`
+     mention repair: a crash may have left a GHOST claim holding a slot (not
+     live work), so "wait" will not help. Run \`sigmarun audit run <RUN-ID>
+     --json\` then \`sigmarun repair <RUN-ID> --json\`, then retry the claim.
    - data.kind="review_work": switch to the REVIEW flow (see
      /team-review, step 3 onward) for the returned task.  [D15]
 4. \`sigmarun context hydrate <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --json\`;
@@ -345,7 +349,14 @@ Flow:
    <RUN> --json\` and tell the user WHO is doing WHAT and what is blocked on
    what ("TASK-2: win-a3f2 is on it; TASK-3 waits for TASK-2 — watch with
    /team-status or come back when a piece frees up").
-6. TAKEOVER CHECK — lightweight windows share ONE working tree. Read
+6. WHERE TO WORK — claim-next returned \`data.worktree.recommend\`: \`local\`
+   (you are the only task in flight) → work in the shared checkout (do the
+   TAKEOVER CHECK below). \`isolated\` (other work is in flight) → make your own
+   worktree so parallel edits don't clobber each other: \`git worktree add
+   <data.worktree.suggested_path> -b <data.worktree.suggested_branch> <base>\`
+   and work there (lightweight needs no \`worktree register\`); the shared-tree
+   TAKEOVER CHECK then does not apply.
+   TAKEOVER CHECK (shared-tree path) — lightweight windows share ONE working tree. Read
    \`task.previous_attempts\` from \`sigmarun task show <RUN> <TASK> --json\`
    (nested under \`data.task\`, NOT top-level). If non-empty, a dead window
    worked this task before and may have left UNCOMMITTED edits sitting in the
@@ -746,7 +757,11 @@ needs to know lightweight vs full. Flow:
    \`sigmarun claim-next <RUN> --agent=<name> --json\` (fresh name
    self-registers). no_claimable_task → do NOT just stop: \`sigmarun agent
    list\` and tell the user who is doing what / what waits on what.
-5. TAKEOVER CHECK: \`task.previous_attempts\` non-empty on \`sigmarun task show\`
+5. WHERE TO WORK — claim-next's \`data.worktree.recommend\`: \`local\` (only task
+   in flight) → shared checkout (TAKEOVER CHECK below); \`isolated\` (parallel
+   work) → own worktree (\`git worktree add <suggested_path> -b <suggested_branch>
+   <base>\`, no register in lightweight), then the TAKEOVER CHECK is skipped.
+   TAKEOVER CHECK (shared tree): \`task.previous_attempts\` non-empty on \`sigmarun task show\`
    (under data.task) means a dead window may have left UNCOMMITTED edits in
    this shared working tree — \`git status --porcelain\` on the task's paths;
    if dirty, RED LINE: ask [keep the edits] / [discard: git checkout -- …].
