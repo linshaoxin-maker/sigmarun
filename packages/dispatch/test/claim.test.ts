@@ -48,6 +48,45 @@ describe('claim-next happy path (BDD-003-01; docs/10 §2.2)', () => {
     expect(tail[0].actor).toEqual({ type: 'agent', id: agent });
   });
 
+  it('a cap tripped by a crash ghost points at repair; a genuinely occupied task does not (P1-9 discoverability)', () => {
+    repo = mkClaimRepo([{ key: 'a' }, { key: 'b' }]);
+    const agent = registerDefault(repo);
+    // Real claim first — this materializes claims/task-claims.json with an ACTIVE claim on TASK-0001.
+    expect(claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent }).data).toMatchObject({ task_id: 'TASK-0001' });
+
+    // GHOST: simulate a crash where the claim record persisted but the task/list rolled back to ready
+    // (the task_claimed commit never landed). The active claim now sits on a task that is NOT in flight.
+    const toReady = () => {
+      const list = readJsonState(join(runDir(), 'team-task-list.json'));
+      const row = (list.doc as { tasks: Array<Record<string, unknown> & { task_id: string }> }).tasks.find((r) => r.task_id === 'TASK-0001')!;
+      row.status = 'ready'; row.owner_agent_id = null; row.claim_id = null;
+      writeJsonStateAtomic(join(runDir(), 'team-task-list.json'), list.doc as Record<string, unknown>, { expectedRev: list.rev });
+      const t1 = readJsonState(join(runDir(), 'tasks', 'TASK-0001', 'task.json'));
+      (t1.doc as { status: string }).status = 'ready';
+      writeJsonStateAtomic(join(runDir(), 'tasks', 'TASK-0001', 'task.json'), t1.doc as Record<string, unknown>, { expectedRev: t1.rev });
+    };
+    toReady();
+
+    // The agent already holds 1 active claim (the ghost) -> agent_claim_limit. Because the ghost sits on a
+    // ready task, the guidance must name repair.
+    const ghost = claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent });
+    expect(ghost.code).toBe('agent_claim_limit');
+    expect(ghost.next_actions.join(' ')).toMatch(/repair/);
+
+    // CONTROL: put TASK-0001 back to genuinely claimed (occupied). Same cap trips, but no ghost -> no repair hint.
+    const list = readJsonState(join(runDir(), 'team-task-list.json'));
+    const row = (list.doc as { tasks: Array<Record<string, unknown> & { task_id: string }> }).tasks.find((r) => r.task_id === 'TASK-0001')!;
+    row.status = 'claimed'; row.owner_agent_id = agent; row.claim_id = 'CLAIM-task-0001';
+    writeJsonStateAtomic(join(runDir(), 'team-task-list.json'), list.doc as Record<string, unknown>, { expectedRev: list.rev });
+    const t1 = readJsonState(join(runDir(), 'tasks', 'TASK-0001', 'task.json'));
+    (t1.doc as { status: string }).status = 'claimed';
+    writeJsonStateAtomic(join(runDir(), 'tasks', 'TASK-0001', 'task.json'), t1.doc as Record<string, unknown>, { expectedRev: t1.rev });
+
+    const real = claimNext({ cwd: repo, runId: 'RUN-0001', agentId: agent });
+    expect(real.code).toBe('agent_claim_limit');
+    expect(real.next_actions.join(' ')).not.toMatch(/repair/);
+  });
+
   it('worktree suggestion derives from run.worktree_root and passes register (remediation A1; smoke L17 regression)', async () => {
     repo = mkClaimRepo([{ key: 'a' }]);
     const agent = registerDefault(repo);

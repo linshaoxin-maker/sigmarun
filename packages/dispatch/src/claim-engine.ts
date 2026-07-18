@@ -600,13 +600,26 @@ export function claimNext(opts: ClaimOptions): Envelope {
       for (const e of swept.events) appendEvent(runDir, e);
     }
 
+    // P1-9 follow-up (crash-residue discoverability): the caps below count ACTIVE claims, and a crash
+    // can strand an ACTIVE claim on a task the list has moved OFF (ready/terminal) — a ghost that
+    // inflates the count with no live work behind it. Point at repair ONLY when a counted claim
+    // actually sits on a non-occupied task, so a genuinely-full run is never told to "run repair".
+    const OCCUPIED_FOR_CAP = new Set(['claimed', 'working', 'blocked', 'changes_requested', 'submitted', 'reviewing', 'approved']);
+    const ghostRepairHint = (): string[] =>
+      stores.taskClaims.doc.claims.filter(ACTIVE).some((c) => {
+        const r = rowsById.get(c.task_id);
+        return !r || !OCCUPIED_FOR_CAP.has(r.status);
+      })
+        ? [`Some active claims sit on tasks that are not in flight — a crash may have left a ghost claim holding a slot: sigmarun audit run ${runId}, then sigmarun repair ${runId}.`]
+        : [];
+
     // Guard #3: per-agent cap (M36/D17).
     const mine = stores.taskClaims.doc.claims.filter((c) => c.agent_id === opts.agentId && ACTIVE(c));
     if (mine.length >= policy.max_active_claims_per_agent) {
       return failEnvelope(
         'agent_claim_limit',
         `Agent ${opts.agentId} already holds ${mine.length} active claim(s) (limit ${policy.max_active_claims_per_agent}).`,
-        { data: { held: mine.map((c) => c.task_id) }, nextActions: ['Submit or release the current task first.'], startedAt },
+        { data: { held: mine.map((c) => c.task_id) }, nextActions: ['Submit or release the current task first.', ...ghostRepairHint()], startedAt },
       );
     }
 
@@ -662,7 +675,7 @@ export function claimNext(opts: ClaimOptions): Envelope {
         return failEnvelope(
           'parallel_limit_reached',
           `Run ${runId} already has ${directedActive} active claims (limit ${policy.max_parallel_tasks}).`,
-          { startedAt },
+          { nextActions: ['Wait for an in-flight task to finish, or raise max_parallel_tasks in the run policy.', ...ghostRepairHint()], startedAt },
         );
       }
       return finishClaim(row);
@@ -692,7 +705,7 @@ export function claimNext(opts: ClaimOptions): Envelope {
       return failEnvelope(
         'parallel_limit_reached',
         `Run ${runId} already has ${activeCount} active claims (limit ${policy.max_parallel_tasks}).`,
-        { startedAt },
+        { nextActions: ['Wait for an in-flight task to finish, or raise max_parallel_tasks in the run policy.', ...ghostRepairHint()], startedAt },
       );
     }
 
