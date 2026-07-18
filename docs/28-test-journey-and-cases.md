@@ -75,7 +75,7 @@
 
 ## 已知测试盲区(诚实标注,进残余/下一阶段)
 
-- **发布产物层无单测**:测试直编源码,测不出"陈旧包"(tsc -b 增量空转发出不含修复的包)。已用 build-release 自清+重建 + clean-install 冒烟兜住,但**没有一条自动化测试打真 tarball 装了跑**(CI 应加一步 pack→install→smoke)。
+- ~~发布产物层无单测~~ **已补**:`npm run smoke`(`scripts/smoke-tarball.mjs`)打真 tarball → 装到隔离前缀 → 驱动装出来的 CLI 跑 14 项断言(版本/adapter 路径/轻量旅程/断点#1);CI 新增 `smoke` job(ubuntu/node22)每次 push/PR 跑。测试直编源码测不出的"陈旧包/files 漏列/bin shebang/装错路径"由它兜住。
 - **模板文案的语义**:field-protocol 守卫查"字段被点名",不查"用法解释正确";真机 golden journey 是唯一端到端验证,非自动化每次跑。
 - **repair 的 done/integrated/cancelled 可清子例**只验了 ready/verified/integrated 三种,其余共用同一 `CLEANABLE` 分支(未逐一单测)。
 - **跨用户 pid、时钟回拨**等锁边界只读码未黑盒压。

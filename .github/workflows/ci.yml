@@ -29,3 +29,20 @@ jobs:
       - name: SCA (official registry; the default mirror lacks the audit endpoint)
         if: matrix.os == 'ubuntu-latest' && matrix.node == 22
         run: npm audit --registry=https://registry.npmjs.org --audit-level=high
+
+  smoke:
+    # Artifact integrity: pack the real tarball, install it, drive the installed CLI. The unit
+    # suite compiles source and CANNOT catch a stale bundle / bad files list / wrong install path.
+    # One platform is enough for artifact smoke.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Configure git identity (smoke drives a real repo)
+        run: |
+          git config --global user.email ci@sigmarun.local
+          git config --global user.name sigmarun-ci
+      - run: npm ci
+      - run: npm run smoke
