@@ -810,6 +810,21 @@ export function claimNext(opts: ClaimOptions): Envelope {
         });
       }
 
+      const suggestedBranch = `team/${runId}/${row.task_id}-${slug}`;
+      // derived from run.worktree_root (same fallback as worktree register) so the suggestion always
+      // passes the register containment check — adapters create it "exactly as suggested".
+      const suggestedPath = `${rdoc.worktree_root ?? `../.team-worktrees/${runId}`}/${row.task_id}`;
+      // Worktree advice (product ask: some tasks can run in the local checkout, some can't). A full run's
+      // review/integrate pipeline needs a branch, and any parallel work would clobber a shared checkout —
+      // isolate. A solo, sequential lightweight task can just work in the local checkout. Gateway advises;
+      // the agent/human decides. `activeOthers` excludes the claim we just made.
+      const activeOthers = stores.taskClaims.doc.claims.filter(ACTIVE).filter((c) => c.claim_id !== taskClaimId).length;
+      const isolate = !lightweight || activeOthers > 0;
+      const advice = isolate
+        ? { recommend: 'isolated', reason: !lightweight ? 'full run — review/integrate needs a branch' : `${activeOthers} other task(s) in flight — a shared checkout would clobber` }
+        : { recommend: 'local', reason: 'solo, sequential lightweight task — the local checkout is fine; isolate only if you go parallel' };
+      const isolateStep = `Isolate: git worktree add ${suggestedPath} -b ${suggestedBranch}${lightweight ? '' : `, then sigmarun worktree register ${runId} ${row.task_id} --agent=${opts.agentId} --path=${suggestedPath} --branch=${suggestedBranch}`}`;
+
       return okEnvelope({
         message: `Claimed ${row.task_id} ("${row.title}") until ${lease}.`,
         data: {
@@ -818,21 +833,20 @@ export function claimNext(opts: ClaimOptions): Envelope {
           path_claim_ids: pathClaimIds,
           agent_id: opts.agentId,
           lease_until: lease,
-          worktree: {
-            suggested_branch: `team/${runId}/${row.task_id}-${slug}`,
-            // derived from run.worktree_root (same fallback as worktree register) so the suggestion
-            // always passes the register containment check — adapters create it "exactly as suggested"
-            suggested_path: `${rdoc.worktree_root ?? `../.team-worktrees/${runId}`}/${row.task_id}`,
-          },
+          worktree: { suggested_branch: suggestedBranch, suggested_path: suggestedPath, ...advice },
           swept: swept.reclaimed,
         },
         nextActions: lightweight
           ? [
               `Read the brief: .team/runs/${runId}/tasks/${row.task_id}/task.md`,
+              isolate
+                ? `${advice.reason}. ${isolateStep} — or work in the local checkout if you serialize.`
+                : `${advice.reason}. Work in the local checkout, or ${isolateStep.slice(0, 1).toLowerCase()}${isolateStep.slice(1)} if you prefer.`,
               `Do the work, then mark it done: sigmarun done ${runId} ${row.task_id} --agent=${opts.agentId}`,
             ]
           : [
               `Read the brief: .team/runs/${runId}/tasks/${row.task_id}/task.md`,
+              isolateStep,
               `Send heartbeats: sigmarun heartbeat ${runId} ${row.task_id} --agent=${opts.agentId}`,
             ],
         startedAt,

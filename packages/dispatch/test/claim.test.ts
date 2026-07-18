@@ -87,6 +87,29 @@ describe('claim-next happy path (BDD-003-01; docs/10 §2.2)', () => {
     expect(real.next_actions.join(' ')).not.toMatch(/repair/);
   });
 
+  it('claim advises isolate for full/parallel, local for a solo lightweight task (worktree advice)', () => {
+    // full run — review/integrate needs a branch, so always isolate
+    repo = mkClaimRepo([{ key: 'a' }]);
+    const a = registerDefault(repo);
+    const full = claimNext({ cwd: repo, runId: 'RUN-0001', agentId: a });
+    expect((full.data as { worktree: { recommend: string; reason: string } }).worktree.recommend).toBe('isolated');
+    expect((full.data as { worktree: { reason: string } }).worktree.reason).toMatch(/full run/);
+
+    // lightweight run, solo -> the local checkout is fine
+    const repo2 = mkClaimRepo([{ key: 'a' }, { key: 'b' }]);
+    const rd = readJsonState(join(repo2, '.team', 'runs', 'RUN-0001', 'run.json'));
+    (rd.doc as { lightweight?: boolean }).lightweight = true;
+    writeJsonStateAtomic(join(repo2, '.team', 'runs', 'RUN-0001', 'run.json'), rd.doc as Record<string, unknown>, { expectedRev: rd.rev });
+    const l1 = registerDefault(repo2, 'lw-a');
+    const solo = claimNext({ cwd: repo2, runId: 'RUN-0001', agentId: l1 });
+    expect((solo.data as { worktree: { recommend: string } }).worktree.recommend).toBe('local');
+    // a second task now in flight -> the next claim should isolate to avoid clobbering the shared checkout
+    const l2 = registerDefault(repo2, 'lw-b');
+    const parallel = claimNext({ cwd: repo2, runId: 'RUN-0001', agentId: l2 });
+    expect((parallel.data as { worktree: { recommend: string } }).worktree.recommend).toBe('isolated');
+    cleanup(repo2);
+  });
+
   it('worktree suggestion derives from run.worktree_root and passes register (remediation A1; smoke L17 regression)', async () => {
     repo = mkClaimRepo([{ key: 'a' }]);
     const agent = registerDefault(repo);
