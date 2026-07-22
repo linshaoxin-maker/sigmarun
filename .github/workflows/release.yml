@@ -17,10 +17,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No registry-url: setup-node would write an .npmrc with _authToken=${NODE_AUTH_TOKEN} —
+      # with that env gone it leaves an EMPTY token config, and npm then takes the token path
+      # instead of attempting the trusted-publishing OIDC exchange. Runner default registry is
+      # already registry.npmjs.org.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
 
       # Trusted Publishing needs npm >= 11.5.1 (the OIDC token exchange); node 22 bundles npm 10.x,
       # which silently skips OIDC and publishes unauthenticated -> E404.
