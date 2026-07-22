@@ -54,5 +54,5 @@ jobs:
       # as the publisher, so no npm token exists anywhere in CI. (The legacy NPM_TOKEN was revoked
       # in npm's 2FA-bypass cleanup — its presence would even override OIDC, so keep env empty.)
       - name: Publish to npm with provenance
-        run: npm publish --access public --provenance
+        run: npm publish --access public --provenance --loglevel http
         working-directory: release
