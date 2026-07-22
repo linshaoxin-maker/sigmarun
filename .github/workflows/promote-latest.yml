@@ -1,0 +1,39 @@
+name: promote-latest
+
+# Promote an already-published version to the `latest` dist-tag.
+# Why a workflow: npm's 2FA-bypass restrictions now reject dist-tag writes from
+# interactive `npm login` sessions (plain 403, no OTP challenge). The CI automation
+# token (NPM_TOKEN) — the same credential release.yml publishes with — is the
+# sanctioned path for unattended package management.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Published version to point `latest` at (e.g. 0.2.1)'
+        required: true
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Guard — version must already exist on npm
+        run: |
+          V="${{ github.event.inputs.version }}"
+          PUBLISHED="$(npm view "sigmarun@$V" version 2>/dev/null || true)"
+          if [ "$PUBLISHED" != "$V" ]; then
+            echo "::error::sigmarun@$V is not on the registry — publish it first (tag v$V)"
+            exit 1
+          fi
+
+      - name: Point latest at the version
+        run: npm dist-tag add "sigmarun@${{ github.event.inputs.version }}" latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Show resulting dist-tags
+        run: npm view sigmarun dist-tags
