@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **CI 去抖:vitest 3.2.7 → 4.1.10**。windows-latest + node20 慢 runner 上,v3 worker→reporter 的 birpc 有硬编码 60s 超时,fsync 重的套件把主进程饿过线就抛 `[vitest-worker]: Timeout calling "onTaskUpdate"`——395/395 全过仍 exit 1,main 长期狼来了(上游 vitest#8164)。v4 根因修复(vitest#8297,worker RPC `timeout: -1`),该错误类结构性消除;不吞错误、不加 `dangerouslyIgnoreUnhandledErrors` 一刀切。迁移面为零:无 workspace/poolOptions/自定义 reporter,coverage.include 已显式;本地 395 绿 + coverage 冒烟通过。
+
 ## 0.2.1 — 2026-07-18
 
 - **claim 故障可发现性 + worktree 本地/隔离建议**(GATEWAY 0.2.0→**0.2.1**,TEMPLATE 0.6.5→**0.6.6**)。深入项目、排查 claim × run.lock × 事件账本 的故障面时收的两项:

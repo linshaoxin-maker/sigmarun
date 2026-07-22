@@ -20,6 +20,11 @@ export default defineConfig({
     // 20 pure-timeout failures with zero assertion failures on the first real matrix run.
     testTimeout: 120_000,
     hookTimeout: 120_000,
+    // vitest >=4 is load-bearing for the same reason: v3 workers had a hardcoded 60s birpc
+    // timeout on worker->reporter calls, and on a saturated windows runner the main process
+    // could starve past it — 3x `Timeout calling "onTaskUpdate"` unhandled errors turned a
+    // 395/395-green run into exit 1 (vitest#8164, fixed by vitest#8297: rpc timeout: -1).
+    // Do not downgrade below 4.x without re-checking that flake class.
     coverage: {
       provider: 'v8',
       include: ['packages/*/src/**'],
