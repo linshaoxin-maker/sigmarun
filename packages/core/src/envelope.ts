@@ -1,6 +1,6 @@
 import type { ReasonCode } from '@sigmarun/storage';
 
-export const GATEWAY_VERSION = '0.2.1';
+export const GATEWAY_VERSION = '0.2.2';
 export const ENVELOPE_VERSION = 'team.envelope.v1';
 
 export interface EnvelopeWarning {

@@ -38,10 +38,12 @@ jobs:
       - name: Assemble the publishable package
         run: npm run release
 
-      # Pre-1.0 discipline (docs/22 §4.1): publish to the `next` dist-tag; promote to `latest`
-      # with `npm dist-tag add sigmarun@X.Y.Z latest` after verifying the published tarball.
+      # Publishes straight to `latest`. The original pre-1.0 next->promote flow died with npm's
+      # 2FA-bypass restrictions: dist-tag writes now 403 from interactive sessions and the legacy
+      # NPM_TOKEN is revoked — only the OIDC trusted-publishing path (npm publish) still works,
+      # so the release itself must set `latest`. Gate quality BEFORE tagging (test + smoke).
       - name: Publish to npm with provenance
-        run: npm publish --access public --tag next --provenance
+        run: npm publish --access public --provenance
         working-directory: release
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

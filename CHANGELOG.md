@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.2.2 — 2026-07-22
+
+- **发布线改直上 `latest`**(GATEWAY 0.2.1→**0.2.2**)。npm 的 2FA-bypass 限制把原"发 next → 人工 promote latest"流堵死:dist-tag 写入对交互登录会话直接 403(无 OTP 质询)、legacy `NPM_TOKEN` 已被回收(401)、OIDC trusted publishing 只覆盖 `npm publish` 不覆盖 dist-tag——`latest` 因此长期钉在 0.1.0(裸 `npm i sigmarun` 装到旧机器)。改法:release.yml 去掉 `--tag next`,发布即置 `latest`,质量门全部前移到 tag 之前(全量测试 + tarball 冒烟)。附 `promote-latest` workflow 备用(等新 automation token 时可用)。遗留:`next` tag 停在 0.2.1,待凭据恢复后再对齐,不影响用户。
 - **CI 去抖:vitest 3.2.7 → 4.1.10**。windows-latest + node20 慢 runner 上,v3 worker→reporter 的 birpc 有硬编码 60s 超时,fsync 重的套件把主进程饿过线就抛 `[vitest-worker]: Timeout calling "onTaskUpdate"`——395/395 全过仍 exit 1,main 长期狼来了(上游 vitest#8164)。v4 根因修复(vitest#8297,worker RPC `timeout: -1`),该错误类结构性消除;不吞错误、不加 `dangerouslyIgnoreUnhandledErrors` 一刀切。迁移面为零:无 workspace/poolOptions/自定义 reporter,coverage.include 已显式;本地 395 绿 + coverage 冒烟通过。
 
 ## 0.2.1 — 2026-07-18
