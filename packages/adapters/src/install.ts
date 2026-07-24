@@ -118,8 +118,14 @@ export function installAdapters(opts: InstallOptions): Envelope {
   const bothNext = 'Open a Claude Code or Codex window in this repo and run /team-plan or /team-dispatch <RUN-ID>.';
   const claudeNext = 'Open a Claude Code window in this repo and run /team-plan or /team-dispatch <RUN-ID>.';
   const codexNext = 'Ask Codex to "join run <RUN-ID>" or type /team-dispatch <RUN-ID> to trigger the skill.';
+  // Say WHAT landed WHERE — a bare total made users wonder why AGENTS.md appeared (beta finding #1).
+  const parts = [
+    ...(() => { const n = written.filter((f) => f.startsWith('.claude/')).length; return n ? [`${n} Claude commands -> .claude/commands`] : []; })(),
+    ...(() => { const n = written.filter((f) => f.startsWith('.agents/')).length; return n ? [`${n} Codex skills -> .agents/skills`] : []; })(),
+    ...(written.includes('AGENTS.md') ? ['protocol section -> AGENTS.md'] : []),
+  ];
   return okEnvelope({
-    message: `Installed ${requested.join(' + ')} adapter${multi ? 's' : ''}: ${written.length} new, ${updated.length} updated, ${skipped.length} up-to-date.`,
+    message: `Installed ${requested.join(' + ')} adapter${multi ? 's' : ''}: ${written.length} new${parts.length ? ` (${parts.join(', ')})` : ''}, ${updated.length} updated, ${skipped.length} up-to-date.`,
     data: { tool: opts.tool, tools: requested, written, updated, skipped },
     warnings,
     nextActions: multi ? [bothNext] : requested[0] === 'claude-code' ? [claudeNext] : [codexNext],

@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.6.7';
+export const TEMPLATE_VERSION = '0.6.8';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -123,9 +123,13 @@ const DISPATCH_FLOW = (tool: string) => `Required flow:
    --agent=<AGENT-ID> [--role=<role>] --dry-run --json\` returns
    \`would_claim\` (the exact next task, guards + priority applied) and
    \`excluded\` with reasons; also list the pool with \`sigmarun task list
-   <RUN-ID> --status=ready --json\`. Tell the human which one you'd take and
-   why (no deps / unblocks others), and offer: [take it] / [take a specific
-   TASK-ID] / [something else]. AUTOPILOT or --task skips this pause. Then
+   <RUN-ID> --status=ready --json\`. Present the pool as a markdown TABLE —
+   one row per ready task: ID | title | files (paths.allow) | depends_on |
+   why-now — and mark the recommended row. If depends_on edges exist, ALSO
+   sketch the order (\`\`\`mermaid flowchart\`\`\` if your UI renders it, else a
+   one-line arrow chain: TASK-0001 -> TASK-0002). Then offer: [take it] /
+   [take a specific TASK-ID] / [something else]. AUTOPILOT or --task skips
+   this pause. Then
    claim for real: \`sigmarun claim-next <RUN-ID> --agent=<AGENT-ID>
    [--role=<role>] [--task=<TASK-ID from --task>] --json\`.  With --task, you
    are claiming that specific task; if it is not claimable, report the
@@ -349,10 +353,13 @@ Flow:
      if you need the exact steps. Everything below is the lightweight path.
 5. PAUSE FOR THE HUMAN (task pick) — unless AUTOPILOT. Preview WITHOUT
    claiming: \`sigmarun claim-next <RUN> --agent=<name> --dry-run --json\`
-   returns \`would_claim\`; say which piece you'd take and why (no deps /
-   unblocks others), offer [take it] / [a specific TASK-ID] / [something
-   else]. Then claim for real: \`sigmarun claim-next <RUN> --agent=<name>
-   --json\` (a fresh name self-registers).
+   returns \`would_claim\`; list the pool (\`sigmarun task list <RUN>
+   --status=ready --json\`) as a markdown TABLE — ID | title | files |
+   depends_on | why-now — recommended row marked; sketch the order when
+   deps exist (mermaid flowchart if the UI renders it, else
+   TASK-0001 -> TASK-0002). Offer [take it] / [a specific TASK-ID] /
+   [something else]. Then claim for real: \`sigmarun claim-next <RUN>
+   --agent=<name> --json\` (a fresh name self-registers).
    If \`no_claimable_task\`: do NOT just stop — run \`sigmarun agent list
    <RUN> --json\` and tell the user WHO is doing WHAT and what is blocked on
    what ("TASK-2: win-a3f2 is on it; TASK-3 waits for TASK-2 — watch with
@@ -762,8 +769,10 @@ needs to know lightweight vs full. Flow:
    too — a fresh worktree has no \`node_modules\`; read
    \`.agents/skills/team-run-dispatch/SKILL.md\`). Below is lightweight only.
 4. PAUSE FOR THE HUMAN unless AUTOPILOT: preview with \`sigmarun claim-next
-   <RUN> --agent=<name> --dry-run --json\` (\`would_claim\`), say which piece
-   you'd take, offer [take it] / [a specific TASK-ID] / [something else]; then
+   <RUN> --agent=<name> --dry-run --json\` (\`would_claim\`); show the pool as
+   a markdown TABLE (ID | title | files | depends_on | why-now, recommended
+   row marked; deps exist -> arrow chain or mermaid), offer [take it] /
+   [a specific TASK-ID] / [something else]; then
    \`sigmarun claim-next <RUN> --agent=<name> --json\` (fresh name
    self-registers). no_claimable_task → do NOT just stop: \`sigmarun agent
    list\` and tell the user who is doing what / what waits on what.
