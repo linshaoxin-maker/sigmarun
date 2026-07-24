@@ -33,13 +33,20 @@ describe('adapter install (docs/19; docs/22 §installation; D12 sigmarun naming)
     expect(agents).toContain('Team Run Protocol (.team/)');
   });
 
-  it('re-install skips existing files with a warning; --update overwrites', () => {
+  it('re-install skips existing files with a warning; --update overwrites and audits as updated', () => {
     installAdapters({ cwd: repo, tool: 'claude-code' });
     const again = installAdapters({ cwd: repo, tool: 'claude-code' });
     expect(again.warnings.some((w) => w.code === 'already_installed')).toBe(true);
+    // Hand-edit one file but keep its marker: --update must still force the shipped template back.
+    const file = join(repo, '.claude', 'commands', 'team-dispatch.md');
+    writeFileSync(file, readFileSync(file, 'utf8') + '\nLOCAL DRIFT\n');
     const updated = installAdapters({ cwd: repo, tool: 'claude-code', update: true });
     expect(updated.warnings.length).toBe(0);
-    expect((updated.data as { written: string[] }).written.length).toBeGreaterThan(0);
+    expect(readFileSync(file, 'utf8')).not.toContain('LOCAL DRIFT');
+    const data = updated.data as { written: string[]; updated: string[] };
+    // Every file already existed — a forced rewrite is an update, never a fresh install.
+    expect(data.written).toEqual([]);
+    expect(data.updated.length).toBeGreaterThan(0);
   });
 
   it('codex: writes skills under the OFFICIAL .agents/skills tree, never .codex/skills (P0-3)', () => {
@@ -101,6 +108,44 @@ describe('smoke-round L21: managed templates roll forward by version', () => {
     } finally {
       cleanup(repo);
     }
+  });
+});
+
+describe('beta finding: --update on an installed repo must audit rewrites as updated, not new', () => {
+  // Real-repo report: 0.6.7 templates + `adapter install --tool=all --update` to 0.6.8 printed
+  // "25 new (…), 0 updated" — every upgrade was booked as a first install, so the upgrade audit
+  // could not distinguish a version roll from a fresh checkout.
+  it('older-generation files + --update land in updated with old -> new notes; new count excludes them', () => {
+    const first = installAdapters({ cwd: repo, tool: 'all' });
+    const managed = (first.data as { written: string[] }).written.filter((f) => f !== 'AGENTS.md');
+    for (const rel of managed) {
+      const p = join(repo, rel);
+      writeFileSync(p, readFileSync(p, 'utf8').replace(/template_version: [\d.]+/, 'template_version: 0.0.1'));
+    }
+    const env = installAdapters({ cwd: repo, tool: 'all', update: true });
+    expect(env.ok).toBe(true);
+    const data = env.data as { written: string[]; updated: string[]; skipped: string[] };
+    expect(data.written).toEqual([]); // nothing was newly installed
+    expect(data.updated.length).toBe(managed.length);
+    for (const u of data.updated) expect(u).toMatch(/ \(0\.0\.1 -> [\d.]+\)$/);
+    // Summary: upgrades must not inflate the "new" count, and the what-landed-where rollup
+    // (beta finding #1) has to follow the files into the updated bucket.
+    expect(env.message).toContain('0 new');
+    expect(env.message).toContain(`${managed.length} updated (`);
+    expect(env.message).toMatch(/updated \(\d+ Claude commands -> \.claude\/commands, \d+ Codex skills -> \.agents\/skills\)/);
+    expect(env.message).toMatch(/0 up-to-date/);
+  });
+
+  it('marker-less file + --update: still force-overwritten, audited as updated with unknown old version', () => {
+    installAdapters({ cwd: repo, tool: 'claude-code' });
+    const file = join(repo, '.claude', 'commands', 'team-dispatch.md');
+    writeFileSync(file, readFileSync(file, 'utf8').replace(/<!-- template_version:[^>]*-->/, '<!-- marker gone -->'));
+    const env = installAdapters({ cwd: repo, tool: 'claude-code', update: true });
+    expect(env.ok).toBe(true);
+    const data = env.data as { written: string[]; updated: string[] };
+    expect(data.written).toEqual([]);
+    expect(data.updated.some((u) => /team-dispatch\.md \(\? -> [\d.]+\)$/.test(u))).toBe(true);
+    expect(readFileSync(file, 'utf8')).toContain('template_version:'); // back under management
   });
 });
 

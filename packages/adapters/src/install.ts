@@ -27,25 +27,30 @@ function installOne(repoRoot: string, files: Record<string, string>, update: boo
   const warnings: EnvelopeWarning[] = [];
   for (const [rel, content] of Object.entries(files)) {
     const target = join(repoRoot, rel);
-    if (existsSync(target) && !update) {
+    if (existsSync(target)) {
       // Managed files upgrade themselves when the shipped template_version differs
       // (docs/22 §4.3; smoke-round L21: exists-means-skip could never roll 0.1.0 forward).
       const current = versionOf(readFileSync(target, 'utf8'));
       const shipped = versionOf(content);
-      if (current === shipped) {
-        skipped.push(rel);
-        continue;
+      if (!update) {
+        if (current === shipped) {
+          skipped.push(rel);
+          continue;
+        }
+        if (current === null) {
+          // The on-disk file carries no managed version marker — it was hand-edited or is not ours.
+          // Overwriting would silently destroy the user's edits; leave it and warn (use --update to force).
+          skipped.push(rel);
+          warnings.push({ code: 'unmanaged_template', message: `${rel} has no template_version marker (hand-edited?) — left untouched. Pass --update to overwrite with the shipped template.` });
+          continue;
+        }
       }
-      if (current === null) {
-        // The on-disk file carries no managed version marker — it was hand-edited or is not ours.
-        // Overwriting would silently destroy the user's edits; leave it and warn (use --update to force).
-        skipped.push(rel);
-        warnings.push({ code: 'unmanaged_template', message: `${rel} has no template_version marker (hand-edited?) — left untouched. Pass --update to overwrite with the shipped template.` });
-        continue;
-      }
+      // Rewriting a pre-existing file — version drift or a --update force — is an upgrade, never a
+      // first install: it must land in `updated` or a version roll audits as "N new, 0 updated"
+      // (beta finding: 0.6.7 -> 0.6.8 with --update reported every file as new).
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, content, 'utf8');
-      updated.push(`${rel} (${current} -> ${shipped ?? '?'})`);
+      updated.push(`${rel} (${current ?? '?'} -> ${shipped ?? '?'})`);
       continue;
     }
     mkdirSync(dirname(target), { recursive: true });
@@ -119,13 +124,16 @@ export function installAdapters(opts: InstallOptions): Envelope {
   const claudeNext = 'Open a Claude Code window in this repo and run /team-plan or /team-dispatch <RUN-ID>.';
   const codexNext = 'Ask Codex to "join run <RUN-ID>" or type /team-dispatch <RUN-ID> to trigger the skill.';
   // Say WHAT landed WHERE — a bare total made users wonder why AGENTS.md appeared (beta finding #1).
-  const parts = [
-    ...(() => { const n = written.filter((f) => f.startsWith('.claude/')).length; return n ? [`${n} Claude commands -> .claude/commands`] : []; })(),
-    ...(() => { const n = written.filter((f) => f.startsWith('.agents/')).length; return n ? [`${n} Codex skills -> .agents/skills`] : []; })(),
-    ...(written.includes('AGENTS.md') ? ['protocol section -> AGENTS.md'] : []),
+  // Updated entries keep their relative path as a prefix ("rel (old -> new)"), so the same
+  // destination rollup works for upgrades too.
+  const byDest = (files: string[]): string[] => [
+    ...(() => { const n = files.filter((f) => f.startsWith('.claude/')).length; return n ? [`${n} Claude commands -> .claude/commands`] : []; })(),
+    ...(() => { const n = files.filter((f) => f.startsWith('.agents/')).length; return n ? [`${n} Codex skills -> .agents/skills`] : []; })(),
   ];
+  const parts = [...byDest(written), ...(written.includes('AGENTS.md') ? ['protocol section -> AGENTS.md'] : [])];
+  const updatedParts = byDest(updated);
   return okEnvelope({
-    message: `Installed ${requested.join(' + ')} adapter${multi ? 's' : ''}: ${written.length} new${parts.length ? ` (${parts.join(', ')})` : ''}, ${updated.length} updated, ${skipped.length} up-to-date.`,
+    message: `Installed ${requested.join(' + ')} adapter${multi ? 's' : ''}: ${written.length} new${parts.length ? ` (${parts.join(', ')})` : ''}, ${updated.length} updated${updatedParts.length ? ` (${updatedParts.join(', ')})` : ''}, ${skipped.length} up-to-date.`,
     data: { tool: opts.tool, tools: requested, written, updated, skipped },
     warnings,
     nextActions: multi ? [bothNext] : requested[0] === 'claude-code' ? [claudeNext] : [codexNext],
