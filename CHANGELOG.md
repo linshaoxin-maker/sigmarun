@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.4 — 2026-07-24
+
+- **`sigmarun dashboard` 本地只读仪表盘**(docs/23 落地;GATEWAY 0.2.3→**0.2.4**,TEMPLATE→**0.6.8**)。`sigmarun dashboard [<RUN>] [--port=7317] [--once]`:零依赖单页(需求清单+user_state · 任务表 · **DAG 图**(节点按状态着色,布局按依赖分层) · needs-you 清单,2.5s 自刷新,明暗随系统)+ `/api/state` 聚合端点;`--once` 打印快照后退出(冒烟/脚本用)。**只读铁律由构造保证**:全部数据来自现有读模型(watch 的 runList/statusRun/taskList + context 的 showGraph),不 import 任何写原语;dashboard 属前端关注点落在 cli 包;bin 加 `keepAlive` 哨兵让服务存活。命令进 COMMAND_SURFACE + docs/17 §1(对账绿)。
+- **Beta 测试发现两连修**(用户真机反馈):①task-pick 暂停从散文改为**表格**(ID/标题/文件/依赖/推荐理由,标推荐行)+ 有依赖时给 **mermaid/箭头链**草图(三个站点:DISPATCH_FLOW/TEAM_DO/CODEX_DO 两侧同步);②`adapter install` 汇总从裸 "26 new" 改为**分落点报**(N Claude commands → .claude/commands、N Codex skills → .agents/skills、protocol section → AGENTS.md)——AGENTS.md 的出现不再让人意外。
 ## 0.2.3 — 2026-07-23
 
 - **用户旅途归位:setup 永远不是用户的事**(GATEWAY 0.2.2→**0.2.3**,TEMPLATE 0.6.6→**0.6.7**)。用户指出产品化 gap:文档把"维护者验证机器"当成了"用户怎么用",且入口 skill 撞上未初始化仓库时把 `sigmarun init` 踢回给用户(templates 旧文案"report next_actions and stop")。修复:①**RULE 11(两侧全 skill 注入)**——任何 gateway 调用撞 `team_root_not_found`,AI 自跑 `sigmarun init --json`(幂等)后重试,"The user never needs to know init exists";plan 入口 doctor 文案同步改为"缺 `.team/` 自己修,只有真修不了的环境问题(非 git 仓库/无写权限)才报给用户"。②新增 **docs/31 用户旅途与验收手册**——从用户座位写:三句话(/team-plan·do·status)+ 一次性两条安装命令 + 9 个场景×聊天窗可见判据(S0 总纲:全程用户没被要求跑任何 sigmarun 命令即合格);docs/29/30 挂"开发者/维护者视角"标注,docs/00 修订注指向 31。渲染两侧对称验证;395 绿。

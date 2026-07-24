@@ -50,6 +50,7 @@
 | `team repair <RUN>` | 写 | run + 备份 | ✓ | 运维（§5.3，M30） |
 | `team export <RUN> [--to --full --force]` | 读（写 repo 目录） | — | ✓ | Record |
 | `team watch <RUN> [--interval --once --force]` | 读 + 周期 sweep | 触发时 run | ✓（D14） | Progress（循环模式逐 tick 输出；--json=NDJSON，R2） |
+| `team dashboard [<RUN>] [--port --once]` | 读 | — | ✓（R6） | 本地只读仪表盘：单页(runs·任务表·DAG·needs-you,自刷新) + `/api/state`；`--once` 打印聚合快照后退出 |
 | `team migrate [<RUN>] [--dry-run]` | 写 | run（逐 run） | ✓ | 运维（[21](21-schema-versioning-and-migration.md)；发 run_migrated，R3） |
 | `team backup list` | 读 | — | ✓ | 运维（[22](22-packaging-installation-and-evolution.md)） |
 | `team restore <backup-id> [--dry-run]` | 写 | — | ✓ | 运维（可逆：覆盖前自快照） |

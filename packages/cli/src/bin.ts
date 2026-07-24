@@ -9,7 +9,8 @@ import { GATEWAY_VERSION } from '@sigmarun/core';
 try {
   const result = runCli(process.argv.slice(2));
   console.log(result.stdout);
-  process.exit(result.exitCode);
+  // Server modes (dashboard) return keepAlive: print the line and let the event loop live.
+  if (!result.keepAlive) process.exit(result.exitCode);
 } catch (err) {
   const json = process.argv.includes('--json');
   const message = err instanceof Error ? err.message : String(err);

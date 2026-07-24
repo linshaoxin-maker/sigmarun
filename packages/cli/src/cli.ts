@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { setVerbose, resolveTeamRoot } from '@sigmarun/storage';
-import { initProject, doctorProject, importRun, publishTasks, runShow, readEvents, migrateState, backupList, restoreBackup, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, runReopen, taskAdd, taskCancel, taskDone, failEnvelope, type Envelope, type DoctorCheck, GATEWAY_VERSION } from '@sigmarun/core';
+import { initProject, doctorProject, importRun, publishTasks, runShow, readEvents, migrateState, backupList, restoreBackup, submitEvidence, integrateStart, integrateRecord, reportRun, exportRun, runPause, runResume, runCancel, runArchive, runReopen, taskAdd, taskCancel, taskDone, failEnvelope, okEnvelope, type Envelope, type DoctorCheck, GATEWAY_VERSION } from '@sigmarun/core';
 import { registerAgent, claimNext, heartbeat, releaseTask, reclaimTask, approvePaths, registerWorktree, adoptWorktree, reviewClaim, reviewDecide, resumeTask, unblockTask, blockTask, verifySubmit, listWorktrees, pruneWorktrees } from '@sigmarun/dispatch';
 import { postMessage, listMessages, hydrateContext, validateGraph, showGraph, updateRunMemory, promoteMemory, memoryCandidates } from '@sigmarun/context';
 import { installAdapters, installedTemplateVersion, TEMPLATE_VERSION } from '@sigmarun/adapters';
 import { statusRun, runList, taskShow, taskList, evidenceShow, agentList, watchOnce } from '@sigmarun/watch';
+import { dashboardState, serveDashboard } from './dashboard.js';
 import { auditRun, repairRun } from '@sigmarun/audit';
 
 const EXIT_BY_CODE: Record<string, number> = {
@@ -80,7 +81,7 @@ function flag(argv: string[], name: string): string | undefined {
 const VALUE_FLAGS = new Set([
   'agent', 'task', 'role', 'tool', 'label', 'paths', 'evidence', 'review', 'verify', 'path', 'branch', 'status', 'owner',
   'from', 'type', 'body', 'to', 'reply-to', 'refs', 'file', 'entry', 'section', 'supersedes', 'tasks',
-  'merge-commit', 'reason', 'interval', 'since', 'limit', 'note', 'team-root', 'msg',
+  'merge-commit', 'reason', 'interval', 'since', 'limit', 'note', 'team-root', 'msg', 'port',
 ]);
 
 /**
@@ -100,7 +101,7 @@ export const COMMAND_SURFACE: string[] = [
   'verify submit', 'integrate start', 'integrate record', 'report', 'export',
   'msg post', 'msg list', 'context hydrate', 'graph show', 'graph validate',
   'memory update', 'memory candidates', 'memory promote',
-  'status', 'events', 'watch', 'audit run', 'repair', 'migrate', 'backup list', 'restore',
+  'status', 'events', 'watch', 'dashboard', 'audit run', 'repair', 'migrate', 'backup list', 'restore',
 ];
 
 /** Command groups and their subcommands — used to answer `task lst` with the task menu, not "Unknown command: task". */
@@ -125,6 +126,8 @@ const GROUP_SUBCOMMANDS: Record<string, string> = {
 export interface CliResult {
   exitCode: number;
   stdout: string;
+  /** Server modes (dashboard): bin must print and RETURN without process.exit so the event loop lives. */
+  keepAlive?: boolean;
 }
 
 interface TimelineEvent { seq: number; ts: string | null; event: string; actor: { id: string }; task_id: string | null; claim_id: string | null; }
@@ -283,6 +286,7 @@ const HELP_TEXT = [
   'Plan:       run import <payload.json> [--lightweight] [--force] | task publish <RUN> [--tasks=..] [--force]',
   'Runs:       run list | run show <RUN> | run pause|resume|cancel|archive|reopen <RUN> | status <RUN> | watch <RUN> [--interval=s]',
   'Observe:    events <RUN> [--task=T] [--type=<event>] [--since=<seq>] [--limit=n] — read the append-only ledger (timeline; --json for full payload)',
+  '            dashboard [<RUN>] [--port=7317] [--once] — read-only local page (runs · tasks · DAG · needs-you, auto-refresh)',
   'Tasks:      task add <RUN> --file=<task.json> | task list <RUN> [--status --owner --type] | task cancel <RUN> <TASK> [--reason=..] | task show <RUN> <TASK> | graph show|validate <RUN>',
   'Dispatch:   agent register <RUN> --tool=<t> [--role=r] [--label=w] | agent list <RUN> | claim-next <RUN> --agent=<A> [--role=r] [--task=T] [--dry-run]',
   '            heartbeat <RUN> <TASK> --agent=<A> | release <RUN> <TASK> --agent=<A> | reclaim <RUN> <TASK> | approve-paths <RUN> <TASK> --paths=g1,g2',
@@ -465,6 +469,34 @@ export function runCli(argv: string[], opts: { cwd?: string; env?: Record<string
     env = !runId || !taskId
       ? failEnvelope('usage_error', 'Usage: sigmarun evidence show <RUN-ID> <TASK-ID> [--json]')
       : evidenceShow({ ...base, runId, taskId });
+  } else if (cmd === 'dashboard') {
+    const runId = args[1];
+    const portRaw = flag(argv, 'port');
+    const port = portRaw === undefined ? 7317 : Number(portRaw);
+    if (!Number.isFinite(port) || port < 0 || port > 65535) {
+      env = failEnvelope('usage_error', `Usage: sigmarun dashboard [<RUN-ID>] [--port=7317] [--once] [--json] — --port must be 0-65535, got "${portRaw}".`);
+    } else if (argv.includes('--once')) {
+      env = dashboardState({ ...base, runId });
+    } else {
+      // Fail fast on environment errors before opening a socket (not a repo / no .team yet).
+      const probe = dashboardState({ ...base, runId });
+      if (!probe.ok) {
+        env = probe;
+      } else if ((((probe.data as { runs?: unknown[] }).runs) ?? []).length === 0) {
+        // Nothing to show yet — guidance beats an empty page (and generic dispatch tests stay server-free).
+        env = okEnvelope({
+          message: 'No runs yet — the dashboard has content once a run exists.',
+          nextActions: ['Create one from a chat window: /team-plan <goal>', 'Then re-run: sigmarun dashboard'],
+        });
+      } else {
+        serveDashboard({ ...base, runId, port });
+        const url = `http://localhost:${port}`;
+        const line = json
+          ? JSON.stringify(okEnvelope({ message: `Dashboard serving on ${url}`, data: { url, port } }))
+          : `Dashboard: ${url}  (read-only · auto-refresh · Ctrl-C to stop)`;
+        return { exitCode: 0, stdout: line, keepAlive: true };
+      }
+    }
   } else if (cmd === 'watch') {
     const runId = args[1];
     if (!runId) {

@@ -26,7 +26,7 @@ afterEach(() => { while (dirs.length) cleanup(dirs.pop()!); });
  * must still be reachable from some journey. */
 const READONLY = new Set([
   'doctor', 'run list', 'run show', 'task list', 'task show', 'evidence show', 'agent list',
-  'msg list', 'graph show', 'graph validate', 'memory candidates', 'status', 'events',
+  'msg list', 'graph show', 'graph validate', 'memory candidates', 'status', 'events', 'dashboard',
   'watch', 'audit run', 'backup list',
 ]);
 
@@ -352,9 +352,12 @@ describe('user journeys — executable, terminal, tangle-free (product-axis reco
   });
 
   journey({ id: 'J-observe', name: 'watch streams ticks and exits on a terminal run', features: ['observability'], terminal: 'archived',
-    commands: ['init', 'run import', 'claim-next', 'done', 'report', 'run archive', 'watch'] }, () => {
+    commands: ['init', 'run import', 'claim-next', 'done', 'report', 'run archive', 'watch', 'dashboard'] }, () => {
     const w = start('lightweight');
     for (const t of ['TASK-0001', 'TASK-0002']) { w.cli(['claim-next', 'RUN-0001', '--agent=w']); w.cli(['done', 'RUN-0001', t, '--agent=w']); }
+    const dash = w.cli(['dashboard', '--once']);
+    expect(dash.ok).toBe(true);
+    expect((dash.data.runs as Array<{ graph: { nodes: unknown[] } }>)[0]!.graph.nodes.length).toBe(2);
     w.cli(['report', 'RUN-0001']);
     w.cli(['run', 'archive', 'RUN-0001']);
     const ticks: string[] = [];

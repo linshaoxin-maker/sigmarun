@@ -84,6 +84,12 @@ try {
   check('claim-next ok', sr(['claim-next', 'RUN-0001', `--agent=${agentId}`, '--json']).ok);
   check('done ok', sr(['done', 'RUN-0001', 'TASK-0001', `--agent=${agentId}`, '--json']).ok);
 
+  // C2) dashboard snapshot mode works from the installed artifact
+  const dash = sr(['dashboard', '--once', '--json']);
+  let dashOk = false;
+  try { dashOk = dash.ok && JSON.parse(dash.out).ok === true; } catch { /* fallthrough */ }
+  check('dashboard --once aggregates state', dashOk, (dash.out || '').slice(0, 120));
+
   // D) human-face validation prints the error list, not just "fix the listed items" (breakpoint #1)
   const badPf = join(repo, 'bad.json'); writeFileSync(badPf, JSON.stringify({ tasks: [{}] }));
   const bad = sr(['run', 'import', badPf]); // human mode, no --json
