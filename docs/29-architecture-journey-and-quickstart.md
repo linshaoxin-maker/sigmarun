@@ -1,4 +1,6 @@
-# 29. 架构速览 · 用户旅程 × 状态机 · 实测快速上手
+# 29. 架构速览 · 旅程 × 状态机 · 实测快速上手
+
+> ⚠️ **开发者/维护者视角**:本文手动敲 CLI 是为了看机器内部。**用户不这么用**——用户旅途(聊天窗三件套 /team-plan·do·status)与验收见 [31](31-user-journey-and-acceptance.md)。
 
 > 日期:2026-07-18(v0.2.1)
 > 目标:给新读者(人或 AI 窗口)一页入门——三条地基、领域关系、旅程怎么落在状态机上、一份**实测过**的端到端用例。图基于 [11](11-4-plus-1-architecture-view.md)(mermaid,GitHub 原生渲染);细节以 [15](15-run-task-state-machine-and-lifecycle.md)/[17](17-cli-mcp-contract-and-error-model.md) 为准。

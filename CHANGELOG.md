@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.2.3 — 2026-07-23
+
+- **用户旅途归位:setup 永远不是用户的事**(GATEWAY 0.2.2→**0.2.3**,TEMPLATE 0.6.6→**0.6.7**)。用户指出产品化 gap:文档把"维护者验证机器"当成了"用户怎么用",且入口 skill 撞上未初始化仓库时把 `sigmarun init` 踢回给用户(templates 旧文案"report next_actions and stop")。修复:①**RULE 11(两侧全 skill 注入)**——任何 gateway 调用撞 `team_root_not_found`,AI 自跑 `sigmarun init --json`(幂等)后重试,"The user never needs to know init exists";plan 入口 doctor 文案同步改为"缺 `.team/` 自己修,只有真修不了的环境问题(非 git 仓库/无写权限)才报给用户"。②新增 **docs/31 用户旅途与验收手册**——从用户座位写:三句话(/team-plan·do·status)+ 一次性两条安装命令 + 9 个场景×聊天窗可见判据(S0 总纲:全程用户没被要求跑任何 sigmarun 命令即合格);docs/29/30 挂"开发者/维护者视角"标注,docs/00 修订注指向 31。渲染两侧对称验证;395 绿。
 ## 0.2.2 — 2026-07-22
 
 - **发布线改直上 `latest`**(GATEWAY 0.2.1→**0.2.2**)。npm 的 2FA-bypass 限制把原"发 next → 人工 promote latest"流堵死:dist-tag 写入对交互登录会话直接 403(无 OTP 质询)、legacy `NPM_TOKEN` 已被回收(401)、OIDC trusted publishing 只覆盖 `npm publish` 不覆盖 dist-tag——`latest` 因此长期钉在 0.1.0(裸 `npm i sigmarun` 装到旧机器)。改法:release.yml 去掉 `--tag next`,发布即置 `latest`,质量门全部前移到 tag 之前(全量测试 + tarball 冒烟)。附 `promote-latest` workflow 备用(等新 automation token 时可用)。遗留:`next` tag 停在 0.2.1,待凭据恢复后再对齐,不影响用户。

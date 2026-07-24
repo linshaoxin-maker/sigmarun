@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.6.6';
+export const TEMPLATE_VERSION = '0.6.7';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -38,7 +38,11 @@ export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
    if the user passed \`--loop\`.  [D5]
 9. Never review or approve a task you have ever owned.  [INV-008]
 10. Everything you tell the user should quote IDs (RUN-/TASK-/CLAIM-)
-    so any statement can be verified against \`.team/\`.`;
+    so any statement can be verified against \`.team/\`.
+11. Setup is YOUR job, never the user's. If any gateway call fails with
+    \`team_root_not_found\` (no \`.team/\` yet), run \`sigmarun init --json\`
+    yourself — idempotent, only creates \`.team/\` — then retry the original
+    command. The user never needs to know init exists.`;
 
 /**
  * Human-in-the-loop block — the gateway keeps AI windows from colliding, but it
@@ -243,7 +247,11 @@ RULES: every \`sigmarun\` call uses \`--json\`; branch only on \`ok\` /
 ${COLLAB_BLOCK}
 
 Flow:
-1. \`sigmarun doctor --json\`; if not ok, report its \`next_actions\` and stop.
+1. \`sigmarun doctor --json\`. Missing \`.team/\` checks? Fix it YOURSELF per
+   RULE 11 (\`sigmarun init --json\`, idempotent) and re-run doctor. Only
+   environment problems you truly cannot fix (not a git repo, no write
+   permission) get reported with \`next_actions\` — setup is never the
+   user's errand.
 2. Read enough of the repo to split the goal into 1–6 INDEPENDENT tasks
    (pieces with no ordering dependency, so different tools can do them at
    once). Each task needs: a title, a one-line objective, at least one
@@ -697,7 +705,9 @@ Break the goal into 1-6 INDEPENDENT pieces any tool can pick up (a genuinely
 single-piece goal is fine as a single-task run — never invent an artificial
 split; offer [single-task run] / [just do it directly]). No goal given? Ask
 what they want to build — one plain question, never an error. Flow:
-doctor -> read the repo (and docs/team/MEMORY.md if present) -> build a
+doctor (missing \`.team/\`? fix it YOURSELF per RULE 11 — \`sigmarun init
+--json\` — setup is never the user's errand) -> read the repo (and
+docs/team/MEMORY.md if present) -> build a
 team.plan_payload.v1 JSON: top-level \`schema_version\`:"team.plan_payload.v1",
 \`source\`, \`run\` {title, mode, goal}, \`plan\` {summary}, \`tasks\`; each task
 carries \`client_task_key\`, title, \`type\`, one-line objective, >=1 testable

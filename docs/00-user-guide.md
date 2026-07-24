@@ -1,5 +1,7 @@
 # 00. 用户使用手册（User Guide）
 
+> **修订注(2026-07-23)**:日常动线已收敛为聊天窗三件套 `/team-plan` · `/team-do` · `/team-status`,**用户旅途与验收以 [31](31-user-journey-and-acceptance.md) 为准**(用户不跑 CLI,init 由 AI 自动补齐 — RULE 11)。本文保留为深度参考(full 流水线细节、gateway 命令面)。
+
 > **修订注（2026-07-15，整改 R0–R4 回写）**：命令面以 [17](17-cli-mcp-contract-and-error-model.md) §1（机器对账表）为准——新增 `run reopen`、`block`、`agent list`、`task list`、`done`、`events`、`reclaim --force --agent=user`、`init --example`、`migrate`、`backup list`/`restore`、`worktree prune`、全局 `--verbose`/`--team-root`。**轻量模式**（5 命令闭环，推荐首次接触）见 [26](26-lightweight-mode.md)；本文主体描述 full 流水线。`status` 的 Needs-user 现覆盖全部流水线等待态并给可执行命令；`watch` 循环逐 tick 输出。
 
 
