@@ -244,6 +244,23 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
             ? ` — you set \`handoff_ref\`, the stored/output name the gateway writes (it emits context/tasks/${opts.taskId}.md from your \`handoff\`), not a draft input.`
             : ` (the gateway writes context/tasks/${opts.taskId}.md from it).`),
       );
+    } else {
+      // Handoff structure guardrail (docs/14 §2.4) — WARN-ONLY: the gateway has no LLM (I4) and
+      // never rejects on content quality. Two shape heuristics catch the classic garbage handoff
+      // (one throwaway line) while its author is still around to fix it, instead of leaving the
+      // next agent to discover it inside hydrate must_read.
+      const shapeProblems: string[] = [];
+      if (handoffContent.trim().length < 200) shapeProblems.push('is under 200 characters');
+      if (!/^##+ /m.test(handoffContent)) shapeProblems.push('has no "## " section heading');
+      if (shapeProblems.length > 0) {
+        warnings.push({
+          code: 'handoff_unstructured',
+          message:
+            `handoff ${shapeProblems.join(' and ')} — it lands as context/tasks/${opts.taskId}.md, the next agent's ` +
+            `hydrate must_read. Recommended sections (docs/14 §2.4; warn-only, never rejected): handoff summary / ` +
+            `what was done / key decisions (why) / pitfalls & unfinished / notes for the next agent / related files.`,
+        });
+      }
     }
 
     if (errors.length > 0) return emitInvalid();

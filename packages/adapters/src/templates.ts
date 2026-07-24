@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.6.8';
+export const TEMPLATE_VERSION = '0.6.9';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -200,6 +200,23 @@ const DISPATCH_FLOW = (tool: string) => `Required flow:
      record the risk].
 7. Before submitting: run every required check, keep outputs; ensure
    \`git status --porcelain\` is clean; write the handoff memory file.
+   The gateway lands it as context/tasks/<TASK-ID>.md — the FIRST thing
+   the next agent reads (hydrate must_read), so write it for THEM, in
+   the run's language, with these sections (docs/14 §2.4 recommended
+   shape; a thin or heading-free handoff draws a warn-only
+   \`handoff_unstructured\` at submit, never a rejection):
+     # Handoff summary        — 1-2 lines: what shipped, where it stands
+     ## What was done         — changes + checks run (cite cmd_ids/paths)
+     ## Key decisions (why)   — trade-offs chosen and the reasoning, so
+                                the next agent doesn't re-derive or
+                                accidentally revert them
+     ## Pitfalls & unfinished — traps hit, workarounds, what is NOT done
+                                (mirror evidence risks / follow_ups)
+     ## Notes for the next agent — ordering deps, fragile spots,
+                                what not to touch
+     ## Related files         — key files/dirs and why each matters
+   An empty section gets "none", not deleted — absence should be
+   visible, not ambiguous.
 8. Build \`evidence.json\` per team.evidence.v1 (docs/14 §2.1: commands
    with exit codes + output refs, acceptance item-by-item,
    context_ack = the must_read list you actually read, risks,
@@ -688,7 +705,11 @@ Required flow (docs/14 §2.1 evidence contract):
    \`git diff --name-status <base_commit>..HEAD\`), commands with exit codes
    and output_file paths, required_checks_results covering every task check,
    acceptance item-by-item, context_ack (the must_read list you actually
-   read), handoff (markdown for the next agent), risks, follow_ups.
+   read), handoff (markdown for the next agent — sections per
+   docs/14 §2.4, same shape /team-dispatch step 7 teaches: handoff
+   summary / what was done / key decisions (why) / pitfalls &
+   unfinished / notes for the next agent / related files), risks,
+   follow_ups.
 4. \`sigmarun submit <RUN-ID> <TASK-ID> --agent=<AGENT-ID> --evidence=<file> --json\`.
    On evidence_invalid: fix exactly the listed items and retry.
 5. Report the envelope outcome and the run's next step.
@@ -898,7 +919,9 @@ ${RULES_BLOCK}
 
 Assemble the evidence draft JSON (summary, changed_files, commands with real
 exit codes and output files, required_checks_results, acceptance mapping,
-handoff), then run
+handoff — markdown for the next agent, sectioned per docs/14 §2.4: handoff
+summary / what was done / key decisions (why) / pitfalls & unfinished /
+notes for the next agent / related files), then run
 \`sigmarun submit <RUN-ID> <TASK-ID> --agent=<id> --evidence=<draft.json> --json\`.
 On \`evidence_invalid\`, fix exactly the listed items and resubmit. Lightweight
 runs have no submit — use \`sigmarun done\` there.
