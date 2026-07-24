@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>sigmarun dashboard · 设计稿 v0.2</title>
+<style>
+/* ============ tokens(docs/23 §8;明暗为同族色相两组明度,均经校验器验证) ============ */
+:root{
+  --bg:#f6f8f7; --card:#ffffff; --line:#e2e9e6; --line-soft:#edf2f0;
+  --ink:#15211f; --ink2:#4d5c58; --mut:#8a9995;
+  --acc:#0f6e56; --acc-tint:rgba(15,110,86,.10);
+  --st-draft:#888780; --st-ready:#ba7517; --st-work:#15559c; --st-review:#9b4fd0;
+  --st-approved:#1d9e75; --st-done:#0f6e56; --st-alert:#a32d2d; --st-cancel:#5f5e5a;
+  --shadow:0 8px 28px rgba(21,33,31,.13);
+  --edge:#9aa8a4;
+}
+html[data-theme="dark"]{
+  --bg:#0d1413; --card:#151f1d; --line:#26322f; --line-soft:#1c2725;
+  --ink:#e7eeec; --ink2:#9fb0ab; --mut:#6b7b76;
+  --acc:#5dcaa5; --acc-tint:rgba(93,202,165,.13);
+  --st-draft:#98978f; --st-ready:#d68a28; --st-work:#4a90dd; --st-review:#c793f5;
+  --st-approved:#52d49a; --st-done:#1f8a66; --st-alert:#f28b82; --st-cancel:#7d7c75;
+  --shadow:0 10px 30px rgba(0,0,0,.5);
+  --edge:#4e5c58;
+}
+@media(prefers-color-scheme:dark){
+  html:not([data-theme]){
+    --bg:#0d1413; --card:#151f1d; --line:#26322f; --line-soft:#1c2725;
+    --ink:#e7eeec; --ink2:#9fb0ab; --mut:#6b7b76;
+    --acc:#5dcaa5; --acc-tint:rgba(93,202,165,.13);
+    --st-draft:#98978f; --st-ready:#d68a28; --st-work:#4a90dd; --st-review:#c793f5;
+    --st-approved:#52d49a; --st-done:#1f8a66; --st-alert:#f28b82; --st-cancel:#7d7c75;
+    --shadow:0 10px 30px rgba(0,0,0,.5);
+    --edge:#4e5c58;
+  }
+}
+/* ============ base ============ */
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;min-width:1200px;font:13px/1.55 ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;padding:0}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:6px;border:2px solid var(--bg)}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ============ ① 顶栏 ============ */
+#top{height:48px;display:flex;align-items:center;gap:14px;padding:0 16px;
+  border-bottom:1px solid var(--line);background:var(--card);position:relative;z-index:30}
+#top .brand{font-weight:700;font-size:15px;letter-spacing:.01em}
+.badge-ro{font-size:11px;color:var(--acc);background:var(--acc-tint);border:1px solid transparent;
+  padding:1px 8px;border-radius:99px;font-weight:600}
+.badge-mock{font-size:11px;color:var(--st-ready);background:color-mix(in srgb,var(--st-ready) 12%,transparent);
+  padding:1px 8px;border-radius:99px;font-weight:600}
+#top .root{color:var(--mut);font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#top .sp{flex:1}
+#needsBtn{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:8px;
+  padding:5px 12px;font-weight:600;font-size:12.5px;background:var(--card)}
+#needsBtn:hover{border-color:var(--mut)}
+#needsBtn .n{background:var(--st-alert);color:#fff;font-size:11px;min-width:18px;height:18px;line-height:18px;
+  text-align:center;border-radius:9px;padding:0 5px;font-weight:700}
+html[data-theme="dark"] #needsBtn .n{color:#161311}
+.meta{display:flex;align-items:center;gap:6px;color:var(--mut);font-size:11.5px}
+.pulse{width:7px;height:7px;border-radius:50%;background:var(--st-approved);animation:pu 2.5s infinite}
+@keyframes pu{0%,100%{opacity:1}50%{opacity:.25}}
+#themeBtn{border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:12px;color:var(--ink2)}
+#themeBtn:hover{border-color:var(--mut)}
+
+/* ============ ② 收件箱面板 ============ */
+#inbox{position:absolute;top:52px;right:12px;width:440px;max-height:calc(100vh - 70px);overflow:auto;
+  background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);z-index:40;
+  display:none}
+#inbox.open{display:block}
+#inbox .hd{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:var(--card);z-index:1}
+#inbox .hd b{font-size:13px}
+#inbox .hd .sub{color:var(--mut);font-size:11px}
+#inbox .hd .x{margin-left:auto;color:var(--mut);font-size:15px;padding:2px 6px;border-radius:6px}
+#inbox .hd .x:hover{background:var(--line-soft)}
+.ni{display:flex;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line-soft);cursor:default}
+.ni:last-child{border-bottom:none}
+.ni .ic{width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-size:13px;flex:none;margin-top:1px}
+.ni .bd{min-width:0;flex:1}
+.ni .l1{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ni .kind{font-weight:650;font-size:12.5px}
+.chip{font-size:10.5px;padding:0 6px;border-radius:5px;background:var(--line-soft);color:var(--ink2);
+  border:1px solid var(--line);white-space:nowrap}
+.chip.click{cursor:pointer}
+.chip.click:hover{border-color:var(--acc);color:var(--acc)}
+.ni .dt{color:var(--ink2);font-size:12px;margin:3px 0 6px;display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical;overflow:hidden}
+.cmd{display:flex;align-items:center;gap:6px;background:var(--line-soft);border:1px solid var(--line);
+  border-radius:7px;padding:4px 8px}
+.cmd code{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--ink2);flex:1;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.copy{font-size:11px;color:var(--acc);font-weight:600;flex:none;padding:1px 6px;border-radius:5px}
+.copy:hover{background:var(--acc-tint)}
+
+/* ============ 三栏骨架 ============ */
+#grid{display:grid;grid-template-columns:248px minmax(520px,1fr) 360px;
+  height:calc(100vh - 48px);overflow:hidden}
+.col{overflow-y:auto;padding:12px}
+#colL{border-right:1px solid var(--line)}
+#colR{border-left:1px solid var(--line);padding:0}
+h4{margin:2px 2px 8px;font-size:11px;color:var(--mut);font-weight:650;text-transform:uppercase;letter-spacing:.07em}
+
+/* ============ ③ run 卡 ============ */
+.runcard{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:9px 11px 10px 14px;margin-bottom:8px;cursor:pointer;overflow:hidden}
+.runcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--band)}
+.runcard:hover{border-color:var(--mut)}
+.runcard.sel{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}
+.runcard .l1{display:flex;align-items:baseline;gap:6px}
+.runcard .rid{font-size:11.5px;color:var(--ink2)}
+.runcard .lw{font-size:10px;color:var(--mut)}
+.runcard .pct{margin-left:auto;font-size:12px;font-weight:700;color:var(--ink2)}
+.runcard .tt{font-weight:650;font-size:12.5px;margin:2px 0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.runcard .stt{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ink2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.stack{display:flex;gap:1px;height:4px;border-radius:2px;overflow:hidden;margin-top:7px;background:var(--line-soft)}
+.stack i{display:block;height:100%}
+
+/* ============ ④ agent 卡 ============ */
+.agsum{color:var(--mut);font-size:11.5px;margin:0 2px 8px}
+.ag{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:7px}
+.ag.stale{opacity:.62}
+.ag .l1{display:flex;align-items:center;gap:6px}
+.ag .id{font-weight:650;font-size:12px}
+.ag .tool{font-size:10px;color:var(--mut);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+.ag .role{margin-left:auto;font-size:10.5px;color:var(--ink2)}
+.ag .l2{display:flex;align-items:center;gap:6px;margin-top:5px;font-size:11.5px;color:var(--ink2)}
+.hb{width:7px;height:7px;border-radius:50%;background:var(--st-approved);flex:none}
+.hb.warn{background:var(--st-ready)}
+.ag .hbt{color:var(--mut);font-size:11px;margin-left:auto}
+
+/* ============ ⑤ 中栏 ============ */
+#paneHd{display:flex;align-items:center;gap:10px;padding:2px 2px 10px;flex-wrap:wrap}
+#paneHd .tt{font-size:15px;font-weight:700}
+#paneHd .big{font-size:20px;font-weight:700;color:var(--acc)}
+#paneHd .wt{color:var(--mut);font-size:11.5px}
+.pill{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:99px;font-size:11.5px;
+  font-weight:600;color:var(--c);background:color-mix(in srgb,var(--c) 12%,transparent);
+  border:1px solid color-mix(in srgb,var(--c) 38%,transparent);white-space:nowrap}
+.tabs{margin-left:auto;display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.tabs button{padding:4px 12px;font-size:12px;color:var(--ink2);background:var(--card)}
+.tabs button.on{background:var(--acc-tint);color:var(--acc);font-weight:650}
+#legend{display:flex;gap:12px;align-items:center;color:var(--mut);font-size:11px;padding:0 2px 8px}
+#legend svg{vertical-align:-2px}
+#dagwrap{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:auto;position:relative}
+#dagwrap svg{display:block}
+.node{cursor:pointer}
+.node rect.bx{fill:color-mix(in srgb,var(--c) 11%,var(--card));stroke:var(--c);stroke-width:1.4;rx:9}
+.node.dim rect.bx{stroke-dasharray:4 3;fill:var(--card)}
+.node.dim{opacity:.75}
+.node.sel rect.bx{stroke:var(--acc);stroke-width:2.2;filter:drop-shadow(0 3px 8px color-mix(in srgb,var(--acc) 45%,transparent))}
+.node text{font-family:ui-monospace,Menlo,monospace}
+.node .nid{font-size:11px;font-weight:700;fill:var(--c)}
+.node .nti{font-size:11px;fill:var(--ink2);font-family:ui-sans-serif,system-ui,"PingFang SC",sans-serif}
+.node .now{font-size:9.5px;fill:var(--mut)}
+.node.cancel .nti{text-decoration:line-through}
+.rk{font-size:10px}
+/* 任务表 */
+#tbl{display:none;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+#tbl table{width:100%;border-collapse:collapse;font-size:12px}
+#tbl th{color:var(--mut);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+  padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;background:var(--line-soft)}
+#tbl td{padding:6px 10px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+#tbl td:first-child{white-space:nowrap}
+#tbl tr:last-child td{border-bottom:none}
+#tbl tbody tr{cursor:pointer}
+#tbl tbody tr:hover{background:var(--line-soft)}
+#tbl tbody tr.sel{background:var(--acc-tint)}
+.depchip{font-size:10.5px;padding:0 5px;border-radius:4px;border:1px solid var(--line);color:var(--ink2);
+  margin-right:3px;white-space:nowrap;cursor:pointer}
+.depchip.unmet{border-color:color-mix(in srgb,var(--st-ready) 55%,transparent);color:var(--st-ready)}
+.depchip:hover{border-color:var(--acc);color:var(--acc)}
+
+/* ============ ⑥ 侧栏 ============ */
+#colR .inner{padding:12px}
+#sbHead{padding:12px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card);z-index:2}
+#sbHead .l1{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+#sbHead .tid{font-weight:700;font-size:13.5px}
+#sbHead .ty{font-size:10.5px;color:var(--mut);border:1px solid var(--line);padding:0 5px;border-radius:4px}
+#sbHead .tt{font-size:13px;font-weight:600;margin-top:5px}
+#sbHead .own{color:var(--mut);font-size:11.5px;margin-top:4px}
+.sec{padding:11px 14px;border-bottom:1px solid var(--line-soft)}
+.sec h5{margin:0 0 8px;font-size:11px;color:var(--mut);font-weight:650;text-transform:uppercase;letter-spacing:.07em}
+.kv{display:flex;gap:8px;font-size:12px;margin:4px 0;align-items:baseline}
+.kv b{color:var(--mut);font-weight:600;flex:none;width:58px;font-size:11.5px}
+.kv .v{color:var(--ink);min-width:0}
+.riskline{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--st-alert);margin:4px 0}
+.riskline.warn{color:var(--st-ready)}
+.ck{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px}
+.ck code{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--ink2);flex:1;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.ckpill{font-size:10.5px;font-weight:700;padding:0 7px;border-radius:99px;color:var(--c);
+  background:color-mix(in srgb,var(--c) 13%,transparent)}
+.cf{display:flex;align-items:center;gap:6px;font-size:11px;padding:2px 0;color:var(--ink2)}
+.cf code{font-family:ui-monospace,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.oob{font-size:9.5px;color:var(--st-ready);border:1px solid color-mix(in srgb,var(--st-ready) 50%,transparent);
+  border-radius:4px;padding:0 4px;flex:none}
+.sum{font-size:12px;color:var(--ink2);margin-top:6px}
+/* 时间线 */
+.tl{position:relative;margin-left:4px}
+.tl::before{content:"";position:absolute;left:5px;top:8px;bottom:8px;width:2px;background:var(--line)}
+.ev{position:relative;padding:0 0 12px 22px}
+.ev:last-child{padding-bottom:2px}
+.ev .pt{position:absolute;left:0;top:4px;width:12px;height:12px;border-radius:50%;
+  background:var(--c);border:2.5px solid var(--card);box-shadow:0 0 0 1.5px var(--c)}
+.ev .l1{display:flex;align-items:center;gap:6px;font-size:12px}
+.ev .nm{font-weight:650}
+.ev .meta2{color:var(--mut);font-size:10.5px;margin-top:2px}
+.ev .pay{color:var(--ink2);font-size:11px;margin-top:2px}
+.more{color:var(--mut);font-size:11px;margin-top:8px}
+.empty{color:var(--mut);font-size:12px;padding:24px 14px;text-align:center}
+#toast{position:fixed;bottom:18px;left:50%;transform:translate(-50%,8px);background:var(--ink);color:var(--bg);
+  font-size:12px;padding:6px 14px;border-radius:8px;opacity:0;transition:.18s;pointer-events:none;z-index:99}
+#toast.on{opacity:.93;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+
+<header id="top">
+  <span class="brand">sigmarun</span>
+  <span class="badge-ro">只读</span>
+  <span class="badge-mock" title="设计稿:内嵌假数据,不连真实 .team/">设计稿 · 假数据</span>
+  <span class="root mono" title="~/work/acme-api/.team">~/work/acme-api/.team</span>
+  <span class="sp"></span>
+  <button id="needsBtn" onclick="toggleInbox()">需要你 <span class="n" id="needsN">4</span></button>
+  <span class="meta mono" id="stamp">12:07:31 · seq 214</span>
+  <span class="meta"><span class="pulse"></span>2.5s 轮询 · 实时</span>
+  <button id="themeBtn" onclick="cycleTheme()">主题:自动</button>
+  <div id="inbox" class="open">
+    <div class="hd"><b>需要你处理</b><span class="sub">4 件 · 跨 2 个需求 · 命令只可复制</span>
+      <button class="x" onclick="toggleInbox()">✕</button></div>
+    <div id="inboxList"></div>
+  </div>
+</header>
+
+<div id="grid">
+  <!-- ③④ 左栏 -->
+  <div class="col" id="colL">
+    <h4>需求 · 3</h4>
+    <div id="runs"></div>
+    <h4 style="margin-top:16px">窗口 · agents</h4>
+    <div class="agsum" id="agsum"></div>
+    <div id="agents"></div>
+  </div>
+
+  <!-- ⑤ 中栏 -->
+  <div class="col" id="colM">
+    <div id="paneHd"></div>
+    <div id="legend">
+      <span><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--edge)" stroke-width="1.6"/></svg> blocks</span>
+      <span style="color:var(--st-ready)"><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--st-ready)" stroke-width="1.6"/></svg> blocks·未满足</span>
+      <span><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--st-review)" stroke-width="1.6" stroke-dasharray="6 4"/></svg> 产出 context</span>
+      <span><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--edge)" stroke-width="1.6" stroke-dasharray="2 4"/></svg> 软依赖</span>
+    </div>
+    <div id="dagwrap"><svg id="dag"></svg></div>
+    <div id="tbl">
+      <table>
+        <thead><tr><th>ID</th><th>标题</th><th>类型</th><th>状态</th><th>owner</th><th>依赖</th><th>风险</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ⑥ 右栏 -->
+  <div class="col" id="colR"><div id="sidebar"></div></div>
+</div>
+<div id="toast">已复制</div>
+
+<script>
+/* ================= 假数据(字段名与 /api/state 真实 envelope 一致,docs/23 §3) ================= */
+const MOCK = {
+  generated_at: '2026-07-24T12:07:31',
+  runs: [
+    {
+      run: { run_id:'RUN-0007', title:'重构 evidence 校验管道', status:'active', mode:'feature',
+             lightweight:false, progress_pct:58,
+             user_state:{ state:'needs_you', detail:'MSG-0021: CLI 表格输出列序冲突待裁决', command:'sigmarun msg post RUN-0007 …' } },
+      status: {
+        run_status:'active', progress_pct:58, weight_total:24, weight_done:11,
+        counts:{ draft:1, ready:2, working:1, blocked:1, reviewing:1, approved:1, done:2, cancelled:1 },
+        agents:{ total:4, with_claims:3, stale:1 },
+        open_questions:0,
+        risks:[
+          { kind:'stale_lease', task_id:'TASK-0005', agent_id:'AG-01', minutes_overdue:12 },
+          { kind:'unresolved_blocker', task_id:'TASK-0006', message_id:'MSG-0021' }
+        ],
+        needs_user:[
+          { kind:'blocker', task_id:'TASK-0006',
+            detail:'MSG-0021: CLI 表格输出与 docs/17 §1 的列序冲突 —— 沿用旧列序还是对齐新表?',
+            command:'sigmarun msg post RUN-0007 --from=user --type=answer --reply-to=MSG-0021 --body="<answer>"' },
+          { kind:'awaiting_verify', task_id:'TASK-0003',
+            detail:'TASK-0003 awaits INDEPENDENT verification — register a different agent in a second window first (INV-008).',
+            command:'sigmarun claim-next RUN-0007 --agent="<verifier AGENT-ID>" --role=verifier' },
+          { kind:'approval_pending', task_id:'TASK-0007',
+            detail:'TASK-0007 needs approval for: migrations/**',
+            command:'sigmarun approve-paths RUN-0007 TASK-0007 --paths=migrations/**' }
+        ]
+      },
+      tasks:[
+        { task_id:'TASK-0001', title:'evidence schema v2 定稿', type:'design',    status:'done',      owner_agent_id:null,   depends_on:[] },
+        { task_id:'TASK-0002', title:'读路径迁移到 schema v2', type:'implement', status:'done',      owner_agent_id:null,   depends_on:['TASK-0001'] },
+        { task_id:'TASK-0003', title:'checks 执行器抽象',      type:'implement', status:'approved',  owner_agent_id:'AG-02',depends_on:['TASK-0001'] },
+        { task_id:'TASK-0004', title:'重写 submit-evidence 校验', type:'implement', status:'reviewing', owner_agent_id:'AG-02',depends_on:['TASK-0002'] },
+        { task_id:'TASK-0005', title:'审计规则对齐 evidence v2', type:'implement', status:'working',  owner_agent_id:'AG-01',depends_on:['TASK-0002'] },
+        { task_id:'TASK-0006', title:'CLI 输出对齐',           type:'implement', status:'blocked',   owner_agent_id:'AG-04',depends_on:['TASK-0003'] },
+        { task_id:'TASK-0007', title:'迁移工具 migrate --evidence', type:'implement', status:'ready', owner_agent_id:null,  depends_on:['TASK-0002'] },
+        { task_id:'TASK-0008', title:'回归测试矩阵',           type:'test',      status:'ready',     owner_agent_id:null,   depends_on:['TASK-0004','TASK-0005'] },
+        { task_id:'TASK-0009', title:'docs/14 合同更新',       type:'docs',      status:'draft',     owner_agent_id:null,   depends_on:['TASK-0008'] },
+        { task_id:'TASK-0010', title:'旧校验兼容层',           type:'implement', status:'cancelled', owner_agent_id:null,   depends_on:[] }
+      ],
+      graph:{
+        nodes:'SAME_AS_TASKS',
+        edges:[
+          { from:'TASK-0001', to:'TASK-0002', kind:'blocks', required:true },
+          { from:'TASK-0001', to:'TASK-0003', kind:'blocks', required:true },
+          { from:'TASK-0002', to:'TASK-0004', kind:'blocks', required:true },
+          { from:'TASK-0002', to:'TASK-0005', kind:'blocks', required:true },
+          { from:'TASK-0003', to:'TASK-0006', kind:'blocks', required:true },
+          { from:'TASK-0002', to:'TASK-0007', kind:'blocks', required:true },
+          { from:'TASK-0004', to:'TASK-0008', kind:'blocks', required:true },
+          { from:'TASK-0005', to:'TASK-0008', kind:'blocks', required:true },
+          { from:'TASK-0008', to:'TASK-0009', kind:'blocks', required:true },
+          { from:'TASK-0001', to:'TASK-0004', kind:'produces_context_for', refs:3 },
+          { from:'TASK-0004', to:'TASK-0009', kind:'produces_context_for', refs:2 },
+          { from:'TASK-0004', to:'TASK-0007', kind:'soft_depends_on' }
+        ]
+      },
+      agents:[
+        { agent_id:'AG-01', label:'左窗', tool:'claude-code', role:'implementer', current_task:'TASK-0005', gate_kind:null,    last_heartbeat_min:1,  stale:false },
+        { agent_id:'AG-02', label:null,   tool:'codex',       role:'implementer', current_task:'TASK-0004', gate_kind:null,    last_heartbeat_min:3,  stale:false },
+        { agent_id:'AG-03', label:'评审窗', tool:'claude-code', role:'reviewer',   current_task:'TASK-0004', gate_kind:'review', last_heartbeat_min:0,  stale:false },
+        { agent_id:'AG-04', label:null,   tool:'claude-code', role:'implementer', current_task:'TASK-0006', gate_kind:null,    last_heartbeat_min:47, stale:true }
+      ]
+    },
+    {
+      run: { run_id:'RUN-0006', title:'修复 watch 心跳抖动', status:'active', mode:'bugfix',
+             lightweight:true, progress_pct:82,
+             user_state:{ state:'ready_to_report', detail:'Every task is closed.', command:'sigmarun report RUN-0006' } },
+      status: { run_status:'active', progress_pct:82, weight_total:5, weight_done:4,
+        counts:{ done:2, working:1 }, agents:{ total:1, with_claims:1, stale:0 }, open_questions:0,
+        risks:[], needs_user:[ { kind:'ready_to_report', detail:'Every task is closed.', command:'sigmarun report RUN-0006' } ] },
+      tasks:[], graph:{nodes:[],edges:[]}, agents:[]
+    },
+    {
+      run: { run_id:'RUN-0005', title:'发布 v0.2.3 与安装脚本', status:'reported', mode:'chore',
+             lightweight:false, progress_pct:100,
+             user_state:{ state:'closed', detail:'requirement closed — hand the changes back to git', command:null } },
+      status: { run_status:'reported', progress_pct:100, weight_total:8, weight_done:8,
+        counts:{ done:6, cancelled:1 }, agents:{ total:0, with_claims:0, stale:0 }, open_questions:0,
+        risks:[], needs_user:[] },
+      tasks:[], graph:{nodes:[],edges:[]}, agents:[]
+    }
+  ]
+};
+MOCK.runs[0].graph.nodes = MOCK.runs[0].tasks.map(t=>({task_id:t.task_id,title:t.title,type:t.type,status:t.status}));
+
+/* /api/task + /api/events 的假响应(选中任务的侧栏数据;缺省任务用行内字段合成) */
+const DETAIL = {
+  'TASK-0004': {
+    task:{ goal:'把 submit-evidence 的校验层重写到 evidence schema v2,错误映射 docs/17 错误模型;不改写路径语义。',
+      acceptance:['schema v2 全字段校验有单测','错误 envelope 带 next_actions','旧 v1 evidence 读兼容'],
+      paths:{ allow:['packages/core/**','docs/14-evidence-review-verification-contract.md'], requires_approval:[] },
+      weight:3, previous_attempts:[] },
+    claim:{ owner:'AG-02', line:'claim CLM-0042 · 已提交待评审', gate:'评审租约 AG-03 · 剩 18 分' },
+    evidence:{ revision:2, history:1, summary:'校验层重写为 schema 分层校验;第 1 版评审提出 2 处 must_fix(错误码命名、越界改动说明),第 2 版已回应。',
+      checks:[
+        { name:'pnpm vitest run', status:'pass' },
+        { name:'pnpm tsc --noEmit', status:'pass' },
+        { name:'pnpm eslint .', status:'pass' },
+        { name:'pnpm test:arch', status:'pass' },
+        { name:'sigmarun audit run RUN-0007 --json', status:'pass' }
+      ],
+      changed_files:[
+        { path:'packages/core/src/evidence.ts', in_scope:true },
+        { path:'packages/core/src/evidence-schema.ts', in_scope:true },
+        { path:'packages/core/src/errors.ts', in_scope:true },
+        { path:'packages/core/test/evidence.test.ts', in_scope:true },
+        { path:'docs/14-evidence-review-verification-contract.md', in_scope:true },
+        { path:'packages/cli/src/cli.ts', in_scope:false }
+      ] },
+    events:[
+      { seq:214, ts:'12:06:58', event:'heartbeat',          actor:'AG-03', pay:'' },
+      { seq:201, ts:'11:52:10', event:'review_claimed',     actor:'AG-03', pay:'REVIEW-0004-02' },
+      { seq:198, ts:'11:49:33', event:'evidence_submitted', actor:'AG-02', pay:'revision 2 · checks 5/5 pass' },
+      { seq:185, ts:'11:18:47', event:'changes_requested',  actor:'AG-03', pay:'2 must_fix:错误码命名 / 越界改动未声明' },
+      { seq:180, ts:'11:02:29', event:'review_claimed',     actor:'AG-03', pay:'REVIEW-0004-01' },
+      { seq:172, ts:'10:41:12', event:'evidence_submitted', actor:'AG-02', pay:'revision 1 · checks 5/5 pass' },
+      { seq:135, ts:'09:58:04', event:'task_started',       actor:'AG-02', pay:'' },
+      { seq:134, ts:'09:57:51', event:'task_claimed',       actor:'AG-02', pay:'lease 30 min' },
+      { seq:128, ts:'09:40:22', event:'task_published',     actor:'user',  pay:'' },
+      { seq:121, ts:'09:31:07', event:'task_created',       actor:'user',  pay:'' }
+    ],
+    total:23
+  },
+  'TASK-0005': {
+    task:{ goal:'把 audit 的 evidence 规则(AUD-014/015/031)对齐 schema v2 字段名与 in_scope 判定。',
+      acceptance:['audit 三条规则用 v2 字段','回放测试通过'],
+      paths:{ allow:['packages/audit/**'], requires_approval:[] }, weight:2, previous_attempts:[] },
+    claim:{ owner:'AG-01', line:'claim CLM-0044 · active · 租约已超 12 分钟', gate:null },
+    evidence:null,
+    events:[
+      { seq:206, ts:'11:55:40', event:'heartbeat',    actor:'AG-01', pay:'' },
+      { seq:161, ts:'10:22:18', event:'task_started', actor:'AG-01', pay:'' },
+      { seq:160, ts:'10:22:03', event:'task_claimed', actor:'AG-01', pay:'lease 30 min' },
+      { seq:129, ts:'09:40:22', event:'task_published', actor:'user', pay:'' },
+      { seq:122, ts:'09:31:24', event:'task_created', actor:'user',  pay:'' }
+    ],
+    total:9
+  },
+  'TASK-0006': {
+    task:{ goal:'CLI 人类模式输出对齐 checks 执行器的新摘要格式。',
+      acceptance:['status/task show 两处输出对齐','快照测试更新'],
+      paths:{ allow:['packages/cli/**'], requires_approval:[] }, weight:2, previous_attempts:[] },
+    claim:{ owner:'AG-04', line:'claim CLM-0045 · active(阻塞冻结,租约不计时)', gate:null },
+    evidence:null,
+    events:[
+      { seq:196, ts:'11:47:02', event:'task_blocked',  actor:'AG-04', pay:'MSG-0021 列序冲突待裁决' },
+      { seq:178, ts:'10:58:11', event:'task_started',  actor:'AG-04', pay:'' },
+      { seq:177, ts:'10:57:58', event:'task_claimed',  actor:'AG-04', pay:'lease 30 min' },
+      { seq:130, ts:'09:40:22', event:'task_published', actor:'user', pay:'' },
+      { seq:123, ts:'09:31:40', event:'task_created',  actor:'user',  pay:'' }
+    ],
+    total:7
+  },
+  'TASK-0003': {
+    task:{ goal:'把 required_checks 执行抽象为可复用执行器,输出结构化结果。',
+      acceptance:['执行器单测','audit 可消费结果结构'],
+      paths:{ allow:['packages/core/**'], requires_approval:[] }, weight:3, previous_attempts:[] },
+    claim:{ owner:'AG-02', line:'claim CLM-0038 · completed', gate:'等独立验证(见收件箱)' },
+    evidence:{ revision:1, history:0, summary:'执行器抽象完成,checks 结果结构化为 required_checks_results[]。',
+      checks:[
+        { name:'pnpm vitest run', status:'pass' },
+        { name:'pnpm tsc --noEmit', status:'pass' },
+        { name:'pnpm test:arch', status:'pass' }
+      ],
+      changed_files:[
+        { path:'packages/core/src/checks.ts', in_scope:true },
+        { path:'packages/core/test/checks.test.ts', in_scope:true }
+      ] },
+    events:[
+      { seq:193, ts:'11:40:15', event:'review_approved',    actor:'AG-03', pay:'REVIEW-0003-01 · approve' },
+      { seq:175, ts:'10:49:30', event:'review_claimed',     actor:'AG-03', pay:'' },
+      { seq:168, ts:'10:35:44', event:'evidence_submitted', actor:'AG-02', pay:'revision 1 · checks 3/3 pass' },
+      { seq:139, ts:'10:02:11', event:'task_started',       actor:'AG-02', pay:'' },
+      { seq:138, ts:'10:01:58', event:'task_claimed',       actor:'AG-02', pay:'lease 30 min' }
+    ],
+    total:12
+  }
+};
+
+/* ================= 词汇映射(全部来自 core/watch 词汇表,不造词) ================= */
+const ST = {
+  draft:    { c:'var(--st-draft)',    g:'○',  zh:'计划' },
+  ready:    { c:'var(--st-ready)',    g:'◇',  zh:'就绪' },
+  claimed:  { c:'var(--st-work)',     g:'▶',  zh:'已认领' },
+  working:  { c:'var(--st-work)',     g:'▶',  zh:'进行中' },
+  blocked:  { c:'var(--st-alert)',    g:'⛔', zh:'阻塞' },
+  submitted:{ c:'var(--st-review)',   g:'◐',  zh:'已提交' },
+  reviewing:{ c:'var(--st-review)',   g:'◐',  zh:'评审中' },
+  changes_requested:{ c:'var(--st-alert)', g:'⛔', zh:'待返工' },
+  approved: { c:'var(--st-approved)', g:'✓',  zh:'已通过' },
+  verified: { c:'var(--st-done)',     g:'✓',  zh:'已验证' },
+  integrated:{c:'var(--st-done)',     g:'✓',  zh:'已集成' },
+  done:     { c:'var(--st-done)',     g:'✓',  zh:'完成' },
+  cancelled:{ c:'var(--st-cancel)',   g:'×',  zh:'已取消' },
+  unknown:  { c:'var(--st-draft)',    g:'?',  zh:'未知' }
+};
+const USTATE = {
+  needs_you:        { c:'var(--st-alert)',    zh:'等你处理' },
+  awaiting_publish: { c:'var(--st-ready)',    zh:'待发布' },
+  ready_to_work:    { c:'var(--st-ready)',    zh:'可开工' },
+  in_progress:      { c:'var(--st-work)',     zh:'进行中' },
+  awaiting_gates:   { c:'var(--st-review)',   zh:'等闸门' },
+  ready_to_integrate:{c:'var(--st-approved)', zh:'可集成' },
+  ready_to_report:  { c:'var(--st-approved)', zh:'可收尾' },
+  closed:           { c:'var(--st-done)',     zh:'已收尾' },
+  paused:           { c:'var(--st-cancel)',   zh:'已暂停' }
+};
+const KIND = {
+  ledger_broken:   { c:'var(--st-alert)',    ic:'⚑', zh:'账本损坏' },
+  blocker:         { c:'var(--st-alert)',    ic:'⛔', zh:'阻塞待答' },
+  blocked_unblock: { c:'var(--st-ready)',    ic:'🔓', zh:'待解除阻塞' },
+  reclaim_confirm: { c:'var(--st-ready)',    ic:'⏱', zh:'待确认回收' },
+  stale_owner:     { c:'var(--st-ready)',    ic:'⏱', zh:'owner 失联' },
+  deps_dead:       { c:'var(--st-ready)',    ic:'✂', zh:'依赖已死' },
+  open_question:   { c:'var(--st-ready)',    ic:'?',  zh:'提问待答' },
+  approval_pending:{ c:'var(--st-ready)',    ic:'🛂', zh:'路径待批准' },
+  awaiting_rework: { c:'var(--st-ready)',    ic:'↩',  zh:'待返工' },
+  awaiting_review: { c:'var(--st-review)',   ic:'◐',  zh:'等独立评审' },
+  awaiting_verify: { c:'var(--st-review)',   ic:'◑',  zh:'等独立验证' },
+  ready_to_integrate:{c:'var(--st-approved)',ic:'⇣', zh:'可以集成' },
+  ready_to_report: { c:'var(--st-approved)', ic:'✓',  zh:'可以收尾' }
+};
+const EV_ZH = {
+  task_created:'创建任务', task_published:'发布任务', task_claimed:'认领', task_started:'开工',
+  task_released:'释放', task_reclaimed:'回收重派', evidence_submitted:'提交 evidence',
+  review_claimed:'认领评审', review_released:'释放评审', review_approved:'评审通过',
+  review_skipped:'跳过评审', changes_requested:'要求修改', review_blocked:'评审阻塞',
+  task_blocked:'挂起阻塞', task_unblocked:'解除阻塞', verification_passed:'验证通过',
+  verification_failed:'验证失败', verification_started:'开始验证', verify_claimed:'认领验证',
+  task_integrated:'已集成', task_cancelled:'取消任务', task_done:'完成',
+  heartbeat:'心跳', agent_registered:'注册窗口', path_approval_granted:'批准路径',
+  run_created:'创建需求', run_activated:'激活需求', worktree_created:'创建 worktree'
+};
+/* 状态事件→落点状态(core EVENT_STATUS 摘录,时间线点的颜色) */
+const EV_STATUS = {
+  task_created:'draft', task_published:'ready', task_claimed:'claimed', task_started:'working',
+  task_released:'ready', task_reclaimed:'ready', evidence_submitted:'submitted',
+  review_claimed:'reviewing', review_released:'submitted', review_approved:'approved',
+  review_skipped:'approved', changes_requested:'changes_requested', review_blocked:'blocked',
+  task_blocked:'blocked', task_unblocked:'working', verification_passed:'verified',
+  task_integrated:'integrated', task_cancelled:'cancelled', task_done:'done'
+};
+const TOOL_SHORT = { 'claude-code':'CC', 'codex':'CX' };
+
+/* ================= 状态 ================= */
+let selRun = 'RUN-0007';
+let selTask = 'TASK-0004';
+let tab = 'dag';
+
+const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const curRun = () => MOCK.runs.find(r => r.run.run_id === selRun);
+
+/* ================= ② 收件箱 ================= */
+function renderInbox(){
+  const items = [];
+  for (const r of MOCK.runs)
+    for (const n of (r.status.needs_user||[]))
+      items.push({ run: r.run.run_id, ...n });
+  document.getElementById('needsN').textContent = items.length;
+  document.getElementById('inboxList').innerHTML = items.length ? items.map(n => {
+    const k = KIND[n.kind] || { c:'var(--st-draft)', ic:'•', zh:n.kind };
+    return `<div class="ni">
+      <div class="ic" style="color:${k.c};background:color-mix(in srgb,${k.c} 13%,transparent)">${k.ic}</div>
+      <div class="bd">
+        <div class="l1"><span class="kind" style="color:${k.c}">${k.zh}</span>
+          <span class="chip">${n.run}</span>
+          ${n.task_id?`<span class="chip click" onclick="jumpTo('${n.run}','${n.task_id}')">${n.task_id}</span>`:''}
+        </div>
+        <div class="dt">${esc(n.detail)}</div>
+        <div class="cmd"><code>${esc(n.command)}</code>
+          <button class="copy" onclick="copyText(this,'${esc(n.command).replace(/'/g,"\\'")}')">复制</button></div>
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty">没有等你的事 —— 去喝口水</div>';
+}
+function toggleInbox(){ document.getElementById('inbox').classList.toggle('open'); }
+function jumpTo(run, task){
+  selRun = run; selTask = task;
+  renderAll();
+}
+
+/* ================= ③ run 卡 ================= */
+function renderRuns(){
+  document.getElementById('runs').innerHTML = MOCK.runs.map(r => {
+    const u = r.run.user_state || {};
+    const us = USTATE[u.state] || { c:'var(--st-draft)', zh:u.state };
+    const counts = r.status.counts || {};
+    const order = ['done','integrated','verified','approved','reviewing','submitted','working','claimed','blocked','changes_requested','ready','draft','cancelled'];
+    const total = Object.values(counts).reduce((a,b)=>a+b,0) || 1;
+    const segs = order.filter(s=>counts[s]).map(s =>
+      `<i style="width:${counts[s]/total*100}%;background:${ST[s].c}" title="${ST[s].zh} ${counts[s]}"></i>`).join('');
+    return `<div class="runcard${r.run.run_id===selRun?' sel':''}" style="--band:${us.c}" onclick="selRun='${r.run.run_id}';renderAll()">
+      <div class="l1"><span class="rid mono">${r.run.run_id}</span>
+        <span class="lw">${r.run.lightweight?'轻量':'完整'}</span>
+        <span class="pct">${r.run.progress_pct??'—'}%</span></div>
+      <div class="tt">${esc(r.run.title)}</div>
+      <div class="stt"><span class="dot" style="background:${us.c}"></span>
+        <span style="color:${us.c};font-weight:650">${us.zh}</span>
+        <span style="overflow:hidden;text-overflow:ellipsis">· ${esc(u.detail||r.run.status)}</span></div>
+      <div class="stack">${segs}</div>
+    </div>`;
+  }).join('');
+}
+
+/* ================= ④ agent 卡 ================= */
+function renderAgents(){
+  const r = curRun();
+  const a = r.status.agents || {};
+  document.getElementById('agsum').textContent =
+    `${a.total??0} 窗口 · ${a.with_claims??0} 在干活 · ${a.stale??0} 失联`;
+  document.getElementById('agents').innerHTML = (r.agents||[]).map(g => `
+    <div class="ag${g.stale?' stale':''}">
+      <div class="l1"><span class="hb${g.stale?' warn':''}"></span>
+        <span class="id mono">${g.agent_id}</span>
+        ${g.label?`<span style="font-size:11px;color:var(--mut)">${esc(g.label)}</span>`:''}
+        <span class="tool">${TOOL_SHORT[g.tool]||g.tool}</span>
+        <span class="role">${g.role}</span></div>
+      <div class="l2">${g.current_task
+          ? `<span class="chip click" onclick="jumpTo('${r.run.run_id}','${g.current_task}')">${g.current_task}</span>
+             <span>${g.gate_kind==='review'?'评审中':g.gate_kind==='verify'?'验证中':'实现中'}</span>`
+          : '<span style="color:var(--mut)">空闲</span>'}
+        <span class="hbt">${g.stale?`${g.last_heartbeat_min} 分钟没心跳`:`心跳 ${g.last_heartbeat_min===0?'刚刚':g.last_heartbeat_min+' 分钟前'}`}</span></div>
+    </div>`).join('') || '<div class="empty" style="padding:8px">没有注册窗口</div>';
+}
+
+/* ================= ⑤ pane 头 + tab ================= */
+function renderPane(){
+  const r = curRun();
+  const s = r.run.status;
+  const stMap = { active:['var(--st-work)','active'], planned:['var(--st-draft)','planned'],
+    paused:['var(--st-cancel)','paused'], integrating:['var(--st-approved)','integrating'],
+    reported:['var(--st-done)','reported'], archived:['var(--st-cancel)','archived'], cancelled:['var(--st-cancel)','cancelled'] };
+  const [c,label] = stMap[s] || ['var(--st-draft)',s];
+  document.getElementById('paneHd').innerHTML = `
+    <span class="tt">${esc(r.run.title)}</span>
+    <span class="pill" style="--c:${c}">${label}</span>
+    <span class="big">${r.status.progress_pct??0}%</span>
+    <span class="wt">权重 ${r.status.weight_done??0}/${r.status.weight_total??0}</span>
+    <div class="tabs">
+      <button class="${tab==='dag'?'on':''}" onclick="tab='dag';renderAll()">DAG</button>
+      <button class="${tab==='tbl'?'on':''}" onclick="tab='tbl';renderAll()">任务表</button>
+    </div>`;
+  document.getElementById('dagwrap').style.display = tab==='dag' ? '' : 'none';
+  document.getElementById('legend').style.display = tab==='dag' ? '' : 'none';
+  document.getElementById('tbl').style.display = tab==='tbl' ? 'block' : 'none';
+}
+
+/* ================= ⑤ DAG(blocks 拓扑分层,与 dashboard.ts 同思路) ================= */
+const NW = 142, NH = 52, HG = 32, VG = 16, PAD = 16;
+function renderDag(){
+  const r = curRun();
+  const nodes = r.graph.nodes || [], edges = r.graph.edges || [];
+  const svg = document.getElementById('dag');
+  if (!nodes.length){ svg.setAttribute('height', 60);
+    svg.innerHTML = '<text x="16" y="34" fill="var(--mut)" font-size="12">此需求没有任务图(轻量模式或已收尾)</text>'; return; }
+  const statusOf = {}; nodes.forEach(n => statusOf[n.task_id] = n.status);
+  /* 分层:只按 blocks 边 */
+  const depth = {}; nodes.forEach(n => depth[n.task_id] = 0);
+  const be = edges.filter(e => e.kind === 'blocks');
+  for (let i = 0; i < nodes.length; i++)
+    be.forEach(e => { if (depth[e.to] < depth[e.from] + 1) depth[e.to] = depth[e.from] + 1; });
+  const cols = {};
+  nodes.slice().sort((a,b)=>a.task_id<b.task_id?-1:1).forEach(n => (cols[depth[n.task_id]] ||= []).push(n));
+  const pos = {}; let maxRow = 1;
+  Object.keys(cols).sort((a,b)=>a-b).forEach(d => {
+    cols[d].forEach((n,i) => pos[n.task_id] = { x: PAD + d*(NW+HG), y: PAD + i*(NH+VG) });
+    maxRow = Math.max(maxRow, cols[d].length);
+  });
+  const W = PAD*2 + (Math.max(...Object.keys(cols).map(Number))+1)*(NW+HG) - HG;
+  const H = PAD*2 + maxRow*(NH+VG) - VG;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('width', W); svg.setAttribute('height', H);
+  let s = `<defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="var(--edge)"/></marker>
+    <marker id="arw" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="var(--st-ready)"/></marker>
+  </defs>`;
+  /* 边:blocks(实线;未满足=琥珀+微标) / produces_context_for(短划+refs 徽标) / soft(点线) */
+  const met = st => st === 'done' || st === 'integrated';
+  edges.forEach(e => {
+    const a = pos[e.from], b = pos[e.to]; if (!a || !b) return;
+    const x1 = a.x + NW, y1 = a.y + NH/2, x2 = b.x, y2 = b.y + NH/2;
+    const mx = (x1+x2)/2, my = (y1+y2)/2;
+    const d = `M${x1} ${y1} C${x1+HG*.55} ${y1},${x2-HG*.55} ${y2},${x2} ${y2}`;
+    if (e.kind === 'blocks'){
+      const ok = met(statusOf[e.from]);
+      s += `<path d="${d}" fill="none" stroke="${ok?'var(--edge)':'var(--st-ready)'}" stroke-width="1.6"
+              marker-end="url(#${ok?'ar':'arw'})"${ok?'':' opacity="0.95"'}/>`;
+      if (!ok) s += `<g><rect x="${mx-19}" y="${my-8}" width="38" height="15" rx="7.5"
+              fill="color-mix(in srgb,var(--st-ready) 14%,var(--card))" stroke="var(--st-ready)" stroke-width="0.8"/>
+            <text x="${mx}" y="${my+3}" text-anchor="middle" font-size="9" fill="var(--st-ready)">等上游</text></g>`;
+    } else if (e.kind === 'produces_context_for'){
+      s += `<path d="${d}" fill="none" stroke="var(--st-review)" stroke-width="1.4" stroke-dasharray="6 4" opacity="0.75"/>`;
+      if (e.refs) s += `<g><circle cx="${mx}" cy="${my}" r="8" fill="color-mix(in srgb,var(--st-review) 15%,var(--card))"
+              stroke="var(--st-review)" stroke-width="0.9"/>
+            <text x="${mx}" y="${my+3}" text-anchor="middle" font-size="9" fill="var(--st-review)">${e.refs}</text></g>`;
+    } else {
+      s += `<path d="${d}" fill="none" stroke="var(--edge)" stroke-width="1.3" stroke-dasharray="2 4" opacity="0.6"/>`;
+    }
+  });
+  /* 节点 */
+  const riskOf = {};
+  (r.status.risks||[]).forEach(k => { if (k.task_id) (riskOf[k.task_id] ||= []).push(k); });
+  nodes.forEach(n => {
+    const p = pos[n.task_id], st = ST[n.status] || ST.unknown;
+    const cls = ['node']; if (n.status==='draft') cls.push('dim');
+    if (n.status==='cancelled') cls.push('cancel'); if (n.task_id===selTask) cls.push('sel');
+    const t = r.tasks.find(t=>t.task_id===n.task_id) || {};
+    s += `<g class="${cls.join(' ')}" style="--c:${st.c}" onclick="selTask='${n.task_id}';renderAll()">
+      <rect class="bx" x="${p.x}" y="${p.y}" width="${NW}" height="${NH}" rx="9"/>
+      <text class="nid" x="${p.x+10}" y="${p.y+19}">${st.g} ${n.task_id.replace('TASK-','T')}</text>
+      <text class="nti" x="${p.x+10}" y="${p.y+37}">${esc(n.title.length>10?n.title.slice(0,9)+'…':n.title)}</text>`;
+    if (t.owner_agent_id)
+      s += `<text class="now" x="${p.x+NW-8}" y="${p.y+19}" text-anchor="end">${t.owner_agent_id}</text>`;
+    const rk = riskOf[n.task_id];
+    if (rk){
+      const isAlert = rk.some(k=>k.kind==='unresolved_blocker');
+      const col = isAlert ? 'var(--st-alert)' : 'var(--st-ready)';
+      const tip = rk.map(k=>k.kind==='stale_lease'?`租约超时 ${k.minutes_overdue} 分钟`:k.kind).join(' / ');
+      s += `<g><title>${tip}</title><circle cx="${p.x+NW-2}" cy="${p.y+2}" r="8.5"
+          fill="color-mix(in srgb,${col} 16%,var(--card))" stroke="${col}" stroke-width="1"/>
+        <text class="rk" x="${p.x+NW-2}" y="${p.y+5.5}" text-anchor="middle" fill="${col}">${isAlert?'⛔':'⏱'}</text></g>`;
+    }
+    s += '</g>';
+  });
+  svg.innerHTML = s;
+}
+
+/* ================= ⑤ 任务表 ================= */
+function renderTable(){
+  const r = curRun();
+  const statusOf = {}; (r.tasks||[]).forEach(t => statusOf[t.task_id] = t.status);
+  const riskOf = {};
+  (r.status.risks||[]).forEach(k => { if (k.task_id) (riskOf[k.task_id] ||= []).push(k); });
+  const order = ['blocked','changes_requested','reviewing','submitted','working','claimed','approved','ready','draft','verified','integrated','done','cancelled'];
+  const rows = (r.tasks||[]).slice().sort((a,b) =>
+    (order.indexOf(a.status)-order.indexOf(b.status)) || (a.task_id<b.task_id?-1:1));
+  document.getElementById('tbody').innerHTML = rows.map(t => {
+    const st = ST[t.status] || ST.unknown;
+    const deps = (t.depends_on||[]).map(d => {
+      const unmet = !(statusOf[d]==='done'||statusOf[d]==='integrated');
+      return `<span class="depchip${unmet?' unmet':''}" title="${unmet?'上游未完成':'上游已完成'}"
+        onclick="event.stopPropagation();selTask='${d}';renderAll()">${d.replace('TASK-','T')}</span>`;
+    }).join('') || '<span style="color:var(--mut)">—</span>';
+    const rk = (riskOf[t.task_id]||[]).map(k =>
+      k.kind==='stale_lease' ? `<span title="租约超时 ${k.minutes_overdue} 分钟">⏱ ${k.minutes_overdue}m</span>`
+      : k.kind==='unresolved_blocker' ? `<span title="阻塞未答">⛔</span>` : '').join(' ')
+      || '<span style="color:var(--mut)">—</span>';
+    return `<tr class="${t.task_id===selTask?'sel':''}" onclick="selTask='${t.task_id}';renderAll()">
+      <td class="mono" style="font-size:11px">${t.task_id}</td>
+      <td style="max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.title)}</td>
+      <td style="color:var(--mut);font-size:11px">${t.type||'—'}</td>
+      <td><span class="pill" style="--c:${st.c}">${st.g} ${st.zh}</span></td>
+      <td class="mono" style="font-size:11px">${t.owner_agent_id||'—'}</td>
+      <td>${deps}</td>
+      <td style="color:var(--st-ready)">${rk}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ================= ⑥ 侧栏 ================= */
+function renderSidebar(){
+  const r = curRun();
+  const el = document.getElementById('sidebar');
+  const t = (r.tasks||[]).find(t => t.task_id === selTask);
+  if (!t){
+    const u = r.run.user_state || {};
+    el.innerHTML = `<div class="empty" style="padding-top:60px">点击 DAG 节点或任务行查看详情<br><br>
+      <span style="font-size:11px">${esc(u.detail||'')}</span></div>`;
+    return;
+  }
+  const st = ST[t.status] || ST.unknown;
+  const d = DETAIL[t.task_id] || {
+    task:{ goal:'(设计稿:此任务未内嵌详情假数据;实现中由 /api/task 懒加载)', acceptance:[],
+      paths:{ allow:[], requires_approval:[] }, weight:1, previous_attempts:[] },
+    claim: t.owner_agent_id ? { owner:t.owner_agent_id, line:'claim active', gate:null } : null,
+    evidence:null,
+    events:[ { seq:128, ts:'09:40:22', event:'task_published', actor:'user', pay:'' },
+             { seq:121, ts:'09:31:07', event:'task_created', actor:'user', pay:'' } ],
+    total:2
+  };
+  const risks = (r.status.risks||[]).filter(k => k.task_id === t.task_id);
+  const html = [];
+  /* 头部 */
+  html.push(`<div id="sbHead">
+    <div class="l1"><span class="tid mono">${t.task_id}</span>
+      <span class="pill" style="--c:${st.c}">${st.g} ${st.zh}</span>
+      <span class="ty">${t.type||'—'}</span></div>
+    <div class="tt">${esc(t.title)}</div>
+    <div class="own">owner <span class="mono">${t.owner_agent_id||'—'}</span>
+      ${d.claim?` · ${esc(d.claim.line)}`:''}${d.claim&&d.claim.gate?` · ${esc(d.claim.gate)}`:''}</div>
+  </div>`);
+  /* A 档案 */
+  const deps = (t.depends_on||[]).map(dd => {
+    const ds = (r.tasks.find(x=>x.task_id===dd)||{}).status;
+    const unmet = !(ds==='done'||ds==='integrated');
+    return `<span class="depchip${unmet?' unmet':''}" onclick="selTask='${dd}';renderAll()">${dd}${unmet?' ·等':''}</span>`;
+  }).join('') || '<span style="color:var(--mut)">无</span>';
+  html.push(`<div class="sec"><h5>任务档案</h5>
+    <div class="kv"><b>目标</b><div class="v">${esc(d.task.goal)}</div></div>
+    ${d.task.acceptance.length?`<div class="kv"><b>验收</b><div class="v">${d.task.acceptance.map(a=>`· ${esc(a)}`).join('<br>')}</div></div>`:''}
+    <div class="kv"><b>依赖</b><div class="v">${deps}</div></div>
+    <div class="kv"><b>路径</b><div class="v mono" style="font-size:11px">${
+      d.task.paths.allow.map(p=>esc(p)).join('<br>')||'—'}${
+      d.task.paths.requires_approval.length?`<br><span style="color:var(--st-ready)">待批准: ${d.task.paths.requires_approval.map(esc).join(', ')}</span>`:''}</div></div>
+    <div class="kv"><b>权重</b><div class="v">${d.task.weight}</div></div>
+    ${risks.map(k => k.kind==='stale_lease'
+      ? `<div class="riskline warn">⏱ 租约超时 ${k.minutes_overdue} 分钟(${k.agent_id})—— 收件箱有回收命令</div>`
+      : k.kind==='unresolved_blocker'
+      ? `<div class="riskline">⛔ 阻塞未答(${k.message_id})—— 见收件箱</div>` : '').join('')}
+  </div>`);
+  /* B evidence */
+  if (d.evidence){
+    const ev = d.evidence;
+    const pass = ev.checks.filter(c=>c.status==='pass').length;
+    html.push(`<div class="sec"><h5>Evidence · 第 ${ev.revision} 版${ev.history?`(${ev.history} 次归档)`:''}</h5>
+      <div style="font-size:12px;color:var(--ink2);margin-bottom:6px">checks ${pass}/${ev.checks.length} 通过</div>
+      ${ev.checks.map(c => `<div class="ck"><code>${esc(c.name)}</code>
+        <span class="ckpill" style="--c:${c.status==='pass'?'var(--st-approved)':'var(--st-alert)'}">${c.status==='pass'?'✓ pass':'✗ fail'}</span></div>`).join('')}
+      <div style="font-size:11.5px;color:var(--mut);margin:8px 0 3px">改动文件 · ${ev.changed_files.length}</div>
+      ${ev.changed_files.map(f => `<div class="cf"><code title="${esc(f.path)}">${esc(f.path)}</code>${f.in_scope?'':'<span class="oob">越界</span>'}</div>`).join('')}
+      <div class="sum">${esc(ev.summary)}</div>
+    </div>`);
+  } else {
+    html.push(`<div class="sec"><h5>Evidence</h5><div style="color:var(--mut);font-size:12px">尚未提交</div></div>`);
+  }
+  /* C 时间线 */
+  html.push(`<div class="sec"><h5>事件时间线</h5><div class="tl">
+    ${d.events.map(e => {
+      const stc = EV_STATUS[e.event] ? ST[EV_STATUS[e.event]].c : 'var(--st-draft)';
+      return `<div class="ev" style="--c:${stc}"><span class="pt"></span>
+        <div class="l1"><span class="nm">${EV_ZH[e.event]||e.event}</span>
+          <span class="chip">${e.actor==='user'?'user':e.actor}</span></div>
+        <div class="meta2 mono">#${e.seq} · ${e.ts}</div>
+        ${e.pay?`<div class="pay">${esc(e.pay)}</div>`:''}
+      </div>`;}).join('')}
+    </div>
+    ${d.total>d.events.length?`<div class="more">共 ${d.total} 条,显示最近 ${d.events.length} 条 ·
+      <button class="copy" onclick="copyText(this,'sigmarun events ${r.run.run_id} --task=${t.task_id} --limit=0')">复制完整命令</button></div>`:''}
+  </div>`);
+  el.innerHTML = html.join('');
+}
+
+/* ================= 主题 / 复制 / 汇总 ================= */
+const THEMES = ['auto','light','dark'];
+function applyTheme(t){
+  if (t==='auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('themeBtn').textContent = '主题:' + ({auto:'自动',light:'亮',dark:'暗'}[t]);
+  try{ localStorage.setItem('sigmarun-mock-theme', t); }catch(e){}
+}
+function cycleTheme(){
+  const cur = (()=>{try{return localStorage.getItem('sigmarun-mock-theme')}catch(e){return null}})() || 'auto';
+  applyTheme(THEMES[(THEMES.indexOf(cur)+1) % THEMES.length]);
+}
+function copyText(btn, text){
+  const done = () => { const old = btn.textContent; btn.textContent = '已复制';
+    setTimeout(()=>btn.textContent = old, 1200); };
+  if (navigator.clipboard && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+  else fallbackCopy(text, done);
+}
+function fallbackCopy(text, done){
+  const ta = document.createElement('textarea'); ta.value = text;
+  ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta);
+  ta.select(); try{ document.execCommand('copy'); }catch(e){} document.body.removeChild(ta); done();
+}
+function renderAll(){
+  renderInbox(); renderRuns(); renderAgents(); renderPane();
+  renderDag(); renderTable(); renderSidebar();
+}
+applyTheme((()=>{try{return localStorage.getItem('sigmarun-mock-theme')}catch(e){return null}})() || 'auto');
+renderAll();
+</script>
+</body>
+</html>

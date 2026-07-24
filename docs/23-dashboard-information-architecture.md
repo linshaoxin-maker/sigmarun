@@ -1,287 +1,366 @@
 # 23. Dashboard Information Architecture（Read-only Viewer）
 
-> 日期：2026-07-09
-> 状态：v0.1 设计草案
-> 依据：[13](13-design-audit-and-next-breakdown.md) §6.1（23 号范围）、§7 P2 裁剪（DAG 边 MVP 只留三种）、D14（`team watch`）；[08](08-core-gateway-capabilities.md) §6.2 dashboard 定位（不可违背）；[12](12-context-plane-task-dag-message-pool-memory.md) §12–13（DAG、message pool、open questions、context handoff 是必展对象）；[15](15-run-task-state-machine-and-lifecycle.md) 状态机与风险语义；[17](17-cli-mcp-contract-and-error-model.md) §7 `team watch --json`；[14](14-evidence-review-verification-contract.md) / [16](16-git-worktree-and-team-root.md) 目录结构与 git 事实；[21](21-schema-versioning-and-migration.md) §6.1 读窗口、[24](24-security-permissions-and-data-hygiene.md) §2/§5（两文档留给 23 号的接口在 §9 接住）
-> 目标：定义 read-only dashboard 的信息架构与数据映射：页面树、每页回答的用户问题、"元素 → 事实源 → read-model 聚合 → CLI 等价命令"四方对照、DAG 视图规格、刷新模型、只读边界落地清单与风险徽标体系。**不做视觉稿、不选前端框架**；进程形态只约定为"本地 read-model server + 浏览器"，container 边界归 [20](20-c4-l2-l3-component-contracts.md)。
+> 日期：2026-07-09（v0.1 草案）· 2026-07-24（v0.2 定稿：单页三栏 IA + 视觉 token + 高保真 mock）
+> 状态：v0.2 —— 对齐 v0.2.4 已落地的 `sigmarun dashboard`（packages/cli/src/dashboard.ts），给出下一版单页的**明确信息架构、逐区域数据字段映射、状态色 token 与实现拆解**。
+> 交付物：本文档 + [23-dashboard-mock.html](23-dashboard-mock.html)（纯静态高保真设计稿，内嵌假数据，浏览器直接打开，明暗双主题）。
+> 依据：[08](08-core-gateway-capabilities.md) §6.2 dashboard 定位（不可违背）；[15](15-run-task-state-machine-and-lifecycle.md) 状态机；[13](13-design-audit-and-next-breakdown.md) §7 P2 裁剪（DAG 边 MVP 三种）；[12](12-context-plane-task-dag-message-pool-memory.md)（DAG 与 context 是必展对象）；[17](17-cli-mcp-contract-and-error-model.md)（CLI 等价命令与 events 合同）。
+> 参考语言：Conductor（per-agent 卡片）、Vibe Kanban（状态看板）、Dagster（DAG + 侧栏详情）、Temporal（事件时间线）、GitHub Actions（极简 DAG）。
+>
+> **v0.1 → v0.2 的变化**：v0.1 规划的是多页面站点（P0 总览 / P1 run 详情 / P2 task 详情 / P3 messages / P4 audit，A1–A9 聚合）。v0.2.4 实际落地的是零依赖单页 + `/api/state` 轮询,数据面只有 watch/context 两个包的四个只读函数。v0.2 定稿以**单页三栏**为 MVP 形态,原多页树降级为 §11 演进方向;原 §1 硬边界、§7 只读清单原则全部继承（见 §2、§10）。
 
 ---
 
-## 1. 定位与硬边界
+## 1. 定位与硬边界（继承 v0.1，仍然有效）
 
-| # | 边界 | 依据 |
+| # | 边界 | 说明 |
 |---|---|---|
-| B1 | **纯只读 viewer，无任何写路径**：不派活、不改状态、不编辑文本；权威入口永远是 slash command → gateway primitive | [08](08-core-gateway-capabilities.md) §6.2、[11](11-4-plus-1-architecture-view.md) §5.3 |
-| B2 | 数据只来自 `.team/` 文件（经 read-model 聚合）与 git 只读命令（diff / log / branch 列表）；**不发明新的状态文件** | [02](02-domain-model-and-team-storage.md)、[16](16-git-worktree-and-team-root.md) |
-| B3 | dashboard 不向 `.team/` 写任何缓存、布局或偏好；缓存只存在于 read-model 进程内存 | B1/B2 推论 |
-| B4 | 允许的交互仅三类：查看详情、触发只读刷新、**复制命令文本**（§7 允许清单） | [08](08-core-gateway-capabilities.md) §6.2 原文 |
-| B5 | P2 优先级：MVP 主链路不依赖 dashboard；**每个视图都有 CLI 等价命令**（各页标注），dashboard 挂了协议照跑 | [13](13-design-audit-and-next-breakdown.md) §7 |
-| B6 | read-model 与 CLI 共享同一 core 读逻辑（派生规则只实现一次），进程形态为本地 server + 浏览器 | [20](20-c4-l2-l3-component-contracts.md)（container 边界） |
+| B1 | **纯只读 viewer,无任何写路径** | 不派活、不改状态、不编辑文本;权威入口永远是 slash command → gateway primitive。dashboard.ts 由构造保证:不 import 任何写 primitive,架构测试守护 |
+| B2 | 数据只来自只读 read-model 函数 | 现状:`runList` / `statusRun` / `taskList`（@sigmarun/watch）+ `showGraph`（@sigmarun/context）;扩展只能加**只读**函数（§4 数据面） |
+| B3 | 不向 `.team/` 写任何缓存、布局或偏好 | 主题偏好等 UI 状态只存浏览器 localStorage（属浏览器,不属 `.team/`） |
+| B4 | 允许的交互仅三类 | 查看详情、触发只读刷新、**复制命令文本**（§10 允许清单） |
+| B5 | 每个视图都有 CLI 等价命令 | 各区域规格表标注;dashboard 挂了协议照跑 |
+| B6 | 派生规则只实现一次 | 状态、needs_user、进度全部来自与 CLI 共库的 read-model;前端不复刻判定逻辑（如"blocks 边未满足"谓词应从 core 导出,而非页面内重写,见 §7） |
+
+注:`statusRun` 会顺手持久化 `progress.json`（delete-and-recompute 的派生文件,[02](02-domain-model-and-team-storage.md) 允许）。这是 read-model 既有行为,不算 dashboard 新增写路径;若要绝对零写,属 watch 侧的独立议题,不由本文档改变。
 
 ---
 
-## 2. 信息架构总览
+## 2. v0.2 单页信息架构总览
 
-```mermaid
-flowchart TD
-  P0["P0 Runs 总览<br/>repo 内所有 run"] --> P1["P1 Run 详情"]
-  P1 --> V1["任务表"]
-  P1 --> V2["DAG 视图（§5）"]
-  P1 --> V3["Agent 活动泳道"]
-  P1 --> V4["风险栏 + 进度头"]
-  P1 --> P2["P2 Task 详情<br/>objective / evidence / diff /<br/>reviews / verification /<br/>events / previous_attempts"]
-  P1 --> P3["P3 Messages &<br/>Open Questions"]
-  P1 --> P4["P4 Audit 报告视图"]
-  P2 -. "message_ref / 边 refs" .-> P3
-  V4 -. "点击风险徽标" .-> P4
+一屏三栏 + 顶栏,信息密度优先,全中文界面,明暗双主题。所有区域消费同一份 `/api/state`（2.5s 轮询）+ 两个按需懒加载端点（§4）。
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ ① 顶栏  sigmarun · 只读 · team root        [② 需要你 (4)] [数据时刻] [主题] │
+├────────────┬──────────────────────────────────────────────┬──────────────────┤
+│ ③ 需求清单 │ ⑤ 中栏画布                                   │ ⑥ 详情侧栏       │
+│  色带+进度 │   pane 头:RUN 标题·状态·进度·[DAG|任务表]  │   任务档案       │
+│  (runs)    │   ┌────────────────────────────────────┐     │   evidence/checks│
+│            │   │  DAG:状态着色节点·三种边·点选     │     │   事件时间线      │
+│ ④ 窗口/    │   │  联动 ⑥;或切任务表(密表格)       │     │   (Temporal 式)  │
+│   agents   │   └────────────────────────────────────┘     │                  │
+│  卡片      │                                              │                  │
+└────────────┴──────────────────────────────────────────────┴──────────────────┘
+     264px                    自适应(min 560px)                    380px
 ```
 
-导航约定：
+| 区域 | 一句话职责 | 回答的用户问题 | 参考语言 |
+|---|---|---|---|
+| ① 顶栏 | 身份、只读声明、数据新鲜度、主题 | 我看的数据有多新?连接还活着吗? | — |
+| ② needs-you 收件箱 | **跨 run** 汇聚一切等人的事,每条带可复制命令 | 我现在必须处理什么?复制哪条命令? | Linear inbox |
+| ③ 需求清单 | run 列表,user_state 色带 + 进度,点选切换当前 run | 有哪些需求,各到什么程度,哪个在等我? | Vibe Kanban 泳道卡 |
+| ④ agents 卡片 | 当前 run 的窗口:谁在做什么、心跳新鲜度 | 几个窗口活着?谁卡了? | Conductor per-agent 卡 |
+| ⑤ DAG 画布 / 任务表 | 任务依赖图,节点=状态色+字形+风险角标;表格为密度视图 | 活儿怎么流的?卡在哪个节点?为什么没人领? | Dagster / GitHub Actions |
+| ⑥ 详情侧栏 | 点选任务的档案、evidence checks 矩阵、事件时间线 | 这个任务改了什么、过了几关、经历了什么? | Dagster 侧栏 + Temporal 时间线 |
 
-- 主路径 `总览 → run → task`；messages / audit 是 run 级平行页，task 详情内的 `message_ref`、context refs 跳转到 P3 对应锚点。
-- 顶栏全局元素：team root 路径、gateway_version、**数据时刻**（"截至 events seq N / HH:MM:SS"）、刷新状态、watch 存活指示（§6）。只读产品必须诚实标注数据新鲜度。
-- 术语、状态名、风险名与 [15](15-run-task-state-machine-and-lifecycle.md)/[17](17-cli-mcp-contract-and-error-model.md) 完全一致，不另造展示层词汇。
+交互模型(全部只读):左栏点 run → 中栏/右栏切换;中栏点节点或表行 → 右栏渲染该任务;右栏依赖 chip 点击 → 跳选上游任务;一切"命令"只有复制按钮。
 
 ---
 
-## 3. Read-model 聚合类型
+## 3. 数据面:`/api/state` 现状与扩展
 
-所有页面的数据映射引用下表编号；聚合的接口签名与实现归 [20](20-c4-l2-l3-component-contracts.md)。
+### 3.1 现有 envelope(v0.2.4 已在跑,收件箱/左栏/中栏全靠它,无需新数据)
 
-| 编号 | 聚合 | 输入 | 说明 |
+`GET /api/state` → `Envelope{ ok, message, data }`,`data`:
+
+```
+generated_at: ISO 时间戳                    → ① 顶栏数据时刻
+runs: [                                     → ③ 需求清单(每 run 一卡)
+  run:    { run_id, title, status, mode, lightweight,
+            progress_pct,                   → ③ 进度数字
+            user_state: {state, detail, command} }   → ③ 色带 + 状态行
+  status: {                                 ← statusRun(computeProgress + user_state)
+            run_status, computed_at,
+            counts: {draft: n, ready: n, …},→ ③ by_status 堆叠微条 · ⑤ pane 头计数
+            weight_total, weight_done, progress_pct,  → ⑤ pane 头进度
+            risks: [{kind, task_id?, agent_id?, minutes_overdue?, …}], → ⑤ 节点风险角标 · ⑥ 档案风险行
+            needs_user: [{kind, task_id?, detail, command}],           → ② 收件箱(全部字段)
+            open_questions: n,
+            agents: {total, with_claims, stale},      → ④ 汇总行(明细需 §3.2)
+            user_state: {state, detail, command} }
+  tasks:  [{ task_id, title, type, status, owner_agent_id, depends_on[] }] → ⑤ 任务表 · DAG join
+  graph:  { nodes: [{task_id, title, type, status}],                       → ⑤ DAG 节点
+            edges: [{edge_id?, from, to, kind, required?}] }               → ⑤ DAG 三种边
+]
+```
+
+词汇表(全部来自 core/watch,展示层不造词):
+
+- `user_state.state` ∈ `closed | paused | awaiting_publish | awaiting_gates | ready_to_integrate | ready_to_report | needs_you | in_progress | ready_to_work`(progress.ts `deriveUserState`)。
+- `needs_user.kind` ∈ `ledger_broken | reclaim_confirm | blocker | blocked_unblock | open_question | approval_pending | awaiting_review | awaiting_verify | stale_owner | awaiting_rework | deps_dead | ready_to_integrate | ready_to_report`(progress.ts;`ledger_broken` 恒排首位)。
+- task `status` ∈ 13 态(core/state-machine.ts `TASK_STATUSES`);edge `kind` MVP 三种 `blocks | produces_context_for | soft_depends_on`([13](13-design-audit-and-next-breakdown.md) §7)。
+
+### 3.2 需新增的只读聚合(⑥ 侧栏与 ④ 明细的数据缺口)
+
+| 端点(建议) | 复用的 read-model 函数 | 供给区域 | 拉取时机 |
 |---|---|---|---|
-| A1 | run 索引 | `runs/*/run.json` + 各 run task-list | 总览列表；跨 run 路径交集复算（[16](16-git-worktree-and-team-root.md) §5） |
-| A2 | task join | `team-task-list.json` × `tasks/*/task.json` × claims 三件套 | 索引与详情合一；两处状态不一致时以 task.json 为准并标 audit 风险（[13](13-design-audit-and-next-breakdown.md) §5.5） |
-| A3 | lease 派生 | claims + `agents/*.json` + now | stale = `now > lease_until`（blocked 豁免，[15](15-run-task-state-machine-and-lifecycle.md) §5.1）；只标注、不回收 |
-| A4 | progress 重算 | [02](02-domain-model-and-team-storage.md) §10 列出的全部事实 | 按 [03](03-team-task-list-and-task-schema.md) §9 + [15](15-run-task-state-machine-and-lifecycle.md) §3.4 权重现算；`progress.json` 只作对照信号，显示值一律重算（INV-006） |
-| A5 | DAG join | `task-graph.json` × A2 | 节点状态由 join 得出，忽略 graph 文件内残留 status 字段（[13](13-design-audit-and-next-breakdown.md) §5.5）；`blocks` 边满足状态按 claim-next 同规则派生 |
-| A6 | message 线程 | `context/messages.jsonl` | 按 `in_reply_to` 串线程；open questions 以 messages 为权威聚合，`open-questions.jsonl` 仅作加速索引（[13](13-design-audit-and-next-breakdown.md) M23） |
-| A7 | audit 透传 | `team audit * --json`（只读命令） | findings 原样入视图，不改写 severity；与内嵌同库调用二选一，归 [20](20-c4-l2-l3-component-contracts.md) |
-| A8 | git 事实 | `git diff/log/status --porcelain`（只读） | branch / base_commit 取自 `worktrees.json`（[16](16-git-worktree-and-team-root.md) §3.2） |
-| A9 | events 游标 | `events.jsonl`（行内 seq） | tail 增量拉取；seq 断号显示为 audit 风险（[17](17-cli-mcp-contract-and-error-model.md) §5.2） |
+| `/api/task?run=&task=` | `taskShow` + `evidenceShow`(@sigmarun/watch,已存在) | ⑥ 档案(task.json 全量、claims、worktree)+ evidence 面板(revision、`required_checks_results[]` 逐项、`changed_files[]` 含 `in_scope`、summary) | 点选任务时懒加载,选中期间随 tick 刷新 |
+| `/api/events?run=&task=&since=&limit=` | `readEvents`(@sigmarun/core,已存在;`--since` 即 seq 游标) | ⑥ 事件时间线;顶栏"截至 seq N" | 点选任务时懒加载 + `since` 增量 |
+| ④ agents 明细并入 `/api/state` 每 run | `agentList`(@sigmarun/watch,已存在) | ④ per-agent 卡(agent_id、label、tool、role、current_task、gate_kind、last_heartbeat_min、stale) | 随 state 轮询(文件量小) |
+
+三个函数全是既有只读导出,dashboard.ts 新增 import 不破 B1/B6;懒加载避免 state 轮询按任务数放大(runs×tasks 次文件读)。
+
+`readEvents` 返回 `events[]: {seq, ts, event, actor:{type,id}, task_id, claim_id, payload}` + `corrupt_lines[]`(账本破损即 ledger 健康信号,直接映射为 ② 的 `ledger_broken` 同源展示)。事件名词汇 = 状态事件(core `EVENT_STATUS` 19 键:task_created→draft … task_done→done)+ 非状态事件(run_*、agent_registered、heartbeat、path_*、worktree_*、memory_*、integration_* 等);时间线全量展示,状态事件按"落点状态"着色(§8)。
 
 ---
 
-## 4. 页面规格
+## 4. 区域规格 × 字段映射
 
-### 4.1 P0 Runs 总览
+### ① 顶栏
 
-**回答的问题：** ① 这个 repo 现在有哪些 run，各处于什么状态？② 哪个 run 是 active、有几个 agent 在干活？③ 两个 active run 的路径有没有重叠（cross_run_overlap）？④ 上周那个 run 结束了吗、报告在哪？⑤ 我该复制哪条命令加入某个 run？
+| 元素 | 数据 | 说明 |
+|---|---|---|
+| 品牌区 | 静态 | `sigmarun` 字标 + 「只读」徽章(常驻,B1 的界面承诺) |
+| team root 路径 | 服务端已知(启动参数) | mono 截断显示,title 全路径 |
+| 需要你按钮 | `Σ runs[].status.needs_user.length` | 徽标计数,红点=含 error 级(§8 severity);点击开 ② 面板 |
+| 数据时刻 | `data.generated_at`(+ 选中任务时 events 最大 `seq`) | 「12:07:31 · seq 214」;只读产品必须诚实标注新鲜度 |
+| 刷新指示 | fetch 结果 | 三态:●实时(上次 tick 成功)/ ●滞后(>2 个 tick 失败,黄)/ ●断开(红,「连接断开,重试中…」) |
+| 主题切换 | localStorage | 自动(跟系统)/ 亮 / 暗;不写 `.team/`(B3) |
 
-| 元素 | 事实源 | 聚合 | CLI 等价 |
-|---|---|---|---|
-| run 行：RUN-ID、title、mode、status、created_by/at | `runs/*/run.json` | A1 | `team run list` |
-| 进度条 + by_status 微缩计数 | task-list + 事实重算 | A4 | `team progress <RUN>` |
-| active agents 数 / 最近活动时刻 | `agents/*.json`、events tail | A3/A9 | `team run show <RUN>` |
-| 风险徽标汇总（最高 severity + 计数） | §8 各风险源 | A3/A7 | `team audit run <RUN>` |
-| 跨 run 路径重叠警示条 | 各 active run 的 `paths.allow` 交集 + `cross_run_overlap_detected` 事件 | A1 | `/team-status`（run 级 risk） |
-| 复制命令：`/team-dispatch RUN-ID`、`team export --run RUN-ID` | — | — | §7 允许清单 |
+### ② needs-you 收件箱(Linear inbox 式,顶栏下拉面板)
 
-**视图整体等价于：** `team run list` + 逐 run 的 `team progress`。
+数据:**跨 run** 拼接 `runs[].status.needs_user[]`,零新增接口。排序:severity(§8)降序 → 原数组序(read-model 已把 `ledger_broken` 置顶)。
 
-### 4.2 P1 Run 详情
+| 元素 | 字段 | 展示 |
+|---|---|---|
+| 条目图标 + kind 标签 | `needs_user[].kind` | kind→中文短语 + severity 色图标(如 blocker→「阻塞待答」红;awaiting_review→「等独立评审」紫;approval_pending→「路径待批准」琥珀;ready_to_report→「可以收尾」绿) |
+| 归属 chips | 外层 run 的 `run_id` + `needs_user[].task_id?` | run chip 恒显(收件箱是跨 run 的);task chip 点击=选中该 run+task 联动 ⑤⑥ |
+| 正文 | `detail` | 最多两行,溢出折叠 |
+| 命令行 | `command` | mono 一行 + 「复制」按钮(唯一动作,B4);无任何「运行」 |
+| 空态 | `needs_user` 全空 | 「没有等你的事 —— 去喝口水」 |
 
-**回答的问题：** ① 现在谁在做什么、谁卡住了？② TASK-0003 为什么没人领（draft 未发布？依赖未满足？路径被占？能力不匹配？）③ 进度多少、还有几个 ready、review 积压几个？④ 有哪些风险需要用户出手（stale 回收、路径批准、unblock）？⑤ agent 是"完成即停"还是 loop 模式，停了还是断了？
+CLI 等价:`sigmarun status <RUN>`(envelope `next_actions` 即首条 command)。
 
-四个子视图共用一个进度头（weighted_progress、by_status、run status、base_branch、mode、policy 摘要：require_review / claim_ttl / reclaim_policy / path_release_on_submit）。
+### ③ 需求清单(左栏上段)
 
-| 元素 | 事实源 | 聚合 | CLI 等价 |
-|---|---|---|---|
-| 任务表行：TASK-ID、title、type、status、owner、priority、lease 剩余 | task-list、task.json、task-claims | A2/A3 | `team task list <RUN>` |
-| "为什么不可领"tooltip：逐条列出未满足的可领取条件（[08](08-core-gateway-capabilities.md) §4.2 七条） | task-graph、claims、agents、run.json | A2/A5 | `team claim-next <RUN> --dry-run` |
-| evidence / review / verify 摘要列（有无、轮次、verdict） | `evidence/*/evidence.json`、`reviews/*/REVIEW-*.json`、`verification/VERIFY-*.json` | A2 | `team task show <RUN> <TASK>` |
-| Agent 活动泳道：每 agent 一行，时间轴段 = claim→submit 事件区间，心跳新鲜度、`mode: loop/single` | `agents/*.json`、events、claims | A3/A9 | `team run show` + events |
-| 风险栏：run 级风险汇聚（§8），每行带复制命令 | §8 | A3/A7 | `/team-status <RUN>` |
-| DAG 视图 | §5 | A5 | `team graph show <RUN>` |
+数据:`runs[]`(runList 字段 + status.counts)。每 run 一张卡:
 
-**视图整体等价于：** `/team-status RUN-ID`（底层为 `team run show` + `team task list` + `team progress` 组合）。
+| 元素 | 字段 | 展示 |
+|---|---|---|
+| 左缘色带 3px | `run.user_state.state` | §8 user_state→色 token;卡片的第一视觉信号 |
+| 标识行 | `run.run_id` + `run.lightweight` | mono ID + 「轻量/完整」小字 |
+| 标题 | `run.title` | 一行截断 |
+| 状态行 | `user_state.state`(中文)+ `detail` | 色点 + 短语,如「等你处理 · BLK-021 待答」;detail 一行截断 |
+| 进度 | `run.progress_pct` + `status.counts` | 百分比数字 + **by_status 堆叠微条**(4px 高,段色=状态 token,段间 1px 表面缝,hover title 出计数) |
+| 选中态 | 前端状态 | accent 描边;默认选 CLI 启动参数指定的 run,否则首个非 closed |
 
-### 4.3 P2 Task 详情
+CLI 等价:`sigmarun run list`。
 
-**回答的问题：** ① 这个 task 的目标、验收标准、允许路径是什么？② 到底改了哪些文件（diff）、checks 过了没有、原始输出在哪？③ review 走了几轮、每轮要求改什么、改完了吗？④ 这个 task 为什么回到 ready（previous_attempts 谁做过、留下什么进展）？⑤ 它依赖的上游 context 是什么，owner 声明读过了吗（context_ack vs must_read）？
+### ④ agents 卡片(左栏下段,Conductor 语言)
 
-| 元素 | 事实源 | 聚合 | CLI 等价 |
-|---|---|---|---|
-| objective 面板：task.md、acceptance、required_checks、paths（allow/avoid/requires_approval） | `tasks/TASK-ID/task.json`、`task.md` | A2 | `team task show <RUN> <TASK>` |
-| 状态与 claim 历史（task × claim 一致性对照 [15](15-run-task-state-machine-and-lifecycle.md) §4.3） | task-claims、review-claims、path-approvals | A2/A3 | 同上 |
-| evidence 面板：summary、changed_files（含 in_scope 标注）、commands + exit_code、acceptance 覆盖矩阵、risks/deviations、revision 历史 | `evidence/TASK-ID/evidence.json`、`history/`、`outputs/*.log`（展示已截断脱敏文件） | A2 | `team task show` + `team audit task` |
-| diff 面板：文件级 diffstat 与逐文件 diff | `git diff --name-status <base_commit>..<branch>`、`git log --oneline`；branch/base_commit 取自 `worktrees.json`；未提交改动经 `git status --porcelain`（worktree 存在时） | A8 | 同款 git 命令 |
-| reviews 面板：REVIEW-*-01/-02… 逐轮列出（decision、checklist、findings 含 must_fix、message_ref 跳转 P3） | `reviews/TASK-ID/REVIEW-*.json` + 同名 `.md` | A2 | `team task show`（review 段） |
-| verification 面板：VERIFY-* gates、verdict、failures_mapped | `verification/VERIFY-*.json`（filter target.task_id） | A2 | `team task show`（verify 段） |
-| events 时间线（按 task_id 过滤，含 seq） | `events.jsonl` | A9 | `team audit task` 输入 |
-| previous_attempts：attempt、原 agent、reclaim_reason、progress_note 链接、原 worktree 状态（active/abandoned） | `task.json.previous_attempts`、`worktrees.json`、`context/tasks/TASK-ID.attempt-N.md` | A2 | `team task show` |
-| context 面板：上游 `produces_context_for` 边与 refs、handoff memory、context_ack 与 hydrate must_read 的差集 | `task-graph.json`、`context/tasks/*.md`、evidence.context_ack | A5/A6 | `team memory show <RUN> --task <TASK>` |
+数据:§3.2 的 `agentList` 明细;汇总行用现有 `status.agents`。
 
-**diff 回退链：** worktree 已删 → 用 branch 直接 diff（branch 保留，[16](16-git-worktree-and-team-root.md) §6）；branch 也已删 → 仅展示 evidence.changed_files 并标注"live diff 不可用"。
+| 元素 | 字段 | 展示 |
+|---|---|---|
+| 汇总行 | `agents.total / with_claims / stale` | 「4 窗口 · 3 在干活 · 1 失联」 |
+| 卡片标识 | `agent_id`、`label`、`tool` | mono 短 ID + 工具徽标(claude-code/codex)+ role chip(implementer/reviewer/verifier) |
+| 在做什么 | `current_task`、`gate_kind` | task chip(点击联动选中);gate 任务标「评审中/验证中」 |
+| 心跳 | `last_heartbeat_min`、`stale` | 新鲜度点:绿 <TTL,琥珀+「N 分钟没心跳」= stale;stale 的卡整体降透明度 |
 
-### 4.4 P3 Messages & Open Questions
+CLI 等价:`sigmarun agent list <RUN>`。
 
-**回答的问题：** ① 哪些 open question 没人答、挂了多久（超 TTL 的标红）？② TASK-0003 的 blocker 被回答了吗，答案在哪？③ 上游给下游留了什么 handoff？④ run 中形成了哪些 decision，出处可追吗？⑤ reviewer 的 must_fix findings 有没有对应消息线程？
+### ⑤ 中栏画布(DAG 默认,任务表可切)
 
-| 元素 | 事实源 | 聚合 | CLI 等价 |
-|---|---|---|---|
-| 消息流：按 type（question/answer/blocker/handoff/decision/risk/finding/request_changes）与 task 过滤，`in_reply_to` 线程化 | `context/messages.jsonl` | A6 | `team message list <RUN> [--task --type]` |
-| open questions 看板：open/resolved、owner、age、stale 角标 | messages 派生（权威）；`open-questions.jsonl` 作加速索引 | A6 | `team question list <RUN>` |
-| decisions 列表（带 source refs） | messages（type=decision）；`run-decisions.jsonl` 同上作索引 | A6 | `team message list --type decision` |
-| handoff 列表（按 task 分组，链到 context memory） | messages（type=handoff）、`context/tasks/*.md` | A6 | `team memory show <RUN>` |
-| run memory 快照（只读渲染，source refs 可跳转） | `context/run-memory.md` | A6 | `team memory show <RUN>` |
-| **L4 项目记忆面板**（2026-07-10 增补，D19）：MEM 条目按分区渲染、出处戳跳转 refs、Superseded 折叠、超限 warning（AUD-037） | `project_memory_path`（默认 `docs/team/MEMORY.md`，git-tracked） | A6 同款只读渲染 | `sigmarun memory promote`（复制命令）；直接读文件 |
+pane 头(常驻):`run.title` + run status pill + `status.progress_pct` 大数字 + `weight_done/weight_total` + 视图切换 [DAG|任务表] + 边图例。
 
-### 4.5 P4 Audit 报告视图
+**DAG 视图**规格见 §7。**任务表**(密度视图,Vibe Kanban 的表格化):
 
-**回答的问题：** ① 这个 run 的过程可信吗，有几个 error / warning？② missing evidence / self approval 落在哪个 task？③ progress 与事实一致吗？④ 有没有绕过 CLI 直改状态的迹象（rev_conflict、events seq 断号）？⑤ 每条 finding 的修复命令是什么？
+| 列 | 字段 | 说明 |
+|---|---|---|
+| ID | `tasks[].task_id` | mono;行点击联动 ⑥ |
+| 标题 | `title` | 截断 |
+| 类型 | `type` | 小字 chip(implement/review/verify/…) |
+| 状态 | `status` | 状态 pill(色 token + 字形 + 中文,§8) |
+| owner | `owner_agent_id` | mono 或「—」 |
+| 依赖 | `depends_on[]` | 上游 chip 列表,含未满足标记(上游非 done 时琥珀) |
+| 风险 | `status.risks[]` 按 task_id 过滤 | ⏱ stale_lease(+超时分钟)、⛔ blocker 等角标 |
 
-| 元素 | 事实源 | 聚合 | CLI 等价 |
-|---|---|---|---|
-| findings 表：severity、kind、task_id、message、next_action（可复制） | audit JSON 输出（[08](08-core-gateway-capabilities.md) §5.4） | A7 | `team audit run <RUN> --json` |
-| 分维度入口：claims / paths / evidence / progress 四个子报告 tab | 同上 | A7 | `team audit claims/paths/evidence/progress <RUN>` |
-| task × claim 一致性偏离列表 | [15](15-run-task-state-machine-and-lifecycle.md) §4.3 矩阵 | A7 | `team audit run` |
-| progress mismatch 对照（progress.json 值 vs 重算值） | `progress.json` + A4 | A4/A7 | `team audit progress <RUN>` |
+排序:状态机顺序分组(异常置顶)→ task_id。CLI 等价:`sigmarun task list <RUN>` / `sigmarun graph show <RUN>`。
 
-规则编号、severity 定稿以 [18](18-audit-rule-catalog-and-trust-model.md) 为准；在 18 号落地前，MVP 沿用 [08](08-core-gateway-capabilities.md) §5.3 的建议严重度。
+### ⑥ 详情侧栏(Dagster 式,三段折叠)
+
+数据:`/api/task`(§3.2)+ `/api/events`(§3.2)+ 已有 `tasks[]` 行内字段。未选中时空态:「点击 DAG 节点或任务行」+ run 级摘要(user_state.detail)。
+
+**A. 任务档案**
+
+| 元素 | 字段(来源) |
+|---|---|
+| 头部 | `task_id` + 状态 pill + `type` chip + `title`(tasks[] 行内即可先渲染,详情到达后补全) |
+| owner/租约 | `owner_agent_id`;`claims[]` 活跃条目的 `lease_until` 倒计时、`last_heartbeat_at` 新鲜度(taskShow) |
+| 目标 | `task.goal / acceptance`(taskShow → task.json) |
+| 依赖 | `depends_on[]` chip,点击跳选;未满足标注与 DAG 同谓词 |
+| 路径 | `task.paths.allow / requires_approval`(mono 列表;待批准项琥珀 + 对应 ② 条目) |
+| 风险 | `status.risks[]` 该 task 的条目逐行(kind + 参数,如「租约超时 12 分钟」) |
+| previous_attempts | `task.previous_attempts[]`(有则显示:attempt、原 agent、reclaim 原因) |
+
+**B. Evidence / checks**(evidenceShow;无 evidence 时显示「尚未提交」)
+
+| 元素 | 字段 |
+|---|---|
+| 版次 | `evidence.revision`(+`history[]` 计数「第 2 版,1 次归档」) |
+| checks 矩阵 | `required_checks_results[]`:每行 `name`(mono)+ pass/fail pill;fail 行红且置顶 |
+| 改动文件 | `changed_files[]`:mono 路径 + `in_scope=false` 的标「越界」琥珀角标([14](14-evidence-review-verification-contract.md) §2.3) |
+| 摘要 | `summary` 段落;`outputs[]` 文件名列表(只列名,不内嵌大日志) |
+
+**C. 事件时间线**(Temporal 语言;readEvents 按 task 过滤)
+
+| 元素 | 字段 | 展示 |
+|---|---|---|
+| 时间线条目 | `events[]` 逆序(新在上) | 左轨色点(状态事件按 `EVENT_STATUS` 落点状态着色;非状态事件中性灰),点间细线连接 |
+| 条目主行 | `event` + `actor` | 事件中文短语(「提交 evidence」「认领评审」)+ actor chip(`agent:AG-02` / `user`) |
+| 条目辅行 | `seq`、`ts`、`payload` 摘要 | mono `#187 · 12:03:41`;payload 择要一行(如 revision、checks 计数) |
+| 断层提示 | `corrupt_lines[]` 非空 | 时间线顶部红条「账本有 N 行不可读」联动 ② `ledger_broken` |
+| 查看更多 | `total > shown` | 「共 N 条,复制 `sigmarun events RUN --task=T --limit=0`」(复制,不代跑) |
+
+CLI 等价:`sigmarun task show / evidence show / events`。
 
 ---
 
-## 5. DAG 视图规格
+## 5. 布局与响应
 
 | 项 | 规格 |
 |---|---|
-| 数据 | `task-graph.json`（nodes/edges）经 A5 join task 状态；graph 文件内残留的 node status / edge `satisfied` 一律忽略、以派生为准（[13](13-design-audit-and-next-breakdown.md) §5.5） |
-| **MVP 只渲染三种边** | `blocks`、`produces_context_for`、`soft_depends_on`（[13](13-design-audit-and-next-breakdown.md) §7 P2 裁剪结论）。三者必须视觉可区分且有图例；具体样式留实现 |
-| 其他边 kind | `reviews` / `verifies` / `integrates` / `conflicts_with` / `supersedes` **不入主图**，在 P2 task 详情"关系"列表中可见；是否入图属 P2 增强 |
-| 节点内容 | TASK-ID + 短标题 + owner 缩写 + 状态色组 + 风险角标 |
-| 状态着色（语义分组，不定色值） | 计划 `draft` ／ 就绪 `ready` ／ 执行 `claimed`,`working` ／ 返工 `changes_requested` ／ 评审验证 `submitted`,`reviewing`,`approved` ／ 完成 `verified`,`integrated`,`done` ／ 异常 `blocked` ／ 终止 `cancelled` |
-| 风险角标 | `stale`（A3 派生）、`blocked`、`path_conflict`、`out_of_scope`、`review_skipped`；多个风险取最高 severity 显示 + 计数 |
-| `blocks` 边标注 | 满足/未满足（派生规则与 claim-next 依赖判断一致：上游 `done` 或 policy 放行，[08](08-core-gateway-capabilities.md) §4.2）；未满足的边是"TASK 为什么没人领"的可视答案 |
-| 边上 context refs 计数 | `produces_context_for` / `soft_depends_on` 边显示 `context_refs` 数量徽标；点击展开 refs 清单并跳转 evidence / message / handoff 锚点 |
-| 布局 | 按 `blocks` 拓扑分层（与 [16](16-git-worktree-and-team-root.md) §4.2 合并序同源），层内按 priority desc、TASK-ID asc——同一数据永远渲染同一张图（确定性） |
-| 交互（全部只读） | hover 摘要卡（status/owner/lease/依赖）；点击进 task 详情；按状态或风险过滤高亮 |
-| 规模退化 | 节点 > 50 时折叠"完成"分组为聚合节点；minimap 属 P2 |
-| 结构问题 | cycle / dangling edge 不由 dashboard 判定，透传 `team graph validate` 的 findings 显示 |
-| CLI 等价 | `team graph show <RUN>` / `team graph validate <RUN>` |
+| 网格 | 顶栏 48px;下方三栏 `264px / minmax(560px,1fr) / 380px`,各自独立滚动(高密度前提) |
+| 窄屏退化 | <1200px:右栏变覆盖式抽屉(点选任务滑出);<900px:左栏折叠为顶栏 run 下拉。mock 只做 ≥1200 主形态,退化属实现项 |
+| 字号 | 正文 13px/1.55;表格与 meta 12px;pane 头进度数字 20px semibold;ID 一律 `ui-monospace` |
+| 间距 | 4px 基数;卡片 padding 10–12px;区块间 12px |
+| 主题 | CSS 变量双 token 组(§8);`prefers-color-scheme` 默认 + `data-theme` 手动覆盖 |
 
 ---
 
-## 6. 刷新模型
+## 6. 参考语言的具体落点
 
-| 维度 | 方案 A：轮询 `.team/` | 方案 B：订阅 `team watch --json` NDJSON 流（[17](17-cli-mcp-contract-and-error-model.md) §7） |
+| 参考 | 借了什么 | 落在 |
 |---|---|---|
-| 机制 | 默认 5s 一个轻量 tick：读 `events.jsonl` tail（seq 游标，A9）+ 关键文件 mtime/`rev`（progress.json、task-list、claims）；有变化才重算受影响聚合 | read-model server 消费用户启动的 watch 进程的 NDJSON 行，增量更新视图 |
-| 新鲜度 | 上限 = 轮询间隔（5s） | 上限 = watch interval（默认 30s，可调）+ 行推送延迟 |
-| 写路径 | **零写**，dashboard 全链路只读 | dashboard 自身仍只读，但数据链路包含会写的进程：watch 的 sweep 会执行合法回收（D9/D14） |
-| stale 处理 | 只能派生**标注**（A3），不能推进回收；回收要靠用户复制 `team reclaim` 或自行运行 watch | sweep 自动回收，回收结果通过文件对 A 同样可见 |
-| 依赖与故障 | 无外部依赖 | 依赖用户先启动 watch；单实例 advisory lock；断流需降级回轮询 |
-| 前提合同 | 已具备（文件 schema 即合同） | **watch `--json` 的 NDJSON 行 schema 尚未定义**（见 §10 修订指令） |
-
-**MVP 建议：方案 A 是唯一数据链路。** 理由：零写路径最干净地兑现 B1；5s 轮询新鲜度已优于 watch 默认 30s；watch 的价值（sweep 推进回收）通过文件自然流入轮询结果——**watch 负责推进事实，dashboard 只负责看**，两者经 `.team/` 文件解耦而非直连。dashboard 顶栏展示 watch 存活状态（`locks/watch.lock` 存在性 + meta），未运行时提示复制 `team watch RUN-ID` 命令。方案 B 作为 P2 增强（形态 C 的 MCP server 常驻后自然获得推送通道，D1）。
-
-补充纪律：`progress.json` 仅作变更信号与 mismatch 对照，**展示的进度永远来自 A4 重算**（INV-006）；"触发只读刷新"按钮只是立即执行一个 tick，不调用任何写 primitive（包括 `team progress`——它按 [17](17-cli-mcp-contract-and-error-model.md) §1 是写命令）。
+| Linear inbox | 收件箱=唯一"必须处理"入口:图标+两行摘要+右侧归属;零已读状态(只读产品不落已读) | ② |
+| Conductor | per-agent 卡:身份+在做什么+新鲜度一眼齐;diff-first 理念转译为 evidence「改动文件」前置 | ④、⑥B |
+| Vibe Kanban | 状态即颜色的看板扫读感 → 压缩为 by_status 堆叠微条 + 状态 pill 表格 | ③、⑤ |
+| Dagster | DAG 居中 + 右侧资产详情侧栏的联动范式;节点状态描边着色 | ⑤⑥ |
+| Temporal | 事件时间线:seq 编号、actor 归属、事件语义着色、增量游标 | ⑥C |
+| GitHub Actions | DAG 极简主义:圆角矩形+连线,不做花哨布局;完成态低调、异常态醒目 | ⑤ |
 
 ---
 
-## 7. 只读边界落地清单
+## 7. DAG 视图规格(v0.2 修订)
 
-### 7.1 禁止的交互（逐条）
-
-| # | 禁止项 | 说明 |
-|---|---|---|
-| N1 | 分派/认领任务 | 无 assign、claim、"开始做"按钮；派活只经 `/team-dispatch` → `claim-next` |
-| N2 | 任何状态变更 | 无 publish / pause / resume / cancel / unblock / release / reclaim / approve / request-changes / verify 按钮 |
-| N3 | 编辑任何文本 | task.md、evidence、review、verification、memory、messages 全部只读；**无发消息输入框**（message post 是写 primitive） |
-| N4 | 触发 sweep / heartbeat / hydrate | 即使"合法权威操作"也不代跑；不后台调用 `team watch --once` |
-| N5 | 执行 git 写操作 | 不 merge、不删 branch、不 remove worktree；worktree 清理只复制 [16](16-git-worktree-and-team-root.md) 给出的建议命令 |
-| N6 | 执行用户粘贴的命令 | 只有"复制"，没有"运行"——命令必须回到终端/agent 会话执行 |
-| N7 | 写 `.team/` 任何文件 | 含缓存、UI 偏好、已读标记（B3） |
-| N8 | 调用任何写 primitive | read-model 进程不 import 写模块（[11](11-4-plus-1-architecture-view.md) §5.3 既有约束，由 [20](20-c4-l2-l3-component-contracts.md) 的包结构强制） |
-
-### 7.2 "复制命令"允许清单
-
-| 场景 | 复制文本模板 | 出处 |
-|---|---|---|
-| 加入 run 干活 | `/team-dispatch RUN-0001` | [04](04-command-workflows.md) |
-| 发布 draft 任务 | `/team-publish RUN-0001` | [15](15-run-task-state-machine-and-lifecycle.md) §6 |
-| stale 回收 | `team reclaim RUN-0001 TASK-0003` | [15](15-run-task-state-machine-and-lifecycle.md) §5.2 |
-| 暂停/恢复 run | `team run pause/resume RUN-0001` | [15](15-run-task-state-machine-and-lifecycle.md) §2 |
-| 解除阻塞 | `team unblock RUN-0001 TASK-0003` | [15](15-run-task-state-machine-and-lifecycle.md) §3.3 |
-| 路径批准 | `team approve-paths RUN-0001 TASK-0003 --paths "src/users/**"` | [14](14-evidence-review-verification-contract.md) §5 |
-| 认领 review | `/team-review RUN-0001 TASK-0003` | [04](04-command-workflows.md) |
-| 跑审计 / 留档 | `team audit run RUN-0001`、`team export --run RUN-0001` | [08](08-core-gateway-capabilities.md) §5.2、[16](16-git-worktree-and-team-root.md) §7 |
-| 启动巡检 | `team watch RUN-0001` | [17](17-cli-mcp-contract-and-error-model.md) §7 |
-| 版本迁移（超窗 run） | `team migrate` | [21](21-schema-versioning-and-migration.md) §5 |
-| worktree 清理 | `git worktree remove …`（原样转抄 gateway 建议） | [16](16-git-worktree-and-team-root.md) §3.5/§6 |
-| audit finding 修复 | finding 的 `next_action` 字符串原样复制 | [08](08-core-gateway-capabilities.md) §5.4、[17](17-cli-mcp-contract-and-error-model.md) §2.1 |
-
-**生成规则：** 复制文本只能取自 [17](17-cli-mcp-contract-and-error-model.md) §1 命令总表、[07](07-skill-plugin-execution-form.md) §8 slash 清单，或 envelope / audit 输出的 `next_actions` 字段——dashboard 不自造命令语法，避免展示层与合同漂移。
+| 项 | 规格 |
+|---|---|
+| 数据 | `graph.nodes[]`(status 已由 read-model join,残留 status 字段已被 showGraph 覆盖)+ `edges[]` |
+| 布局 | 按 `blocks` 边拓扑分层(左→右),层内按 task_id 升序;同数据永远同图(确定性,继承 v0.1)。>50 节点折叠完成组,属演进项 |
+| 节点(168×54) | 状态 tint 底(token 12% 不透明度)+ 1.5px 状态色描边;首行:状态字形 + `task_id`(mono)+ 风险角标;次行:`title` 截断;右下:owner 缩写 chip。**颜色永不孤立承载状态**——字形+文字恒在(§8) |
+| draft 节点 | 虚线描边 + 降透明度(「还是计划」的幽灵感,GitHub Actions pending 语言) |
+| cancelled 节点 | 灰 token + 标题删除线 |
+| 选中态 | accent 2px 外圈 + 阴影;单选,与 ⑥ 联动 |
+| `blocks` 边 | 实线 1.5px + 箭头。**未满足**(上游非 `done`,与 claim-next 依赖闸门同谓词,应从 core 导出复用而非前端复刻,B6):琥珀色 + 边中点「等上游」微标——它是「为什么没人领」的可视答案。已满足:中性灰 |
+| `produces_context_for` 边 | 短划线(dash 6-4)紫灰;边中点 refs 计数徽标(有 `context_refs` 时) |
+| `soft_depends_on` 边 | 点线(dash 2-4)低对比;不参与分层 |
+| 图例 | pane 头右侧常驻三种边样例(线型即语义,不靠色相区分——CVD 安全) |
+| 风险角标 | `status.risks[]` 按 task_id 落到节点右上:⏱ stale_lease、⛔ blocked/blocker;多风险取最高 severity + 计数 |
+| 交互 | 点击=选中联动 ⑥;hover 提示(title/owner/状态);无拖拽、无编辑(B4) |
+| CLI 等价 | `sigmarun graph show <RUN>` |
 
 ---
 
-## 8. 风险与徽标体系
+## 8. 状态色 = 语义色:token 表(v0.2 定稿)
 
-| 风险 | 判定来源 | task 级 | run 级（风险栏） | 总览级 | severity（暂按 [08](08-core-gateway-capabilities.md) §5.3，定稿归 [18](18-audit-rule-catalog-and-trust-model.md)） |
+原则:**色相族=语义**,与 dashboard.ts `COLOR` 表同源;明暗两套是同族色相的两组明度取值(暗色不是亮色的自动翻转);状态**永远伴随字形+文字**,颜色不孤立承载语义(色弱安全的底线)。全部数值经 dataviz 色板校验器逐对验证(相邻状态对 CVD ΔE、正常视力 ΔE、对表面对比度 ≥3:1)。
+
+### 8.1 任务状态(13 态 → 8 语义族)
+
+| 语义族 | 覆盖状态 | 字形 | Light | Dark | 相对 COLOR 表 |
 |---|---|---|---|---|---|
-| `stale_claim` | A3 派生：`now > lease_until`，blocked 豁免（[15](15-run-task-state-machine-and-lifecycle.md) §5.1） | 任务行 + DAG 角标 + 泳道 | 计数 + reclaim 复制命令 | 徽标计数 | warn |
-| `path_conflict` / `out_of_scope` | path-claims 重叠（warn 策略下）；evidence `in_scope=false`（[14](14-evidence-review-verification-contract.md) §2.3） | 角标 | 计数 | 徽标 | warn/error（按 policy） |
-| `review_skipped` | skip review record + 事件（D6，[15](15-run-task-state-machine-and-lifecycle.md) §9） | 任务行标注 | warning 汇总 | — | warn |
-| `cross_run_overlap` | A1 复算 paths 交集 + `cross_run_overlap_detected` 事件（[16](16-git-worktree-and-team-root.md) §5） | — | 警示条 | **主要展示层**：总览警示条 | warn |
-| `rev_conflict` / `direct_state_edit_suspected` / events seq 断号 | audit + [17](17-cli-mcp-contract-and-error-model.md) §5.2 | — | error 徽标 | 徽标 | error |
-| `missing_evidence` / `self_approval` / 一致性矩阵偏离 | audit（[08](08-core-gateway-capabilities.md) §5.3、[15](15-run-task-state-machine-and-lifecycle.md) §4.3） | 角标 + 详情面板 | 计数 | 徽标 | error |
-| `unresolved_blocker` / `stale_open_question` | A6 派生（[12](12-context-plane-task-dag-message-pool-memory.md) §11） | 任务行 | P3 入口徽标 | — | warn |
-| `worktree_missing` / abandoned worktree | `worktrees.json` + audit（[16](16-git-worktree-and-team-root.md) §8） | previous_attempts 面板 | 清理提示 | — | warn |
+| 计划 | `draft` | ○ | `#888780` | `#98978f` | 同 |
+| 就绪 | `ready` | ◇ | `#ba7517` | `#d68a28` | 同族 |
+| 执行 | `claimed` `working` | ▶ | `#15559c` | `#4a90dd` | 微调(原 `#185fa5`,为拉开与评审紫的 CVD 距离) |
+| 评审 | `submitted` `reviewing` | ◐ | `#9b4fd0` | `#c793f5` | **修订**(原 `#534ab7` 与执行蓝 protan ΔE 3.2 几乎不可分;新值 9.3,全检通过) |
+| 通过 | `approved` | ✓ | `#1d9e75` | `#52d49a` | 同 |
+| 完成 | `verified` `integrated` `done` | ✓✓ | `#0f6e56` | `#1f8a66` | 同族(与品牌 accent 呼应) |
+| 异常 | `blocked` `changes_requested` | ⛔ | `#a32d2d` | `#f28b82` | 同族(dark 取珊瑚,protan 下仍与完成绿可分) |
+| 终止 | `cancelled` | × | `#5f5e5a` | `#7d7c75` | 同 |
 
-汇聚规则：
+用法:pill/节点=token 12% tint 底 + token 描边 + token 文字(而非纯色块+白字——密度更高、暗色不刺眼);进度堆叠微条用实色段。校验残留说明:两个灰族低饱和是**语义本身**(惰性状态读作灰);相邻族最差对均 ≥6(CVD)且全部有字形+文字二次编码,合规。
 
-1. 每一层显示**最高 severity 着色 + 总计数**；error > warn > info。
-2. 徽标点击即跳 P4 audit 视图并按该 kind 过滤——徽标是 audit findings 的索引，不是第二套风险判定。
-3. 派生型风险（stale、claimability）由 read-model 按与 status/audit 相同的规则现算（A3/A5 与 CLI 共库，B6），保证 dashboard 与 `/team-status` 永不打架。
+### 8.2 user_state(run 级色带)与 needs-you severity
+
+| user_state | 色族 | | needs_user kind | severity/色族 |
+|---|---|---|---|---|
+| `needs_you` | 异常红 | | `ledger_broken` | error·红(恒置顶) |
+| `awaiting_publish` `ready_to_work` | 就绪琥珀 | | `blocker` `blocked_unblock` `reclaim_confirm` `stale_owner` `deps_dead` | warn·琥珀→红(等待人裁决) |
+| `in_progress` | 执行蓝 | | `open_question` `approval_pending` `awaiting_rework` | warn·琥珀 |
+| `awaiting_gates` | 评审紫 | | `awaiting_review` `awaiting_verify` | 评审紫(缺独立第二窗口) |
+| `ready_to_integrate` `ready_to_report` | 通过绿 | | `ready_to_integrate` `ready_to_report` | 正向绿(顺利收尾) |
+| `closed` | 完成深绿 | | | |
+| `paused` | 终止灰 | | | |
+
+### 8.3 表面与文字 token(mock 已内嵌,实现照抄)
+
+| token | Light | Dark |
+|---|---|---|
+| bg / card / 边线 | `#f6f8f7` / `#ffffff` / `#e2e9e6` | `#0d1413` / `#151f1d` / `#26322f` |
+| 主文字 / 次文字 / 弱文字 | `#15211f` / `#4d5c58` / `#8a9995` | `#e7eeec` / `#9fb0ab` / `#6b7b76` |
+| accent(品牌,选中态/链接,**不作状态色**) | `#0f6e56` | `#5dcaa5` |
 
 ---
 
-## 9. 版本与脱敏边界（接 [21](21-schema-versioning-and-migration.md)/[24](24-security-permissions-and-data-hygiene.md) 留给本文档的接口）
+## 9. 刷新与新鲜度模型(继承现状)
 
-| 项 | 规则 |
+- 2.5s 轮询 `/api/state`;`generated_at` 直接展示为数据时刻,不做乐观更新。
+- 懒加载端点(§3.2)在选中期间挂在同一 tick 后串行拉取;`/api/events` 用 `since=<最大已见 seq>` 增量。
+- 失败退避:连续失败仅改变顶栏指示(●黄→●红),已渲染数据保留并标注「数据可能过期」;恢复即覆盖。
+- 「触发只读刷新」=立即执行一个 tick;不调用任何写 primitive。
+
+---
+
+## 10. 只读边界(继承 v0.1 §7,原文有效)
+
+禁止交互 N1–N8(不派活/不改状态/不编辑/不代跑 sweep/不执行 git 写/不执行粘贴命令/不写 `.team/`/不 import 写 primitive)与「复制命令」允许清单**原样继承 v0.1**(见 git 历史或 [17](17-cli-mcp-contract-and-error-model.md) §1 命令总表);v0.2 补充两条:
+
+- 复制文本只能取自 read-model 输出的 `command`/`next_actions` 字段或 [17](17-cli-mcp-contract-and-error-model.md) 命令总表——收件箱的命令列即 `needs_user[].command` 原样透传,dashboard 不自造命令语法。
+- 主题偏好存 localStorage,已读/折叠状态一律不持久化(只读产品无「已读」概念)。
+
+---
+
+## 11. 演进方向(原 v0.1 多页 IA 的去处)
+
+| v0.1 规划 | v0.2 归宿 |
 |---|---|
-| 旧 major run 的展示 | 与读命令同规则（[21](21-schema-versioning-and-migration.md) §4.1/§6.1）：读窗口（N-1）内的旧 major 文件在**内存中迁移后展示，绝不回写**；超窗 run 在 P0 总览显示"不可读，需迁移"占位行（保留 RUN-ID 与文件时间）+ 复制 `team migrate` 命令，不尝试半解析 |
-| events / messages 行级版本 | 行内 `v` 超出读窗口 → 该行跳过并计 warning（[21](21-schema-versioning-and-migration.md) §3.4），warning 汇入 §8 风险栏与顶栏数据时刻标注 |
-| `.team/` 内容的脱敏边界 | dashboard 展示的 outputs 日志、message body 等均为**写入时已经过 redaction 管道的落盘内容**（[14](14-evidence-review-verification-contract.md) §2.2、[24](24-security-permissions-and-data-hygiene.md) §5）；dashboard 不做二次脱敏、也无法还原原文；audit 的 secret 漏网检出（`secret_leak_suspected`）照常经 A7 透传显示 |
-| git diff/log 的脱敏边界 | diff 内容来自用户仓库本身、不经 gateway 管道，与用户在终端跑同一 git 命令等价——dashboard 不新增泄漏面，也不承担 diff 内 secret 检测责任 |
-| 权限矩阵定位 | dashboard 在 [24](24-security-permissions-and-data-hygiene.md) §2 权限矩阵中与 watch 同列且**全线无写权**（连 sweep 也没有，比 watch 更窄——见 §7 N4） |
+| P0 总览 / P1 run 详情 | 合并为单页(③ 即 P0,⑤⑥ 即 P1) |
+| P2 task 详情页 | 压缩为 ⑥ 侧栏;diff 面板(git 事实 A8)、reviews 逐轮面板、context/handoff 面板为侧栏 P2 增强段 |
+| P3 messages / open questions | 收件箱只吸收了 needs_user 投影;完整消息线程页仍是未来独立页 |
+| P4 audit 报告 | 未落地;`risks[]` 徽标是其索引,点击跳 audit 页属演进项 |
+| 方案 B(watch NDJSON 推送) | 仍属 P2;单页轮询已满足 2.5s 新鲜度 |
 
 ---
 
-## 10. MVP（P2 首版）验收场景
+## 12. Mock 交付物说明
 
-| 场景 | 预期 |
-|---|---|
-| 只知道 repo 路径打开 dashboard | P0 列出全部 run，内容与 `team run list` 一致 |
-| agent 断线超 TTL 且无人运行 watch | 下一个 tick 内该 claim 标 stale（派生），风险栏给出可复制的 `team reclaim` 命令；dashboard 不执行回收 |
-| TASK-0003 无人领取 | 任务表 tooltip 给出的原因与 `team claim-next --dry-run` 输出一致 |
-| review 走了两轮 | task 详情 reviews 面板并列显示 `-01` / `-02` 两条记录，互不覆盖 |
-| 手改 `progress.json` | 展示进度不受影响（A4 重算），P4 显示 progress mismatch |
-| DAG 渲染 | 只出现三种边；上游未完成的 `blocks` 边标"未满足"；节点色随 task 状态变化；`produces_context_for` 边显示 refs 计数 |
-| 用户在终端启动 `team watch` | 顶栏指示变为存活；watch sweep 回收的结果在下一 tick 可见 |
-| blocker 消息被 answer | P3 线程闭合，open question 转 resolved，task 详情联动 |
-| **零写验证** | dashboard 全程运行前后 `.team/` 内容哈希不变、git 无新对象（N1–N8 的机械验收） |
-| gateway 升级后打开含旧 major 文件的 run | 窗口内正常展示（内存迁移、零回写）；超窗 run 显示占位行 + `team migrate` 复制命令 |
-| dashboard 进程被 kill | 协议与 CLI 全部功能不受影响（B5） |
+[23-dashboard-mock.html](23-dashboard-mock.html):纯静态单文件,零依赖零网络,浏览器直接打开。
+
+- 假数据内嵌为 `MOCK` 对象,**字段名与 §3 的真实 envelope 完全一致**(runs[].run/status/tasks/graph、needs_user、agents、events、evidence)——它同时是前端渲染层的合同样本。
+- 场景:3 个 run(完整 run 选中态 · 轻量 run 进行中 · 已收尾 run),10 节点 DAG 覆盖全部 8 语义族与三种边(含未满足 blocks 边、refs 计数)、4 条 needs-you(4 种 severity)、4 agent 卡(含 stale)、TASK-0004 全侧栏(checks 矩阵含越界文件、9 条事件时间线)。
+- 可交互部分:明暗主题切换、收件箱开合、DAG/任务表切换、节点/表行/依赖 chip 点选联动侧栏、复制按钮;其余静态。
+- 不接真数据、不改 dashboard.ts —— 仅设计稿。
 
 ---
 
-## 11. 对现有文档的修订指令
+## 13. 实现拆解(mock → dashboard.ts 单页,供主会话排期)
 
-| 文档 | 修订 |
-|---|---|
-| README | 文档索引追加 23 号行；"Out of Scope: Web dashboard 完整 UI"保留，注明信息架构已定于本文档 |
-| [08](08-core-gateway-capabilities.md) | §6.1 Task progress 行的 `stale` 从状态计数改为"风险栏派生标注"（对齐 [15](15-run-task-state-machine-and-lifecycle.md) §3.1 移除 stale 状态）；§6.2 三栏布局描述标注"IA 以 23 号为准" |
-| [11](11-4-plus-1-architecture-view.md) | §5.3 read-model 行补"本地 server + 浏览器"形态，指针指向 [20](20-c4-l2-l3-component-contracts.md)/23 |
-| [12](12-context-plane-task-dag-message-pool-memory.md) | §12 "dashboard 展示 task DAG"验收行补注：MVP 只渲染三种边（引本文 §5） |
-| [17](17-cli-mcp-contract-and-error-model.md) | §7 定义 `--json` NDJSON 行 schema（event / risk / progress 三类行 + seq 游标字段），作为本文 §6 方案 B 的输入合同 |
+现状 dashboard.ts ≈150 行(server 40 + PAGE 模板 85)。改造后 PAGE 预计 500–650 行,仍零依赖内联。按依赖顺序切五片,每片独立可交付:
+
+| 片 | 改动块 | 内容 | 量级 |
+|---|---|---|---|
+| S1 布局+token | `PAGE` 的 `<style>` 全量重写;`COLOR` 常量 → §8 双主题 token 表(status/user_state/severity 三张映射 + data-theme 切换) | 三栏网格、顶栏、卡片/pill/chip 基础组件样式;**采纳 §8.1 的两处色值修订** | 纯 CSS+常量,~200 行,无逻辑风险 |
+| S2 左栏+收件箱 | `renderRuns` 重写为色带卡片(user_state+堆叠微条);新增 `renderInbox`(跨 run 拼 `needs_user`)+顶栏三态刷新指示 | 全部消费现有 `/api/state`,零后端改动 | ~120 行前端 |
+| S3 DAG 升级 | `drawDag` 重写:分层保留,节点改 tint+描边+字形+风险角标+点选;边按 kind 三样式+未满足判定 | 后端:core 导出「blocks 满足」谓词供复用(B6,替代前端 `from.status!=='done'` 硬编码);其余零后端 | ~150 行 SVG 前端 + core 一个纯函数导出 |
+| S4 侧栏+新端点 | server 加 `/api/task`、`/api/events` 两个 handler(直调 `taskShow`/`evidenceShow`/`readEvents`);前端新增 `renderSidebar`(档案/checks 矩阵/时间线)+选中态管理+懒加载 | 唯一动后端的片;三个函数均已存在且只读,handler 各 ~10 行 | ~180 行前端 + ~25 行 server |
+| S5 表格+agents+打磨 | 任务表 tab(风险列/依赖 chip)、`agentList` 并入 state 聚合与 ④ 卡片、复制按钮、空态/断连态、窄屏抽屉退化 | `dashboardState` 加一个 `agents` 字段(一行 join) | ~120 行 |
+
+验收基线(每片交付都跑):架构测试(不 import 写 primitive)不红;`/api/state` 合同不破坏既有 `--once`/`--json` 消费者;`.team/` 前后哈希不变(v0.1 §10 零写验证);mock 与实现的视觉差异 ≤ 主题 token 内的舍入。
 
 ---
 
-## 12. 遗留到其他文档的接口
+## 14. 遗留接口
 
-- read-model container 边界、与 CLI core 的共库方式、A1–A9 聚合的接口签名 → [20](20-c4-l2-l3-component-contracts.md)
-- 风险规则正式编号、severity 定稿、徽标↔rule_id 映射 → [18](18-audit-rule-catalog-and-trust-model.md)
-- `team watch --json` NDJSON 行 schema → [17](17-cli-mcp-contract-and-error-model.md) 修订
-- dashboard 启动入口与打包（独立 npx 包还是 `team` 子命令、随形态 A→B→C 的演进位置） → [22](22-packaging-installation-and-evolution.md)
-- read-model 本地 server 的网络暴露面（仅绑定 localhost 等进程级安全） → [20](20-c4-l2-l3-component-contracts.md) container 规格，按 [24](24-security-permissions-and-data-hygiene.md) 原则约束
+- read-model 容器边界与共库方式 → [20](20-c4-l2-l3-component-contracts.md);「blocks 满足」谓词的 core 导出归 S3。
+- 风险规则编号与 severity 定稿 → [18](18-audit-rule-catalog-and-trust-model.md)(§8.2 的 severity 映射为暂行)。
+- diff 面板(git 事实)、reviews 逐轮、audit 页、watch 推送 → §11 演进项,不入本轮排期。
