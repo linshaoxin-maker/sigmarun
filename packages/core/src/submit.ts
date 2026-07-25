@@ -231,27 +231,32 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
     }
 
     let handoffContent = draft.handoff ?? '';
-    if (!handoffContent && draft.handoff_file && existsSync(draft.handoff_file)) {
+    if (!handoffContent.trim() && draft.handoff_file && existsSync(draft.handoff_file)) {
       handoffContent = readFileSync(draft.handoff_file, 'utf8');
     }
     // Field-name clarity (P0-4): docs/14 §2.1 showed the *stored* name (handoff_ref); the DRAFT uses
     // `handoff` (inline) or `handoff_file` (path). Call out a copied handoff_ref so it is a one-read fix.
     if (!handoffContent.trim()) {
-      const usedStoredName = typeof (draft as unknown as Record<string, unknown>).handoff_ref === 'string';
-      errors.push(
-        `handoff content is required: put it inline in the draft field \`handoff\`, or point \`handoff_file\` at a file` +
-          (usedStoredName
-            ? ` — you set \`handoff_ref\`, the stored/output name the gateway writes (it emits context/tasks/${opts.taskId}.md from your \`handoff\`), not a draft input.`
-            : ` (the gateway writes context/tasks/${opts.taskId}.md from it).`),
-      );
+      if (draft.handoff_file && !existsSync(draft.handoff_file)) {
+        errors.push(`handoff_file does not exist: ${draft.handoff_file} (resolved from the invocation cwd; absolute paths are accepted)`);
+      } else {
+        const usedStoredName = typeof (draft as unknown as Record<string, unknown>).handoff_ref === 'string';
+        errors.push(
+          `handoff content is required: put it inline in the draft field \`handoff\`, or point \`handoff_file\` at a file` +
+            (usedStoredName
+              ? ` — you set \`handoff_ref\`, the stored/output name the gateway writes (it emits context/tasks/${opts.taskId}.md from your \`handoff\`), not a draft input.`
+              : ` (the gateway writes context/tasks/${opts.taskId}.md from it).`),
+        );
+      }
     } else {
       // Handoff structure guardrail (docs/14 §2.4) — WARN-ONLY: the gateway has no LLM (I4) and
       // never rejects on content quality. Two shape heuristics catch the classic garbage handoff
       // (one throwaway line) while its author is still around to fix it, instead of leaving the
-      // next agent to discover it inside hydrate must_read.
+      // next agent to discover it inside hydrate must_read. Heading detection follows CommonMark:
+      // up to 3 leading spaces, `##`+ hashes, then a space or tab.
       const shapeProblems: string[] = [];
       if (handoffContent.trim().length < 200) shapeProblems.push('is under 200 characters');
-      if (!/^##+ /m.test(handoffContent)) shapeProblems.push('has no "## " section heading');
+      if (!/^ {0,3}##+[ \t]/m.test(handoffContent)) shapeProblems.push('has no "## " section heading');
       if (shapeProblems.length > 0) {
         warnings.push({
           code: 'handoff_unstructured',

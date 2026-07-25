@@ -101,4 +101,54 @@ describe('submit — handoff structure guardrail (docs/14 §2.4; warn-only, neve
     expect(env.code).toBe('evidence_invalid');
     expect((env.data as { errors: string[] }).errors.some((e) => e.includes('handoff content is required'))).toBe(true);
   });
+
+  it('deeper "### " headings count as structure (docs/14 §2.4: ### 亦算)', () => {
+    const handoff = [
+      '# Handoff summary',
+      'Module a shipped and green.',
+      '',
+      '### What was done',
+      '- ' + 'implemented the module and ran every required check. '.repeat(4),
+      '',
+      '### Related files',
+      '- src/a/index.ts — the deliverable.',
+    ].join('\n');
+    const env = submit(validDraft(repo, { handoff }));
+    expect(env.ok).toBe(true);
+    expect(env.warnings.some((x) => x.code === 'handoff_unstructured')).toBe(false);
+  });
+
+  it('CommonMark-tolerant headings: ≤3-space indent and tab after hashes still count as structure', () => {
+    const handoff = [
+      '# Handoff summary',
+      'Module a shipped and green.',
+      '',
+      '  ## What was done',
+      '- ' + 'implemented the module and ran every required check. '.repeat(4),
+      '',
+      '##\tRelated files',
+      '- src/a/index.ts — the deliverable.',
+    ].join('\n');
+    const env = submit(validDraft(repo, { handoff }));
+    expect(env.ok).toBe(true);
+    expect(env.warnings.some((x) => x.code === 'handoff_unstructured')).toBe(false);
+  });
+
+  it('whitespace-only inline handoff falls back to handoff_file (trim, not truthiness)', () => {
+    const dir = join(repo, '..', `handoff-ws-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+    const handoffPath = join(dir, 'handoff.md');
+    writeFileSync(handoffPath, STRUCTURED_HANDOFF);
+    const env = submit(validDraft(repo, { handoff: '   ', handoff_file: handoffPath }));
+    expect(env.ok).toBe(true);
+    expect(env.warnings.some((x) => x.code === 'handoff_unstructured')).toBe(false);
+  });
+
+  it('handoff_file pointing at a missing path names the path instead of the generic error', () => {
+    const env = submit(validDraft(repo, { handoff: '', handoff_file: '/no/such/handoff.md' }));
+    expect(env.ok).toBe(false);
+    expect(env.code).toBe('evidence_invalid');
+    const errs = (env.data as { errors: string[] }).errors;
+    expect(errs.some((e) => e.includes('handoff_file does not exist') && e.includes('/no/such/handoff.md'))).toBe(true);
+  });
 });

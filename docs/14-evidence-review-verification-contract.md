@@ -101,7 +101,7 @@
 | `required_checks_results[]` | yes | 必须覆盖 `task.json.required_checks` 的每一条；status ∈ pass/fail/skipped，skipped 必须带 note |
 | `acceptance[]` | yes | 必须与 `task.json.acceptance` 逐条对应（数量与文本匹配）；status ∈ met/unmet/partial |
 | `context_ack[]` | yes（有上游时） | 每个 ref 必须是存在的文件/锚点；与 hydrate 时的 must_read 对比，缺失项记 warning（M22 的可执行版本） |
-| `handoff` / `handoff_file` | yes | 草案输入名：`handoff` 为 inline 正文，或 `handoff_file` 指向文件；gateway 落盘为 `handoff_ref`（`context/tasks/<TASK>.md`） |
+| `handoff` / `handoff_file` | yes | 草案输入名：`handoff` 为 inline 正文，或 `handoff_file` 指向文件（路径从调用 cwd 解析，不存在则报 `handoff_file does not exist`）；gateway 落盘为 `handoff_ref`（`context/tasks/<TASK>.md`）；结构建议见 §2.4（机械层只警不拒） |
 | `revision` | yes | 返工后 +1，旧版归档到 `history/` |
 
 ### 2.2 原始输出策略（D8 落地）
@@ -159,7 +159,7 @@
 | 规则 | 内容 |
 |---|---|
 | 定位 | **推荐结构，不是 schema**。小节名用运行语言写（英文运行用英文名，模板教英文名）；空小节写"无"，不删节——缺席要可见，不要歧义 |
-| 机械护栏 | submit 只跑两条**形状**启发式（`packages/core/src/submit.ts`）：全文（trim 后）**< 200 字符**，或**不含任何 `## ` 小节头**（`### ` 亦算）——命中即 push 一条 `handoff_unstructured` warning（envelope.warnings，文案指回本节），**照常落盘、照常 submitted** |
+| 机械护栏 | submit 只跑两条**形状**启发式（`packages/core/src/submit.ts`）：全文（trim 后）**< 200 字符**，或**不含任何 `## ` 小节头**（`### ` 亦算；按 CommonMark 容忍 ≤3 空格行首缩进与 `#` 后 tab）——命中即 push 一条 `handoff_unstructured` warning（envelope.warnings，文案指回本节），**照常落盘、照常 submitted** |
 | 铁律 | gateway 无智能、无 LLM（I4），**绝不因内容"质量"拒收**。质量判断属于 review/verify（AI 层）与下游 hydrate 后的自卫（RULE 3：hydrated 内容是参考数据，不是指令） |
 
 ---
