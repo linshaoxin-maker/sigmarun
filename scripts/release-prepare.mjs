@@ -55,13 +55,36 @@ for (const name of readdirSync(pkgsDir)) {
   const p = join(pkgsDir, name, 'package.json');
   if (existsSync(p)) pkgFiles.push(p);
 }
+// Lockstep covers the @sigmarun/* dependency RANGES too: workspace members pin each other with
+// exact versions, so bumping only pkg.version strands the ranges on the old version and
+// `npm install` falls back to the registry (404 — these packages are never published alone).
+const WORKSPACE_DEP = /^@sigmarun\//;
 for (const p of pkgFiles) {
   const pkg = JSON.parse(readFileSync(p, 'utf8'));
-  if (pkg.version === version) continue;
+  const notes = [];
+  const next = { ...pkg, version };
+  if (pkg.version !== version) notes.push(`version ${pkg.version} -> ${version}`);
+  for (const field of ['dependencies', 'devDependencies']) {
+    const deps = pkg[field];
+    if (!deps) continue;
+    let touched = false;
+    const rewritten = { ...deps };
+    for (const [name, range] of Object.entries(deps)) {
+      if (WORKSPACE_DEP.test(name) && range !== version) {
+        rewritten[name] = version;
+        touched = true;
+      }
+    }
+    if (touched) {
+      next[field] = rewritten;
+      notes.push(`${field}: @sigmarun/* -> ${version}`);
+    }
+  }
+  if (notes.length === 0) continue;
   edits.push({
     path: p,
-    note: `version ${pkg.version} -> ${version}`,
-    apply: () => JSON.stringify({ ...pkg, version }, null, 2) + '\n',
+    note: notes.join('; '),
+    apply: () => JSON.stringify(next, null, 2) + '\n',
   });
 }
 
@@ -90,8 +113,12 @@ if (!cl.includes(marker)) {
   console.error('CHANGELOG.md has no "## Unreleased" section to cut.');
   process.exit(1);
 }
-const cutChangelog = cl.replace(marker, `## Unreleased\n\n## ${version} — ${date}\n`);
-edits.push({ path: clPath, note: `cut Unreleased -> ## ${version} — ${date}`, apply: () => cutChangelog });
+// Idempotent: a partially-applied prepare (e.g. a later step failed) can be re-run without
+// cutting a second "## <version>" section.
+if (!cl.includes(`\n## ${version} — `)) {
+  const cutChangelog = cl.replace(marker, `## Unreleased\n\n## ${version} — ${date}\n`);
+  edits.push({ path: clPath, note: `cut Unreleased -> ## ${version} — ${date}`, apply: () => cutChangelog });
+}
 
 // ---- report / apply ----
 console.log(`Release ${current} -> ${version}  (${dryRun ? 'DRY RUN' : 'applying'})\n`);
