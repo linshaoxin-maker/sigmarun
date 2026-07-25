@@ -454,7 +454,8 @@ var KIND={
   blocked_unblock:{c:'var(--st-ready)',ic:'🔓',zh:'待解除阻塞'}, reclaim_confirm:{c:'var(--st-ready)',ic:'⏱',zh:'待确认回收'},
   stale_owner:{c:'var(--st-ready)',ic:'⏱',zh:'owner 失联'}, deps_dead:{c:'var(--st-ready)',ic:'✂',zh:'依赖已死'},
   open_question:{c:'var(--st-ready)',ic:'?',zh:'提问待答'}, approval_pending:{c:'var(--st-ready)',ic:'🛂',zh:'路径待批准'},
-  awaiting_rework:{c:'var(--st-ready)',ic:'↩',zh:'待返工'}, awaiting_review:{c:'var(--st-review)',ic:'◐',zh:'等独立评审'},
+  awaiting_rework:{c:'var(--st-ready)',ic:'↩',zh:'待返工'}, handoff_unstructured:{c:'var(--st-ready)',ic:'☰',zh:'交接欠结构'},
+  awaiting_review:{c:'var(--st-review)',ic:'◐',zh:'等独立评审'},
   awaiting_verify:{c:'var(--st-review)',ic:'◑',zh:'等独立验证'},
   ready_to_integrate:{c:'var(--st-approved)',ic:'⇣',zh:'可以集成'}, ready_to_report:{c:'var(--st-approved)',ic:'✓',zh:'可以收尾'}
 };
