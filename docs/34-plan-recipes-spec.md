@@ -3,6 +3,7 @@
 > 日期:2026-07-25 · v2(v1 作废:v1 凭直觉自创骨架;v2 每条配方都注明**来源**——mode-router 的必交工件表、最小追溯链、P4 切片纪律、工件模板字段)
 > 来源文件:`~/.claude/skills/ai-dev-methodology/references/{mode-router, phase-4-estimation-and-priority, quality-checklists}.md` + `templates/{impact-analysis.md, bdd-scenario.feature}`
 > 分工铁律不变:**配方=skill 层教 AI 拆**(第一刀,gateway 零改);第二刀(mode 策略默认+audit)见 §7。
+> **阀值决策(2026-07-25,产品负责人)**:第一刀照方法论原文取硬度——风险分 **≥31 强制 full+verify**;单任务 **8 点必再切、21 点先 spike**。跑数个真实 run 后按方法论自己的校准法(历史数据回顾)复核这两个阀值;校准数据源=账本(weight vs 实际返工轮次/租约超时/path 冲突率)。
 
 ---
 
