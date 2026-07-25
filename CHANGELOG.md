@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Handoff 交接结构化:模板教学 → 警不拒护栏 → AUD-041 审计兜底 → needs-you 展示,全链闭环**(TEMPLATE 0.6.8→**0.6.9**;全量 422 绿,+20 测试/4 个新测试文件)。evidence 的 `handoff`(gateway 落盘 `context/tasks/<TASK>.md`,下游任务 hydrate 的 must_read)此前是自由 markdown——交接内容全凭 AI 发挥,垃圾交接只能靠下一棒事后识别。本轮补上格式软肋,分四层,每层各守一段:
+  - **推荐结构(docs/14 §2.4 新节)**:六节模板——交接摘要 / 做了什么 / 关键决策(为什么) / 坑与未尽事项 / 下一棒注意 / 相关文件——明标「推荐结构不是 schema,机械层只警不拒」;DISPATCH_FLOW 第 7 步两侧(Claude 命令 + Codex skill 共享一处定义)同文教学(写给下一棒而非自己、按 run 语言写、空节写 none 不删节),`/team-submit` 与 codex `team-run-submit` 两条手动重入路径同步指向,四个落盘模板均带可 grep 的 `docs/14 §2.4` 锚点(渲染验证通过)。
+  - **submit 警不拒护栏(AUD-041 inline 半)**:core 抽出 `handoffShapeProblems()` 作 submit/audit 共享的单一事实源——全文 trim 后 **<200 字符**,或**不含任何 `## ` 小节头**(CommonMark 判定:`### ` 亦算,容忍 ≤3 空格行首缩进与 `#` 后 tab)→ push 一条 `handoff_unstructured` warning(文案指回 docs/14 §2.4)并在 `evidence_submitted` payload 落 `handoff_unstructured` 布尔留档;**照常落盘、照常 submitted**(I4 铁律:gateway 无 LLM,绝不因内容「质量」拒收)。自审顺手修三处相邻缺陷:空白 inline handoff 曾挡死 `handoff_file` 回退(truthiness→trim)、`handoff_file` 路径打错只报泛用错误(现点名 `handoff_file does not exist: <path>`)、标题正则漏 CommonMark 合法形。
+  - **AUD-041 审计兜底(docs/18 目录 40→41 条)**:audit engine 以同一启发式复检**已落盘**的交接文件,检出护栏上线前的存量与落盘后被直改掏空的交接;永远 warn 不 error,文件/evidence 缺失让位 AUD-011。docs/18 五处同落(§2 事件表 27 行 payload 字段、§4 修订注、§4.C 规则行、§4.H 覆盖两行),§4 标题范围顺手修陈旧(写 035 实至 040→现 041);docs/14 §8 挂钩表补行。
+  - **dashboard needs-you 展示**:review 窗口期(task ∈ submitted/reviewing)按 payload 旗标出 `handoff_unstructured` 条目——恒排同任务 review gate 条目**之后**(`deriveUserState` 的 run 级状态不被警告劫持),命令给 `sigmarun evidence show`(detail 写明清除路径:request changes → 换结构重提旗标自清),旧事件无字段视为结构化(不追溯唠叨);过窗静默,长尾归 audit。docs/23 词汇同源收编:kind 枚举、§8.2 severity 表(**评审紫**——归琥珀会在收件箱把警告顶到同任务 gate 之上,与「gate 恒在前」冲突)、②面板短语例、mock 的 KIND 词条(¶「交接欠结构」)+ 真实态 fixture 演示项(reviewing 且 gate 已认领)。真机 fixture 起 `sigmarun dashboard` 浏览器截图验证面板呈现。
+
 ## 0.2.4 — 2026-07-24
 
 - **`sigmarun dashboard` 本地只读仪表盘**(docs/23 落地;GATEWAY 0.2.3→**0.2.4**,TEMPLATE→**0.6.8**)。`sigmarun dashboard [<RUN>] [--port=7317] [--once]`:零依赖单页(需求清单+user_state · 任务表 · **DAG 图**(节点按状态着色,布局按依赖分层) · needs-you 清单,2.5s 自刷新,明暗随系统)+ `/api/state` 聚合端点;`--once` 打印快照后退出(冒烟/脚本用)。**只读铁律由构造保证**:全部数据来自现有读模型(watch 的 runList/statusRun/taskList + context 的 showGraph),不 import 任何写原语;dashboard 属前端关注点落在 cli 包;bin 加 `keepAlive` 哨兵让服务存活。命令进 COMMAND_SURFACE + docs/17 §1(对账绿)。
