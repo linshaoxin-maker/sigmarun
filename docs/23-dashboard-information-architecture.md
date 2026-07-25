@@ -249,7 +249,7 @@ pane 头(常驻):`run.title` + run status pill + `status.progress_pct` 大数字
 |---|---|---|
 | 时间线条目 | `events[]` 逆序(新在上) | 左轨色点(状态事件按 `EVENT_STATUS` 落点状态着色;非状态事件中性灰),点间细线连接 |
 | 条目主行 | `event` + `actor` | 事件中文短语(「提交 evidence」「认领评审」)+ actor chip(`agent:AG-02` / `user`) |
-| 条目辅行 | `seq`、`ts`、`payload` 摘要 | mono `#187 · 12:03:41`;payload 择要一行(如 revision、checks 计数) |
+| 条目辅行 | `seq`、`ts`、`claim_id`、`payload` | mono `#187 · 12:03:41 · CLAIM-task-0001`;payload 结构化为**中文标注 chips**(版次/轮次/租约至/合并 sha/途径…,未知字段通用键值,`rev_after` 记账字段不入 chips);**点击事件行展开完整格式化 JSON**(含 actor/claim_id 全量,▸/▾ 指示) |
 | 断层提示 | `corrupt_lines[]` 非空 | 时间线顶部红条「账本有 N 行不可读」联动 ② `ledger_broken` |
 | 查看更多 | `total > shown` | 「共 N 条,复制 `sigmarun events RUN --task=T --limit=0`」(复制,不代跑) |
 

@@ -362,9 +362,19 @@ g.edge.esel path.vis{stroke-width:2.6}
 .ev .pt{position:absolute;left:0;top:4px;width:12px;height:12px;border-radius:50%;
   background:var(--c);border:2.5px solid var(--card);box-shadow:0 0 0 1.5px var(--c)}
 .ev .l1{display:flex;align-items:center;gap:6px;font-size:12px}
+.ev{cursor:pointer}
 .ev .nm{font-weight:650}
+.ev .chev{margin-left:auto;color:var(--mut);font-size:10px;flex:none}
 .ev .meta2{color:var(--mut);font-size:10.5px;margin-top:2px}
-.ev .pay{color:var(--ink2);font-size:11px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pv{display:inline-flex;gap:4px;align-items:baseline;font-size:10.5px;color:var(--ink2);
+  background:var(--line-soft);border:1px solid var(--line);border-radius:5px;padding:0 5px;
+  margin:3px 3px 0 0;max-width:100%;vertical-align:top}
+.pv b{color:var(--mut);font-weight:600;font-size:10px;flex:none}
+.pv i{font-style:normal;font-family:ui-monospace,Menlo,monospace;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;max-width:180px}
+.ev pre.full{margin:6px 0 0;padding:8px;background:var(--line-soft);border:1px solid var(--line);
+  border-radius:8px;font:10.5px/1.5 ui-monospace,Menlo,monospace;color:var(--ink2);
+  overflow:auto;max-height:240px;white-space:pre}
 .more{color:var(--mut);font-size:11px;margin-top:8px}
 .empty{color:var(--mut);font-size:12px;padding:24px 14px;text-align:center}
 .drawerx{display:none}
@@ -498,11 +508,33 @@ function stOf(s){return ST[s]||ST.unknown}
 function hhmmss(iso){return typeof iso==='string'&&iso.length>=19?iso.slice(11,19):''}
 function agoMin(iso){ var t=Date.parse(iso); return isFinite(t)?Math.max(0,Math.round((Date.now()-t)/60000)):null }
 function agoText(iso){ var m=agoMin(iso); if(m==null)return ''; if(m<1)return '刚刚'; if(m<60)return m+' 分钟前'; return Math.round(m/60)+' 小时前' }
-function payloadBrief(p){ if(!p)return '';
-  var q={}; var any=false;
-  for(var k in p){ if(k==='rev_after')continue; q[k]=p[k]; any=true } // rev_after 是记账噪音
-  if(!any)return '';
-  try{ var s=JSON.stringify(q); return s.length>90?s.slice(0,90)+'…':s }catch(e){ return '' } }
+/* 事件 payload 的结构化展示:已知字段中文标注为 chips,点击事件行展开完整 JSON。 */
+var EXPAND={};
+function toggleEv(seq){ EXPAND[seq]=!EXPAND[seq]; renderSidebar() }
+var PAY_LABEL={revision:'版次',checks_pass_count:'checks 过',out_of_scope_count:'越界',round:'轮次',
+  lease_until:'租约至',merge_commit:'合并',via:'途径',reason:'原因',branch:'分支',published_count:'发布数',
+  must_fix_count:'must_fix',mirrored:'镜像消息',paths:'路径',target:'对象',attempt:'尝试',
+  resumed:'续租',handoff_unstructured:'交接欠结构'};
+function payVal(k,v){
+  if(v==null)return '';
+  if(k==='lease_until'&&typeof v==='string')return hhmmss(v)||v;
+  if(k==='merge_commit'&&typeof v==='string')return v.slice(0,10);
+  if(k==='target'&&typeof v==='object')return v.task_id||v.kind||'';
+  if(k==='paths'&&typeof v==='object')return (v.allow||[]).join(', ');
+  if(typeof v==='object'){ try{ var s=JSON.stringify(v); return s.length>42?s.slice(0,42)+'…':s }catch(e){ return '' } }
+  return String(v);
+}
+function payChips(p){
+  if(!p)return '';
+  var h=''; var n=0;
+  for(var k in p){ if(k==='rev_after')continue; // 记账噪音只在展开的完整 JSON 里看
+    var val=payVal(k,p[k]); if(val==='')continue;
+    var full=typeof p[k]==='object'?JSON.stringify(p[k]):String(p[k]);
+    h+='<span class="pv">'+(PAY_LABEL[k]?'<b>'+PAY_LABEL[k]+'</b>':'')+'<i title="'+esc(k+': '+full)+'">'+esc(val)+'</i></span>';
+    n++; if(n>=4){ h+='<span class="pv"><i>… 点开看全部</i></span>'; break }
+  }
+  return h;
+}
 function selectNode(id){ selTask=id; selEdge=null; document.body.classList.add('drawer'); renderAll(); refreshDetail() }
 function selectEdge(id){ selEdge=id; document.body.classList.add('drawer'); renderAll() }
 function jumpTo(run,task){ selRun=run; selTask=task; selEdge=null; DKEY=''; document.body.classList.add('drawer'); renderAll(); refreshDetail() }
@@ -938,12 +970,16 @@ function renderSidebar(){
   for(var kB=0;kB<evs.length;kB++){ var e2=evs[kB];
     var stc=EV_STATUS[e2.event]?stOf(EV_STATUS[e2.event]).c:'var(--st-draft)';
     var actor=e2.actor&&e2.actor.id?e2.actor.id:'?';
-    var pb=payloadBrief(e2.payload);
-    th+='<div class="ev" style="--c:'+stc+'"><span class="pt"></span>'
+    var chips=payChips(e2.payload);
+    var open=!!EXPAND[e2.seq];
+    th+='<div class="ev" style="--c:'+stc+'" data-seq="'+e2.seq+'" onclick="toggleEv(this.dataset.seq)"><span class="pt"></span>'
       +'<div class="l1"><span class="nm">'+esc(EV_ZH[e2.event]||e2.event)+'</span>'
-      +'<span class="chip">'+esc(actor)+'</span></div>'
-      +'<div class="meta2 mono">#'+e2.seq+' · '+hhmmss(e2.ts||'')+'</div>'
-      +(pb?'<div class="pay">'+esc(pb)+'</div>':'')+'</div>' }
+      +'<span class="chip" title="'+esc(actor)+'">'+esc(agShort(actor))+'</span>'
+      +'<span class="chev">'+(open?'▾':'▸')+'</span></div>'
+      +'<div class="meta2 mono">#'+e2.seq+' · '+hhmmss(e2.ts||'')+(e2.claim_id?' · '+esc(e2.claim_id):'')+'</div>'
+      +(chips?'<div>'+chips+'</div>':'')
+      +(open?'<pre class="full">'+esc(JSON.stringify({event:e2.event,seq:e2.seq,ts:e2.ts,actor:e2.actor,task_id:e2.task_id,claim_id:e2.claim_id,payload:e2.payload||{}},null,2))+'</pre>':'')
+      +'</div>' }
   h+='<div class="sec"><h5>事件时间线</h5>'
     +(th?'<div class="tl">'+th+'</div>':'<div style="color:var(--mut);font-size:12px">暂无事件</div>')
     +((evd.total>evs.length)?'<div class="more">共 '+evd.total+' 条,显示最近 '+evs.length+' 条 · '
