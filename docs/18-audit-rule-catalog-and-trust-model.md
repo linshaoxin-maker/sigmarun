@@ -79,7 +79,7 @@ flowchart LR
 | 24 | `path_approval_granted` | claim | user / agent（integrator） | task_id、payload.approval_id、payload.paths、payload.granted_by | [14](14-evidence-review-verification-contract.md) |
 | 25 | `path_approval_denied`（**P2 未实装**：approve-paths 仅 grant 半边） | claim | user / agent（integrator） | task_id、payload.paths | [14](14-evidence-review-verification-contract.md) |
 | 26 | `heartbeat` | claim | agent（owner） | task_id、claim_id、payload.lease_until（按 [10](10-claim-next-lock-and-conflict-rules.md) §9 采样写入） | [04](04-command-workflows.md) |
-| 27 | `evidence_submitted` | evidence | agent（owner） | task_id、claim_id、payload.revision、payload.checks_pass_count、payload.out_of_scope_count | [04](04-command-workflows.md) / [14](14-evidence-review-verification-contract.md) |
+| 27 | `evidence_submitted` | evidence | agent（owner） | task_id、claim_id、payload.revision、payload.checks_pass_count、payload.out_of_scope_count、payload.handoff_unstructured（AUD-041 inline 判定留档） | [04](04-command-workflows.md) / [14](14-evidence-review-verification-contract.md) |
 | 28 | `evidence_invalid` | evidence | agent（owner） | task_id、payload.error_codes[]（可采样） | [14](14-evidence-review-verification-contract.md) |
 | 29 | `review_requested`（**已废弃**：review 走 D15 gate 合成，无请求事件） | review | agent（owner） | task_id | [04](04-command-workflows.md)（建议废弃并入 `evidence_submitted`，见 §8） |
 | 30 | `review_claimed` | review | agent（reviewer） | task_id、claim_id、payload.round | [04](04-command-workflows.md) / [14](14-evidence-review-verification-contract.md) |
@@ -145,9 +145,9 @@ jsonl 示例（三种 actor）：
 
 ---
 
-## 4. 规则目录主表（AUD-001 … AUD-035）
+## 4. 规则目录主表（AUD-001 … AUD-041）
 
-> **修订注（2026-07-15，D21）**：轻量 run（[26](26-lightweight-mode.md)）下 AUD-011/016/017/019 降为 **info**（文案注明豁免）——直标完成是该模式的正当形态；其余规则口径不变。severity 枚举自此为 error/warn/info。另：`lock_takeover`（#44）自整改 R1 起真实发出（接管后首事件，actor=system/lock-manager）；`task_reclaimed` payload 新增 `parked`（blocker 停靠）与 `forced`（人类强制接管）；`run_reported` payload 新增 `mode`。
+> **修订注（2026-07-15，D21）**：轻量 run（[26](26-lightweight-mode.md)）下 AUD-011/016/017/019 降为 **info**（文案注明豁免）——直标完成是该模式的正当形态；其余规则口径不变。severity 枚举自此为 error/warn/info。另：`lock_takeover`（#44）自整改 R1 起真实发出（接管后首事件，actor=system/lock-manager）；`task_reclaimed` payload 新增 `parked`（blocker 停靠）与 `forced`（人类强制接管）；`run_reported` payload 新增 `mode`。另（2026-07-25）：新增 **AUD-041 handoff_unstructured**——[14](14-evidence-review-verification-contract.md) §2.4 交接结构护栏的 audit 兜底半；`evidence_submitted` payload 同步新增 `handoff_unstructured`（inline 判定留档）。
 
 编号连续、列结构统一，按主题分六组呈现。层级取值见 §1.2；`P0-inline` 规则的"依赖事件"同时是其拒绝时的留痕参考。severity 只取 `error` / `warn`。
 
@@ -187,6 +187,7 @@ jsonl 示例（三种 actor）：
 | AUD-018 | secret_in_outputs | evidence/*/outputs/*.log、verification outputs | 输出文件命中 [24](24-security-permissions-and-data-hygiene.md) 定义的 secret 正则模式集，且未被替换为 `[REDACTED:*]`（redaction 漏网） | error | {file} 疑似含未脱敏 secret（{kind}） | 立即人工清理；修复 redaction 管道；export 前必须清零 | evidence_submitted | P1-audit |
 | AUD-019 | review_skipped_policy_check | events.jsonl、tasks/*/task.json、run.json | 存在 review_skipped 事件：对应 task.review.required=true → error（违反"更严格者胜"，D6）；否则 → warn（留痕供复盘） | warn | TASK-{t} 的 review 被 policy 跳过（{policy_source}） | 复盘确认 require_review 配置符合预期 | review_skipped | P1-audit |
 | AUD-020 | duplicate_review_claim | claims/review-claims.json | 同一 task_id 下 status=active 的 review claim 数 > 1（[14](14-evidence-review-verification-contract.md) §3.1 规则 3） | error | TASK-{t} 有 {n} 个并发 review claim | 保留先到者，其余 `review released`；核对 events | review_claimed | P0-inline |
+| AUD-041 | handoff_unstructured | evidence/TASK-ID/evidence.json、context/tasks/*.md（handoff_ref 指向文件） | handoff_ref 指向的文件存在但形状不合 [14](14-evidence-review-verification-contract.md) §2.4 启发式：trim 后 < 200 字符，或不含任何 `## ` 小节头（CommonMark 判定：≤3 空格缩进、`#` 后空格/tab；与 submit inline 警告共享 core 的 `handoffShapeProblems`，2026-07-25 增补）。文件/evidence 缺失归 AUD-011——本条只判已落盘内容的形状，**永远 warn 不 error**（内容"质量"不拒收铁律，I4） | warn | TASK-{t} 的 handoff 过短/无小节结构：{why} | owner 下轮 submit 按 [14](14-evidence-review-verification-contract.md) §2.4 结构重写 handoff；reviewer 复核交接可用性 | evidence_submitted | P0-inline |
 
 ### 4.D DAG / Context Plane（[12](12-context-plane-task-dag-message-pool-memory.md) §11 八条）
 
@@ -234,11 +235,11 @@ jsonl 示例（三种 actor）：
 |---|---|
 | `claims` | AUD-001、003、005–010、020、040 |
 | `paths` | AUD-002、004、014、031 |
-| `evidence` | AUD-011–019 |
+| `evidence` | AUD-011–019、041 |
 | `progress` | AUD-035 |
 | `memory` | AUD-036–039 |
 | `task <RUN> <TASK>` | 上述规则中按单 task 过滤的子集 + AUD-021–028 相关项 |
-| `run <RUN>` | 全部 40 条（含 AUD-029–034、036–040） |
+| `run <RUN>` | 全部 41 条（含 AUD-029–034、036–041） |
 
 ---
 

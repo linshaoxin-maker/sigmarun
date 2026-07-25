@@ -24,7 +24,7 @@ export { backupList, restoreBackup } from './backup.js';
 export type { RestoreOptions } from './backup.js';
 export type { MigrateOptions } from './migrate.js';
 export type { RunShowOptions, EventsReadOptions } from './run-query.js';
-export { submitEvidence, fileInScope, truncateOutput } from './submit.js';
+export { submitEvidence, fileInScope, handoffShapeProblems, truncateOutput } from './submit.js';
 export type { SubmitOptions } from './submit.js';
 export { integrateStart, integrateRecord, reportRun } from './integrate.js';
 export type { IntegrateStartOptions, IntegrateRecordOptions } from './integrate.js';

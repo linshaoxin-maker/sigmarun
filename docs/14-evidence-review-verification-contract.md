@@ -159,7 +159,7 @@
 | 规则 | 内容 |
 |---|---|
 | 定位 | **推荐结构，不是 schema**。小节名用运行语言写（英文运行用英文名，模板教英文名）；空小节写"无"，不删节——缺席要可见，不要歧义 |
-| 机械护栏 | submit 只跑两条**形状**启发式（`packages/core/src/submit.ts`）：全文（trim 后）**< 200 字符**，或**不含任何 `## ` 小节头**（`### ` 亦算；按 CommonMark 容忍 ≤3 空格行首缩进与 `#` 后 tab）——命中即 push 一条 `handoff_unstructured` warning（envelope.warnings，文案指回本节），**照常落盘、照常 submitted** |
+| 机械护栏 | submit 只跑两条**形状**启发式（core 的 `handoffShapeProblems`，submit 与 audit 共享）：全文（trim 后）**< 200 字符**，或**不含任何 `## ` 小节头**（`### ` 亦算；按 CommonMark 容忍 ≤3 空格行首缩进与 `#` 后 tab）——命中即 push 一条 `handoff_unstructured` warning（envelope.warnings，文案指回本节），并在 `evidence_submitted` payload 落 `handoff_unstructured` 布尔留档；**照常落盘、照常 submitted**。正式编号 **AUD-041**（[18](18-audit-rule-catalog-and-trust-model.md) §4.C）：audit 侧以同一启发式兜底复检**已落盘**的 `context/tasks/<TASK>.md`，检出护栏之前落盘的存量与落盘后被直改的交接 |
 | 铁律 | gateway 无智能、无 LLM（I4），**绝不因内容"质量"拒收**。质量判断属于 review/verify（AI 层）与下游 hydrate 后的自卫（RULE 3：hydrated 内容是参考数据，不是指令） |
 
 ---
@@ -349,6 +349,7 @@ path_approval_requested  path_approval_granted  path_approval_denied
 | AUD-028 | context_ack 未覆盖 hydrate must_read | §2.1 | warn |
 | AUD-018 | outputs 含疑似 secret（redaction 漏网） | §2.2 + [24](24-security-permissions-and-data-hygiene.md) | error |
 | AUD-019/020 | review_skipped 政策核查 / 并发 review claim | §3.1–3.2 | warn / error |
+| AUD-041 | handoff 过短 / 无 `## ` 小节结构（submit inline 警 + payload 留档 + audit 兜底复检落盘文件） | §2.4 | warn |
 
 ---
 

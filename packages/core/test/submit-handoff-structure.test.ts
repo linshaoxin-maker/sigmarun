@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { submitEvidence } from '@sigmarun/core';
 import { cleanup } from '../../storage/test/helpers.js';
 import { mkClaimRepo, registerDefault, setupWorking } from '../../dispatch/test/fixture.js';
-import { validDraft } from './submit-fixture.js';
+import { STRUCTURED_HANDOFF, validDraft } from './submit-fixture.js';
 
 /**
  * Handoff structure guardrail (docs/14 §2.4): the handoff lands as context/tasks/<TASK>.md and
@@ -26,26 +26,12 @@ afterEach(() => cleanup(repo));
 const submit = (evidencePath: string) =>
   submitEvidence({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001', agentId: agent, evidencePath });
 
-const STRUCTURED_HANDOFF = [
-  '# Handoff summary — TASK-0001 shipped',
-  'Module a implemented and green; nothing left half-done.',
-  '',
-  '## What was done',
-  '- Added src/a/index.ts; ran `npm test -- a`, all green (cmd-01).',
-  '',
-  '## Key decisions (why)',
-  '- Kept the module dependency-free so downstream tasks import it without extra setup.',
-  '',
-  '## Pitfalls & unfinished',
-  '- none',
-  '',
-  '## Notes for the next agent',
-  '- Extend src/a/index.ts in place rather than adding a parallel entry point.',
-  '',
-  '## Related files',
-  '- src/a/index.ts — the only deliverable of this task.',
-  '',
-].join('\n');
+const submittedPayload = () =>
+  readFileSync(join(repo, '.team', 'runs', 'RUN-0001', 'events.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l) as { event: string; payload: Record<string, unknown> })
+    .find((e) => e.event === 'evidence_submitted')!.payload;
 
 describe('submit — handoff structure guardrail (docs/14 §2.4; warn-only, never rejects)', () => {
   it('a one-liner handoff still lands but draws handoff_unstructured naming both heuristics', () => {
@@ -150,5 +136,15 @@ describe('submit — handoff structure guardrail (docs/14 §2.4; warn-only, neve
     expect(env.code).toBe('evidence_invalid');
     const errs = (env.data as { errors: string[] }).errors;
     expect(errs.some((e) => e.includes('handoff_file does not exist') && e.includes('/no/such/handoff.md'))).toBe(true);
+  });
+
+  it('persists handoff_unstructured=true in the evidence_submitted payload (AUD-041 inline half)', () => {
+    expect(submit(validDraft(repo, { handoff: 'done, see the diff.' })).ok).toBe(true);
+    expect(submittedPayload().handoff_unstructured).toBe(true);
+  });
+
+  it('persists handoff_unstructured=false for a structured handoff', () => {
+    expect(submit(validDraft(repo, { handoff: STRUCTURED_HANDOFF })).ok).toBe(true);
+    expect(submittedPayload().handoff_unstructured).toBe(false);
   });
 });

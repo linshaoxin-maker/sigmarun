@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { GatewayError, readJsonState, resolveTeamRoot, scanForSecrets, type ResolveOptions } from '@sigmarun/storage';
-import { collectStateRevs, failEnvelope, fileInScope, okEnvelope, pathsOverlapConservative, readEventsSafe, type Envelope } from '@sigmarun/core';
+import { collectStateRevs, failEnvelope, fileInScope, handoffShapeProblems, okEnvelope, pathsOverlapConservative, readEventsSafe, type Envelope } from '@sigmarun/core';
 import { foldLedger } from './replay.js';
 
 export interface AuditOptions extends ResolveOptions {
@@ -43,7 +43,7 @@ const ACTIVE = (c: { status: string }) => c.status === 'active';
 const TASK_CLAIM_TERMINAL = new Set(['released', 'reclaimed', 'cancelled']);
 
 /** docs/18 §4 — rules whose data planes exist today. The rest are registered skips (docs/18 §7 honesty over coverage). */
-const SKIPPED: Array<{ rule_id: string; reason: string }> = []; // all 40 catalog rules are live (docs/18 §4)
+const SKIPPED: Array<{ rule_id: string; reason: string }> = []; // all 41 catalog rules are live (docs/18 §4)
 
 type Rule = { id: string; check: (ctx: Ctx) => Finding[] };
 
@@ -775,6 +775,28 @@ const MEMORY_RULES: Rule[] = [
           finding('AUD-040', 'error', `${agent} holds ${n} active claims (cap ${cap}; M36/D17 bypass suspected).`,
             'Check label-idempotent registration; release or reclaim the surplus claims.', [agent]),
         );
+    },
+  },
+  {
+    // Audit backstop of the submit-time handoff_unstructured warning (docs/14 §2.4): same shared
+    // heuristics re-applied to the STORED context/tasks/<TASK>.md, so handoffs that predate the
+    // guardrail or were gutted on disk after landing are caught too. Missing file/evidence is
+    // AUD-011 territory; this rule only judges shape of what landed. Always warn, never error.
+    id: 'AUD-041',
+    check: (ctx) => {
+      const out: Finding[] = [];
+      for (const row of ctx.rows) {
+        const handoffRef = ctx.evidence(row.task_id)?.handoff_ref as string | undefined;
+        if (!handoffRef || !existsSync(join(ctx.runDir, handoffRef))) continue;
+        const problems = handoffShapeProblems(readFileSync(join(ctx.runDir, handoffRef), 'utf8'));
+        if (problems.length > 0) {
+          out.push(finding('AUD-041', 'warn',
+            `${row.task_id} handoff ${problems.join(' and ')} — the next agent inherits it as hydrate must_read (docs/14 §2.4).`,
+            'Owner rewrites the handoff per the docs/14 §2.4 sections on the next submit revision; reviewer double-checks the handoff is usable.',
+            [row.task_id, handoffRef]));
+        }
+      }
+      return out;
     },
   },
 ];

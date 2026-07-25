@@ -53,6 +53,19 @@ export function fileInScope(path: string, allowGlobs: string[]): boolean {
   return allowGlobs.some((g) => minimatch(path, g, { dot: true }));
 }
 
+/**
+ * Handoff shape heuristics (docs/14 §2.4) — the single source shared by the submit-time warning
+ * (inline half) and the AUD-041 audit backstop. Mechanical shape only, never content quality:
+ * the gateway has no LLM (I4). Heading detection follows CommonMark — up to 3 leading spaces,
+ * `##`+ hashes, then a space or tab. Returns the tripped heuristics as message fragments.
+ */
+export function handoffShapeProblems(content: string): string[] {
+  const problems: string[] = [];
+  if (content.trim().length < 200) problems.push('is under 200 characters');
+  if (!/^ {0,3}##+[ \t]/m.test(content)) problems.push('has no "## " section heading');
+  return problems;
+}
+
 const HEAD_LINES = 50;
 const TAIL_LINES = 200;
 const MAX_BYTES = 256 * 1024;
@@ -140,6 +153,9 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
     // Step 3: mechanical validation — collect every error, mutate nothing on failure.
     const errors: string[] = [];
     const warnings: EnvelopeWarning[] = [];
+    // AUD-041 inline half: persisted into the evidence_submitted payload so audit/dashboard can
+    // consume the submit-time verdict without re-deriving it.
+    let shapeProblems: string[] = [];
     let draft: Draft | null = null;
     try {
       draft = JSON.parse(readFileSync(opts.evidencePath, 'utf8')) as Draft;
@@ -249,14 +265,11 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
         );
       }
     } else {
-      // Handoff structure guardrail (docs/14 §2.4) — WARN-ONLY: the gateway has no LLM (I4) and
-      // never rejects on content quality. Two shape heuristics catch the classic garbage handoff
-      // (one throwaway line) while its author is still around to fix it, instead of leaving the
-      // next agent to discover it inside hydrate must_read. Heading detection follows CommonMark:
-      // up to 3 leading spaces, `##`+ hashes, then a space or tab.
-      const shapeProblems: string[] = [];
-      if (handoffContent.trim().length < 200) shapeProblems.push('is under 200 characters');
-      if (!/^ {0,3}##+[ \t]/m.test(handoffContent)) shapeProblems.push('has no "## " section heading');
+      // Handoff structure guardrail (docs/14 §2.4, AUD-041 inline half) — WARN-ONLY: the gateway
+      // has no LLM (I4) and never rejects on content quality. The shared shape heuristics catch
+      // the classic garbage handoff (one throwaway line) while its author is still around to fix
+      // it, instead of leaving the next agent to discover it inside hydrate must_read.
+      shapeProblems = handoffShapeProblems(handoffContent);
       if (shapeProblems.length > 0) {
         warnings.push({
           code: 'handoff_unstructured',
@@ -412,7 +425,7 @@ export function submitEvidence(opts: SubmitOptions): Envelope {
       run_id: opts.runId,
       task_id: opts.taskId,
       claim_id: claim.claim_id,
-      payload: { revision, checks_pass_count: passCount, out_of_scope_count: outOfScope.length },
+      payload: { revision, checks_pass_count: passCount, out_of_scope_count: outOfScope.length, handoff_unstructured: shapeProblems.length > 0 },
     });
     if (!reviewRequired) {
       // docs/14 §3.2 skip rule: every approved task still gets a review record — no audit exceptions.
