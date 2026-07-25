@@ -15,6 +15,7 @@
  * the page only renders fields, it re-implements no gateway rule.
  */
 import { createServer, type Server } from 'node:http';
+import { resolveTeamRoot } from '@sigmarun/storage';
 import { runList, statusRun, taskList, taskShow, evidenceShow, agentList, gateRecords } from '@sigmarun/watch';
 import { showGraph, listMessages } from '@sigmarun/context';
 import { okEnvelope, failEnvelope, readEvents, runShow, DEPS_SATISFIED_DEFAULT, type Envelope } from '@sigmarun/core';
@@ -59,9 +60,16 @@ export function dashboardState(opts: DashboardOptions): Envelope {
       agents: ag.ok ? ((ag.data as { agents?: unknown[] }).agents ?? []) : [],
     };
   });
+  // Top-bar honesty: which .team is this page even looking at (docs/23 ①).
+  let teamRoot: string | null = null;
+  try {
+    teamRoot = resolveTeamRoot(opts).teamRoot;
+  } catch {
+    // runList above would have failed first; keep the field null-safe regardless
+  }
   return okEnvelope({
     message: `Dashboard state: ${detail.length} run(s).`,
-    data: { generated_at: new Date().toISOString(), runs: detail },
+    data: { generated_at: new Date().toISOString(), team_root: teamRoot, runs: detail },
     startedAt,
   });
 }
@@ -557,12 +565,16 @@ function hov(id){
 function setConn(kind){ var el=document.getElementById('conn'); var t=document.getElementById('connt');
   el.className = kind===0?'':(kind===1?'lag':'down');
   t.textContent = kind===0?'2.5s 轮询':(kind===1?'滞后,重试中':'连接断开,数据可能过期') }
+var LASTTIME=''; var SEQMAX=0;   // 数据时刻 + 选中任务已见最大账本 seq(docs/23 ①)
+function setStamp(){ document.getElementById('stamp').textContent=LASTTIME+(SEQMAX?' · seq '+SEQMAX:'') }
 async function tick(){
   try{
     var env=await (await fetch('/api/state')).json();
     if(env.ok){
       misses=0; setConn(0); STATE=env.data;
-      document.getElementById('stamp').textContent=hhmmss(env.data.generated_at||'');
+      LASTTIME=hhmmss(env.data.generated_at||''); setStamp();
+      if(env.data.team_root){ var rp=document.getElementById('rootpath');
+        rp.textContent=env.data.team_root; rp.title=env.data.team_root }
       if(!selRun&&STATE.runs.length){ var pick=null;
         for(var i=0;i<STATE.runs.length;i++){ var u=STATE.runs[i].run.user_state;
           if(!u||u.state!=='closed'){ pick=STATE.runs[i]; break } }
@@ -580,7 +592,9 @@ async function refreshDetail(){
   try{
     var t=await (await fetch('/api/task?run='+encodeURIComponent(selRun)+'&task='+encodeURIComponent(selTask))).json();
     var ev=await (await fetch('/api/events?run='+encodeURIComponent(selRun)+'&task='+encodeURIComponent(selTask)+'&limit=30')).json();
-    if(t.ok){ DETAIL=t.data; DETAIL.ev=ev.ok?ev.data:{events:[],total:0} }
+    if(t.ok){ DETAIL=t.data; DETAIL.ev=ev.ok?ev.data:{events:[],total:0};
+      var evl=(DETAIL.ev.events||[]);
+      if(evl.length&&evl[evl.length-1].seq>SEQMAX){ SEQMAX=evl[evl.length-1].seq; setStamp() } }
     else DETAIL={error:t.code,message:t.message};
     var dj=JSON.stringify(DETAIL);
     if(dj!==lastDetailJson||key!==DKEY){ lastDetailJson=dj; DKEY=key; if(!selEdge) renderSidebar() }

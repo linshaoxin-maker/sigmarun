@@ -91,6 +91,7 @@ describe('dashboard v0.2.1 — richer read model behind the same read-only shell
     expect(blocks[0].satisfied).toBe(false); // upstream is ready — not past the D20 gate
     expect(Array.isArray(run.agents)).toBe(true);
     expect(run.tasks[0].attempts).toBe(0);
+    expect(env.data.team_root).toContain('.team'); // top bar names the .team it reads
   });
 
   it('/api/task bundles profile + gate records + messages; /api/events slices the ledger', async () => {
