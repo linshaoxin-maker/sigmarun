@@ -1,6 +1,6 @@
 # 23. Dashboard Information Architecture（Read-only Viewer）
 
-> 日期：2026-07-09（v0.1 草案）· 2026-07-24（v0.2 定稿：单页三栏 IA + 视觉 token + 高保真 mock）
+> 日期：2026-07-09（v0.1 草案）· 2026-07-24（v0.2 定稿：单页三栏 IA + 视觉 token + 高保真 mock）· 2026-07-25（v0.2.1：失败/重试/历史观测点 §4.5、DAG 动态交互升级 §7、侧栏 C–F 新段 §4.⑥）
 > 状态：v0.2 —— 对齐 v0.2.4 已落地的 `sigmarun dashboard`（packages/cli/src/dashboard.ts），给出下一版单页的**明确信息架构、逐区域数据字段映射、状态色 token 与实现拆解**。
 > 交付物：本文档 + [23-dashboard-mock.html](23-dashboard-mock.html)（纯静态高保真设计稿，内嵌假数据，浏览器直接打开，明暗双主题）。
 > 依据：[08](08-core-gateway-capabilities.md) §6.2 dashboard 定位（不可违背）；[15](15-run-task-state-machine-and-lifecycle.md) 状态机；[13](13-design-audit-and-next-breakdown.md) §7 P2 裁剪（DAG 边 MVP 三种）；[12](12-context-plane-task-dag-message-pool-memory.md)（DAG 与 context 是必展对象）；[17](17-cli-mcp-contract-and-error-model.md)（CLI 等价命令与 events 合同）。
@@ -94,11 +94,17 @@ runs: [                                     → ③ 需求清单(每 run 一卡)
 
 | 端点(建议) | 复用的 read-model 函数 | 供给区域 | 拉取时机 |
 |---|---|---|---|
-| `/api/task?run=&task=` | `taskShow` + `evidenceShow`(@sigmarun/watch,已存在) | ⑥ 档案(task.json 全量、claims、worktree)+ evidence 面板(revision、`required_checks_results[]` 逐项、`changed_files[]` 含 `in_scope`、summary) | 点选任务时懒加载,选中期间随 tick 刷新 |
+| `/api/task?run=&task=` | `taskShow` + `evidenceShow`(@sigmarun/watch,已存在);**扩展**:同 handler 顺读 `reviews/TASK-ID/REVIEW-*.json` 与 `verification/VERIFY-*.json`(按 `target.task_id` 过滤)、`listMessages`(@sigmarun/context,已存在,按 task 过滤) | ⑥ 档案(task.json 全量含 **previous_attempts**、claims、worktree)+ evidence 面板 + **评审轮次 + 验证记录 + 消息线程**(§4.⑥ C–F) | 点选任务时懒加载,选中期间随 tick 刷新 |
 | `/api/events?run=&task=&since=&limit=` | `readEvents`(@sigmarun/core,已存在;`--since` 即 seq 游标) | ⑥ 事件时间线;顶栏"截至 seq N" | 点选任务时懒加载 + `since` 增量 |
 | ④ agents 明细并入 `/api/state` 每 run | `agentList`(@sigmarun/watch,已存在) | ④ per-agent 卡(agent_id、label、tool、role、current_task、gate_kind、last_heartbeat_min、stale) | 随 state 轮询(文件量小) |
 
-三个函数全是既有只读导出,dashboard.ts 新增 import 不破 B1/B6;懒加载避免 state 轮询按任务数放大(runs×tasks 次文件读)。
+以上函数全是既有只读导出;reviews/verification 目录读取是**新增只读读取**(建议在 watch 加 `gateRecords(runId, taskId)` 一并返回两组文件,与 CLI `task show` 未来的 review/verify 段共库,B6),dashboard.ts 新增 import 不破 B1;懒加载避免 state 轮询按任务数放大(runs×tasks 次文件读)。
+
+关键记录形状(实现与 mock 假数据共同的合同,出处为写入端源码):
+
+- `task.previous_attempts[]`(claim-engine `applyReclaim`):`{attempt, agent_id, claim_id, last_heartbeat_at, ended_at, reclaim_reason, worktree_path?, branch?}`;worktree 同时置 `abandoned` 并把 owner 移入 `previous_owner_agent_ids`。
+- `REVIEW-<TASK>-<round>.json`(review `submitReview`):`{review_id, round, reviewer_agent_id, evidence_revision, decision: approve|request_changes|block, checklist[], findings[]{severity, message, message_ref?}, scope_check{out_of_scope_files[], verdict}, acceptance_opinion[]}`;**must_fix findings 会镜像为 `request_changes` 消息**(`message_ref` 即闭环入口)。
+- `VERIFY-NNNN.json`(verify/integrate):`{verify_id, target, verifier_agent_id, executed_at, checks[]{name, cmd, exit_code, output_ref, status}, gates, verdict: pass|fail, failures_mapped[]}`。
 
 `readEvents` 返回 `events[]: {seq, ts, event, actor:{type,id}, task_id, claim_id, payload}` + `corrupt_lines[]`(账本破损即 ledger 健康信号,直接映射为 ② 的 `ledger_broken` 同源展示)。事件名词汇 = 状态事件(core `EVENT_STATUS` 19 键:task_created→draft … task_done→done)+ 非状态事件(run_*、agent_registered、heartbeat、path_*、worktree_*、memory_*、integration_* 等);时间线全量展示,状态事件按"落点状态"着色(§8)。
 
@@ -202,7 +208,42 @@ pane 头(常驻):`run.title` + run status pill + `status.progress_pct` 大数字
 | 改动文件 | `changed_files[]`:mono 路径 + `in_scope=false` 的标「越界」琥珀角标([14](14-evidence-review-verification-contract.md) §2.3) |
 | 摘要 | `summary` 段落;`outputs[]` 文件名列表(只列名,不内嵌大日志) |
 
-**C. 事件时间线**(Temporal 语言;readEvents 按 task 过滤)
+**C. 评审轮次**(`reviews/TASK-ID/REVIEW-*-NN.json`;"失败→返工→再提交"的完整回路)
+
+| 元素 | 字段 | 展示 |
+|---|---|---|
+| 轮次卡(每轮一张,逐轮并列不覆盖) | `review_id`、`decision`、`reviewer_agent_id`、`completed_at` | decision pill:通过=绿/要求修改=红/阻塞=红;评审人 chip |
+| 版次对照 | `evidence_revision` | 「对 evidence 第 N 版」chip——回答"改完了吗":轮次数 vs 当前 evidence revision |
+| findings 列表 | `findings[]{severity, message, message_ref}` | must_fix 红标置顶,建议绿标;`message_ref` chip 链到消息(F 段/收件箱闭环) |
+| 越界裁定 | `scope_check.out_of_scope_files[]` | 「越界」标 + mono 文件列表(与 evidence `in_scope` 对照) |
+| 进行中提示 | gate claim(review-claims) | 「第 N+1 轮评审进行中 · 评审租约 <AGENT> · 剩 M 分」;submitted 态则「等第 N+1 轮认领」 |
+
+**D. 验证记录**(`verification/VERIFY-*.json` 按 `target.task_id` 过滤)
+
+| 元素 | 字段 | 展示 |
+|---|---|---|
+| verdict 卡 | `verify_id`、`verdict`、`verifier_agent_id`、`executed_at` | ✓ 通过(深绿)/ ✗ 未过(红) |
+| checks 矩阵 | `checks[]{name, exit_code, status}` | mono 命令 + exit code + pass/fail pill(与 evidence checks 同款组件) |
+| 失败映射 | `failures_mapped[]` | fail 时逐条列出「哪个验收项挂了」 |
+| 等待态 | 无记录 + task `approved` | 「◑ 等独立验证——认领命令在收件箱」(与 ② `awaiting_verify` 同源) |
+
+**E. 重试档案**(`task.previous_attempts[]`;§3.2 形状)
+
+| 元素 | 字段 | 展示 |
+|---|---|---|
+| 尝试行 | `attempt`、`agent_id`、`reclaim_reason`、`ended_at` | 「↻N <AGENT> 的租约被回收(超时清扫/手动)· 时刻」 |
+| 遗留现场 | `worktree_path`、`branch` | 遗留分支 mono + 「worktree 已弃」+ **复制清理命令**(`git worktree remove …`,B4 只复制) |
+| 联动 | — | 任务表风险列与 DAG 角标显示 ↻N(§5.5);当前 claim 行标「第 N+1 次尝试」 |
+
+**F. 消息线程**(`context/messages.jsonl` 按 task 过滤;`listMessages`)
+
+| 元素 | 字段 | 展示 |
+|---|---|---|
+| 消息卡 | `message_id`、`type`、`from_agent_id`、`body`、`in_reply_to` | 左缘色条按 type:blocker/request_changes=红、question=琥珀、answer/handoff=绿;body 两行折叠 |
+| 未答状态 | answer 是否存在(与 needs_user 同判定) | 「未答 · 挂了 N 小时」红字;已答则绿「已答」并可展开 answer |
+| 闭环 | — | C 段 must_fix 的 `message_ref`、② 收件箱条目、本段消息卡三处同一 `message_id` 互认 |
+
+**G. 事件时间线**(Temporal 语言;readEvents 按 task 过滤)
 
 | 元素 | 字段 | 展示 |
 |---|---|---|
@@ -212,7 +253,32 @@ pane 头(常驻):`run.title` + run status pill + `status.progress_pct` 大数字
 | 断层提示 | `corrupt_lines[]` 非空 | 时间线顶部红条「账本有 N 行不可读」联动 ② `ledger_broken` |
 | 查看更多 | `total > shown` | 「共 N 条,复制 `sigmarun events RUN --task=T --limit=0`」(复制,不代跑) |
 
-CLI 等价:`sigmarun task show / evidence show / events`。
+CLI 等价:`sigmarun task show / evidence show / events / msg list`(reviews/verification 文件读取待 §13 S4 落入 `task show`)。
+
+## 4.5 失败、重试与历史的观测点(v0.2.1 增补)
+
+回答两类此前无处安放的问题:**"这个任务翻过几次车、为什么"** 与 **"完成的旧任务堆在那怎么办"**。
+
+失败/重试回路的四个事实源与其表面:
+
+| 事实 | 源 | 表面 |
+|---|---|---|
+| 被回收/放弃的尝试 | `task.previous_attempts[]` | DAG 角标与任务表风险列 ↻N;侧栏 E 段;档案 claim 行「第 N+1 次尝试」 |
+| 评审打回 | `REVIEW-*` `decision=request_changes` + must_fix | 侧栏 C 段逐轮卡;状态 pill「待返工」;must_fix→消息闭环 |
+| 验证失败 | `VERIFY-*` `verdict=fail` + `failures_mapped` | 侧栏 D 段;时间线 `verification_failed` 红点 |
+| 全部过程事实 | events 账本(`task_reclaimed`、`changes_requested`、`evidence_invalid`…) | 侧栏 G 时间线(每次失败都有 seq 可指认) |
+
+多风险汇聚:节点角标一个位置显示**最高 severity 图标,多条时显示计数**(hover 列全);任务表风险列并排展示(`⏱ 12m ↻1`)。
+
+历史与"删除"的诚实边界:**模型里没有删除**——账本 append-only,任务终态只有 `done/cancelled`,run 终态 `reported/archived`;任何"清理"都不毁史实。dashboard 相应地只做**收纳与转移**,不做移除:
+
+| 需求 | 观测/交互(全只读) |
+|---|---|
+| DAG 里完成节点碍眼 | ⑤ 「折叠完成组」开关:`done/integrated/cancelled` 收进一个虚线聚合节点(边去重重定向,点击展开);>50 节点时默认折叠(原演进项提前为手动开关) |
+| 任务表历史行堆积 | 「隐藏已收尾」过滤 chip,计数行注明「N/M 项(已收尾折叠——历史不删除,账本可回放)」 |
+| 已收尾 run 占左栏 | closed run 排序沉底;数量多时折叠「历史需求」分组(演进) |
+| 遗留 worktree/branch | 侧栏 E 段列 abandoned 现场 + 复制 `git worktree remove` 命令;不代执行(N5) |
+| 留档与归档 | ② 收件箱的 `ready_to_report`→`sigmarun report`;export/archive 命令属 §10 复制允许清单 |
 
 ---
 
@@ -254,9 +320,14 @@ CLI 等价:`sigmarun task show / evidence show / events`。
 | `blocks` 边 | 实线 1.5px + 箭头。**未满足**(上游非 `done`,与 claim-next 依赖闸门同谓词,应从 core 导出复用而非前端复刻,B6):琥珀色 + 边中点「等上游」微标——它是「为什么没人领」的可视答案。已满足:中性灰 |
 | `produces_context_for` 边 | 短划线(dash 6-4)紫灰;边中点 refs 计数徽标(有 `context_refs` 时) |
 | `soft_depends_on` 边 | 点线(dash 2-4)低对比;不参与分层 |
-| 图例 | pane 头右侧常驻三种边样例(线型即语义,不靠色相区分——CVD 安全) |
-| 风险角标 | `status.risks[]` 按 task_id 落到节点右上:⏱ stale_lease、⛔ blocked/blocker;多风险取最高 severity + 计数 |
-| 交互 | 点击=选中联动 ⑥;hover 提示(title/owner/状态);无拖拽、无编辑(B4) |
+| 图例 | pane 头右侧常驻三种边样例(线型即语义,不靠色相区分——CVD 安全)+「点节点看任务,点边看关系」提示 +「折叠完成组」开关 |
+| 风险角标 | `status.risks[]` + `previous_attempts` 折算,落到节点右上:⛔ blocker > ⏱ stale_lease > ↻ 重试;**多条时显示计数**,hover 列全明细 |
+| **节点点击** | 选中联动 ⑥ 任务详情;与边选中互斥(v0.2.1) |
+| **边点击** | 每条边有 11px 透明命中层;点击 → ⑥ 渲染**关系卡**:kind、from→to 端点 chip(可跳选)、blocks 的闸门判定文案(已满足/未满足及上游当前状态)、`produces_context_for` 的 refs 逐行清单 + hydrate 说明;选中边加粗高亮(v0.2.1) |
+| **hover 邻接高亮** | 悬停节点时非邻接节点与边淡出(opacity .18),只操作 class 不重渲染——大图上"看清一条链"的主要手段(v0.2.1) |
+| **working 脉动** | `claimed/working` 节点描边 2.5s 呼吸动画,与轮询节拍一致,传达"活着"(v0.2.1) |
+| **完成组折叠** | `done/integrated/cancelled` 收进虚线聚合节点「已收尾组 · 点击展开 N 个」;出边按 `kind→to` 去重重定向,来自聚合的 blocks 边视为已满足;refs 徽标随边保留;选中的边若被折叠则清选(§4.5) |
+| 交互边界 | 以上全部只读:无拖拽、无编辑、无布局持久化(B3/B4) |
 | CLI 等价 | `sigmarun graph show <RUN>` |
 
 ---
@@ -337,8 +408,8 @@ CLI 等价:`sigmarun task show / evidence show / events`。
 [23-dashboard-mock.html](23-dashboard-mock.html):纯静态单文件,零依赖零网络,浏览器直接打开。
 
 - 假数据内嵌为 `MOCK` 对象,**字段名与 §3 的真实 envelope 完全一致**(runs[].run/status/tasks/graph、needs_user、agents、events、evidence)——它同时是前端渲染层的合同样本。
-- 场景:3 个 run(完整 run 选中态 · 轻量 run 进行中 · 已收尾 run),10 节点 DAG 覆盖全部 8 语义族与三种边(含未满足 blocks 边、refs 计数)、4 条 needs-you(4 种 severity)、4 agent 卡(含 stale)、TASK-0004 全侧栏(checks 矩阵含越界文件、9 条事件时间线)。
-- 可交互部分:明暗主题切换、收件箱开合、DAG/任务表切换、节点/表行/依赖 chip 点选联动侧栏、复制按钮;其余静态。
+- 场景:3 个 run(完整 run 选中态 · 轻量 run 进行中 · 已收尾 run),10 节点 DAG 覆盖全部 8 语义族与三种边(含未满足 blocks 边、refs 计数)、4 条 needs-you(4 种 severity)、4 agent 卡(含 stale)。侧栏故事覆盖 §4.⑥ 全部 A–G 段:TASK-0004(两轮评审:第 1 轮 request_changes 含 2 条 must_fix→message_ref、第 2 轮进行中;evidence 第 2 版含越界文件)、TASK-0005(previous_attempts 重试档案 + 遗留 worktree 清理命令 + 租约超时,角标计数 2)、TASK-0006(blocker 消息线程未答)、TASK-0002(完整收尾链:评审通过 + VERIFY-0002 验证卡)、TASK-0003(验证 pending 态)。
+- 可交互部分:明暗主题切换、收件箱开合、DAG/任务表切换、节点/表行/依赖 chip 点选联动侧栏、**边点击→关系卡(闸门判定/refs 清单)、节点 hover 邻接高亮、working 节点脉动、完成组折叠(聚合节点可展开)、任务表「隐藏已收尾」过滤**、复制按钮;其余静态。
 - 不接真数据、不改 dashboard.ts —— 仅设计稿。
 
 ---
@@ -351,9 +422,9 @@ CLI 等价:`sigmarun task show / evidence show / events`。
 |---|---|---|---|
 | S1 布局+token | `PAGE` 的 `<style>` 全量重写;`COLOR` 常量 → §8 双主题 token 表(status/user_state/severity 三张映射 + data-theme 切换) | 三栏网格、顶栏、卡片/pill/chip 基础组件样式;**采纳 §8.1 的两处色值修订** | 纯 CSS+常量,~200 行,无逻辑风险 |
 | S2 左栏+收件箱 | `renderRuns` 重写为色带卡片(user_state+堆叠微条);新增 `renderInbox`(跨 run 拼 `needs_user`)+顶栏三态刷新指示 | 全部消费现有 `/api/state`,零后端改动 | ~120 行前端 |
-| S3 DAG 升级 | `drawDag` 重写:分层保留,节点改 tint+描边+字形+风险角标+点选;边按 kind 三样式+未满足判定 | 后端:core 导出「blocks 满足」谓词供复用(B6,替代前端 `from.status!=='done'` 硬编码);其余零后端 | ~150 行 SVG 前端 + core 一个纯函数导出 |
-| S4 侧栏+新端点 | server 加 `/api/task`、`/api/events` 两个 handler(直调 `taskShow`/`evidenceShow`/`readEvents`);前端新增 `renderSidebar`(档案/checks 矩阵/时间线)+选中态管理+懒加载 | 唯一动后端的片;三个函数均已存在且只读,handler 各 ~10 行 | ~180 行前端 + ~25 行 server |
-| S5 表格+agents+打磨 | 任务表 tab(风险列/依赖 chip)、`agentList` 并入 state 聚合与 ④ 卡片、复制按钮、空态/断连态、窄屏抽屉退化 | `dashboardState` 加一个 `agents` 字段(一行 join) | ~120 行 |
+| S3 DAG 升级 | `drawDag` 重写:分层保留,节点改 tint+描边+字形+风险角标(多条计数)+点选;边按 kind 三样式+未满足判定+**11px 命中层可点**;**hover 邻接淡出、working 脉动、完成组折叠(聚合节点+边去重重定向)**(§7 v0.2.1 行) | 后端:core 导出「blocks 满足」谓词供复用(B6,替代前端 `from.status!=='done'` 硬编码);其余零后端 | ~220 行 SVG 前端 + core 一个纯函数导出 |
+| S4 侧栏+新端点 | server 加 `/api/task`、`/api/events` 两个 handler;`/api/task` 聚合 `taskShow`+`evidenceShow`+**新增只读 `gateRecords`(reviews/verification 目录)**+`listMessages`;前端 `renderSidebar` A–G 七段(档案/evidence/评审轮次/验证/重试档案/消息/时间线)+**边关系卡**+选中态管理+懒加载 | 动后端最多的片;除 gateRecords 外均为既有只读函数,handler 各 ~10 行 | ~320 行前端 + ~45 行 server/watch |
+| S5 表格+agents+打磨 | 任务表 tab(风险列含 ↻ 重试角标/依赖 chip/**「隐藏已收尾」过滤**)、`agentList` 并入 state 聚合与 ④ 卡片、复制按钮、空态/断连态、窄屏抽屉退化 | `dashboardState` 加一个 `agents` 字段(一行 join) | ~140 行 |
 
 验收基线(每片交付都跑):架构测试(不 import 写 primitive)不红;`/api/state` 合同不破坏既有 `--once`/`--json` 消费者;`.team/` 前后哈希不变(v0.1 §10 零写验证);mock 与实现的视觉差异 ≤ 主题 token 内的舍入。
 

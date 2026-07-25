@@ -162,7 +162,16 @@ h4{margin:2px 2px 8px;font-size:11px;color:var(--mut);font-weight:650;text-trans
 .node .nti{font-size:11px;fill:var(--ink2);font-family:ui-sans-serif,system-ui,"PingFang SC",sans-serif}
 .node .now{font-size:9.5px;fill:var(--mut)}
 .node.cancel .nti{text-decoration:line-through}
+.node.working rect.bx{animation:npulse 2.5s ease-in-out infinite}
+@keyframes npulse{0%,100%{stroke-opacity:1}50%{stroke-opacity:.35}}
+.fade{opacity:.18;transition:opacity .15s}
+g.edge{cursor:pointer}
+g.edge.esel path.vis{stroke-width:2.6}
 .rk{font-size:10px}
+.lgchip{font-size:11px;color:var(--ink2);border:1px solid var(--line);border-radius:99px;
+  padding:2px 10px;margin-left:auto}
+.lgchip.on{color:var(--acc);border-color:var(--acc);background:var(--acc-tint)}
+.lgchip+.lgchip{margin-left:6px}
 /* 任务表 */
 #tbl{display:none;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 #tbl table{width:100%;border-collapse:collapse;font-size:12px}
@@ -204,6 +213,28 @@ h4{margin:2px 2px 8px;font-size:11px;color:var(--mut);font-weight:650;text-trans
 .oob{font-size:9.5px;color:var(--st-ready);border:1px solid color-mix(in srgb,var(--st-ready) 50%,transparent);
   border-radius:4px;padding:0 4px;flex:none}
 .sum{font-size:12px;color:var(--ink2);margin-top:6px}
+/* 评审轮次 / 验证 / 重试 / 消息 */
+.rev{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin:6px 0;font-size:12px}
+.rev .l1{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.rev .rid{font-weight:650}
+.rev .when{color:var(--mut);font-size:10.5px;margin-left:auto}
+.find{display:flex;gap:6px;align-items:baseline;margin-top:5px;font-size:11.5px;color:var(--ink2)}
+.find .mf{flex:none;font-size:9.5px;font-weight:700;color:var(--st-alert);
+  border:1px solid color-mix(in srgb,var(--st-alert) 50%,transparent);border-radius:4px;padding:0 4px}
+.find .ok{color:var(--st-approved);border-color:color-mix(in srgb,var(--st-approved) 50%,transparent)}
+.att{display:flex;gap:8px;align-items:baseline;font-size:11.5px;color:var(--ink2);margin:5px 0}
+.att .no{flex:none;font-weight:700;color:var(--st-ready)}
+.msgc{border-left:3px solid var(--c);background:color-mix(in srgb,var(--c) 7%,transparent);
+  border-radius:0 8px 8px 0;padding:7px 10px;margin:6px 0;font-size:12px}
+.msgc .l1{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:3px}
+.msgc .ty2{font-weight:650;color:var(--c);font-size:11.5px}
+.msgc .bd2{color:var(--ink2)}
+/* 边详情卡 */
+.edgehead{padding:12px 14px;border-bottom:1px solid var(--line)}
+.edgehead .l1{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.earrow{color:var(--mut);font-size:14px}
+.refline{display:flex;gap:6px;align-items:center;font-size:11px;padding:2px 0;color:var(--ink2)}
+.refline code{font-family:ui-monospace,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 时间线 */
 .tl{position:relative;margin-left:4px}
 .tl::before{content:"";position:absolute;left:5px;top:8px;bottom:8px;width:2px;background:var(--line)}
@@ -259,9 +290,15 @@ h4{margin:2px 2px 8px;font-size:11px;color:var(--mut);font-weight:650;text-trans
       <span style="color:var(--st-ready)"><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--st-ready)" stroke-width="1.6"/></svg> blocks·未满足</span>
       <span><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--st-review)" stroke-width="1.6" stroke-dasharray="6 4"/></svg> 产出 context</span>
       <span><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--edge)" stroke-width="1.6" stroke-dasharray="2 4"/></svg> 软依赖</span>
+      <span style="color:var(--mut)">· 点节点看任务,点边看关系</span>
+      <button class="lgchip" id="foldChip" onclick="collapseDone=!collapseDone;renderAll()">折叠完成组</button>
     </div>
     <div id="dagwrap"><svg id="dag"></svg></div>
     <div id="tbl">
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line)">
+        <span style="font-size:11px;color:var(--mut)" id="tblcount"></span>
+        <button class="lgchip" id="hideChip" onclick="hideClosed=!hideClosed;renderAll()">隐藏已收尾</button>
+      </div>
       <table>
         <thead><tr><th>ID</th><th>标题</th><th>类型</th><th>状态</th><th>owner</th><th>依赖</th><th>风险</th></tr></thead>
         <tbody id="tbody"></tbody>
@@ -319,18 +356,20 @@ const MOCK = {
       graph:{
         nodes:'SAME_AS_TASKS',
         edges:[
-          { from:'TASK-0001', to:'TASK-0002', kind:'blocks', required:true },
-          { from:'TASK-0001', to:'TASK-0003', kind:'blocks', required:true },
-          { from:'TASK-0002', to:'TASK-0004', kind:'blocks', required:true },
-          { from:'TASK-0002', to:'TASK-0005', kind:'blocks', required:true },
-          { from:'TASK-0003', to:'TASK-0006', kind:'blocks', required:true },
-          { from:'TASK-0002', to:'TASK-0007', kind:'blocks', required:true },
-          { from:'TASK-0004', to:'TASK-0008', kind:'blocks', required:true },
-          { from:'TASK-0005', to:'TASK-0008', kind:'blocks', required:true },
-          { from:'TASK-0008', to:'TASK-0009', kind:'blocks', required:true },
-          { from:'TASK-0001', to:'TASK-0004', kind:'produces_context_for', refs:3 },
-          { from:'TASK-0004', to:'TASK-0009', kind:'produces_context_for', refs:2 },
-          { from:'TASK-0004', to:'TASK-0007', kind:'soft_depends_on' }
+          { edge_id:'EDGE-0001', from:'TASK-0001', to:'TASK-0002', kind:'blocks', required:true },
+          { edge_id:'EDGE-0002', from:'TASK-0001', to:'TASK-0003', kind:'blocks', required:true },
+          { edge_id:'EDGE-0003', from:'TASK-0002', to:'TASK-0004', kind:'blocks', required:true },
+          { edge_id:'EDGE-0004', from:'TASK-0002', to:'TASK-0005', kind:'blocks', required:true },
+          { edge_id:'EDGE-0005', from:'TASK-0003', to:'TASK-0006', kind:'blocks', required:true },
+          { edge_id:'EDGE-0006', from:'TASK-0002', to:'TASK-0007', kind:'blocks', required:true },
+          { edge_id:'EDGE-0007', from:'TASK-0004', to:'TASK-0008', kind:'blocks', required:true },
+          { edge_id:'EDGE-0008', from:'TASK-0005', to:'TASK-0008', kind:'blocks', required:true },
+          { edge_id:'EDGE-0009', from:'TASK-0008', to:'TASK-0009', kind:'blocks', required:true },
+          { edge_id:'EDGE-0010', from:'TASK-0001', to:'TASK-0004', kind:'produces_context_for', refs:3,
+            refs_list:['evidence/TASK-0001/evidence.json#summary','context/tasks/TASK-0001.md#schema-v2 字段表','docs/14-evidence-review-verification-contract.md#校验规则'] },
+          { edge_id:'EDGE-0011', from:'TASK-0004', to:'TASK-0009', kind:'produces_context_for', refs:2,
+            refs_list:['evidence/TASK-0004/evidence.json#summary','context/tasks/TASK-0004.md#错误码映射'] },
+          { edge_id:'EDGE-0012', from:'TASK-0004', to:'TASK-0007', kind:'soft_depends_on' }
         ]
       },
       agents:[
@@ -370,6 +409,16 @@ const DETAIL = {
       paths:{ allow:['packages/core/**','docs/14-evidence-review-verification-contract.md'], requires_approval:[] },
       weight:3, previous_attempts:[] },
     claim:{ owner:'AG-02', line:'claim CLM-0042 · 已提交待评审', gate:'评审租约 AG-03 · 剩 18 分' },
+    reviews:[
+      { review_id:'REVIEW-0004-01', round:1, decision:'request_changes', reviewer_agent_id:'AG-03',
+        evidence_revision:1, completed_at:'11:18',
+        findings:[
+          { severity:'must_fix', message:'错误码命名未对齐 docs/17 错误模型', message_ref:'MSG-0018' },
+          { severity:'must_fix', message:'cli.ts 越界改动未在 deviations 声明', message_ref:'MSG-0019' },
+          { severity:'suggestion', message:'校验可拆 schema 层与业务层,便于 audit 复用', message_ref:null }
+        ],
+        scope_check:{ out_of_scope_files:['packages/cli/src/cli.ts'], verdict:'warn' } }
+    ],
     evidence:{ revision:2, history:1, summary:'校验层重写为 schema 分层校验;第 1 版评审提出 2 处 must_fix(错误码命名、越界改动说明),第 2 版已回应。',
       checks:[
         { name:'pnpm vitest run', status:'pass' },
@@ -403,8 +452,12 @@ const DETAIL = {
   'TASK-0005': {
     task:{ goal:'把 audit 的 evidence 规则(AUD-014/015/031)对齐 schema v2 字段名与 in_scope 判定。',
       acceptance:['audit 三条规则用 v2 字段','回放测试通过'],
-      paths:{ allow:['packages/audit/**'], requires_approval:[] }, weight:2, previous_attempts:[] },
-    claim:{ owner:'AG-01', line:'claim CLM-0044 · active · 租约已超 12 分钟', gate:null },
+      paths:{ allow:['packages/audit/**'], requires_approval:[] }, weight:2,
+      previous_attempts:[
+        { attempt:1, agent_id:'AG-04', claim_id:'CLM-0031', reclaim_reason:'lease_expired_sweep',
+          ended_at:'07-23 18:42', worktree_path:'.team-worktrees/TASK-0005-ag04', branch:'task/TASK-0005-attempt1' }
+      ] },
+    claim:{ owner:'AG-01', line:'claim CLM-0044 · active · 第 2 次尝试 · 租约已超 12 分钟', gate:null },
     evidence:null,
     events:[
       { seq:206, ts:'11:55:40', event:'heartbeat',    actor:'AG-01', pay:'' },
@@ -420,6 +473,10 @@ const DETAIL = {
       acceptance:['status/task show 两处输出对齐','快照测试更新'],
       paths:{ allow:['packages/cli/**'], requires_approval:[] }, weight:2, previous_attempts:[] },
     claim:{ owner:'AG-04', line:'claim CLM-0045 · active(阻塞冻结,租约不计时)', gate:null },
+    messages:[
+      { message_id:'MSG-0021', type:'blocker', from:'AG-04',
+        body:'CLI 表格输出与 docs/17 §1 的列序冲突 —— 沿用旧列序还是对齐新表?', status:'open', age:'4 小时' }
+    ],
     evidence:null,
     events:[
       { seq:196, ts:'11:47:02', event:'task_blocked',  actor:'AG-04', pay:'MSG-0021 列序冲突待裁决' },
@@ -435,6 +492,12 @@ const DETAIL = {
       acceptance:['执行器单测','audit 可消费结果结构'],
       paths:{ allow:['packages/core/**'], requires_approval:[] }, weight:3, previous_attempts:[] },
     claim:{ owner:'AG-02', line:'claim CLM-0038 · completed', gate:'等独立验证(见收件箱)' },
+    reviews:[
+      { review_id:'REVIEW-0003-01', round:1, decision:'approve', reviewer_agent_id:'AG-03',
+        evidence_revision:1, completed_at:'11:40', findings:[],
+        scope_check:{ out_of_scope_files:[], verdict:'pass' } }
+    ],
+    verify:'pending',
     evidence:{ revision:1, history:0, summary:'执行器抽象完成,checks 结果结构化为 required_checks_results[]。',
       checks:[
         { name:'pnpm vitest run', status:'pass' },
@@ -451,6 +514,45 @@ const DETAIL = {
       { seq:168, ts:'10:35:44', event:'evidence_submitted', actor:'AG-02', pay:'revision 1 · checks 3/3 pass' },
       { seq:139, ts:'10:02:11', event:'task_started',       actor:'AG-02', pay:'' },
       { seq:138, ts:'10:01:58', event:'task_claimed',       actor:'AG-02', pay:'lease 30 min' }
+    ],
+    total:12
+  },
+  'TASK-0002': {
+    task:{ goal:'读路径全部切到 schema v2,旧 v1 evidence 保持可读。',
+      acceptance:['读路径单测覆盖 v1/v2 双版本','watch/audit 消费不变'],
+      paths:{ allow:['packages/core/**'], requires_approval:[] }, weight:3, previous_attempts:[] },
+    claim:{ owner:'AG-01', line:'claim CLM-0029 · completed', gate:null },
+    reviews:[
+      { review_id:'REVIEW-0002-01', round:1, decision:'approve', reviewer_agent_id:'AG-03',
+        evidence_revision:1, completed_at:'09:55', findings:[],
+        scope_check:{ out_of_scope_files:[], verdict:'pass' } }
+    ],
+    verify:{ verify_id:'VERIFY-0002', verdict:'pass', verifier_agent_id:'AG-03', executed_at:'10:12:40',
+      checks:[
+        { name:'pnpm vitest run', exit_code:0, status:'pass' },
+        { name:'pnpm tsc --noEmit', exit_code:0, status:'pass' }
+      ],
+      failures_mapped:[] },
+    evidence:{ revision:1, history:0, summary:'读路径迁移完成,v1 兼容读通过回放测试。',
+      checks:[
+        { name:'pnpm vitest run', status:'pass' },
+        { name:'pnpm tsc --noEmit', status:'pass' },
+        { name:'pnpm test:arch', status:'pass' }
+      ],
+      changed_files:[
+        { path:'packages/core/src/read.ts', in_scope:true },
+        { path:'packages/core/src/compat-v1.ts', in_scope:true },
+        { path:'packages/core/test/read.test.ts', in_scope:true }
+      ] },
+    events:[
+      { seq:158, ts:'10:14:02', event:'task_done',            actor:'AG-01', pay:'' },
+      { seq:156, ts:'10:12:40', event:'verification_passed',  actor:'AG-03', pay:'VERIFY-0002 · 2/2 checks' },
+      { seq:144, ts:'09:55:19', event:'review_approved',      actor:'AG-03', pay:'REVIEW-0002-01 · approve' },
+      { seq:137, ts:'09:50:02', event:'review_claimed',       actor:'AG-03', pay:'' },
+      { seq:131, ts:'09:44:27', event:'evidence_submitted',   actor:'AG-01', pay:'revision 1 · checks 3/3 pass' },
+      { seq:115, ts:'09:15:44', event:'task_started',         actor:'AG-01', pay:'' },
+      { seq:114, ts:'09:15:31', event:'task_claimed',         actor:'AG-01', pay:'lease 30 min' },
+      { seq:108, ts:'09:10:08', event:'task_published',       actor:'user',  pay:'' }
     ],
     total:12
   }
@@ -471,8 +573,15 @@ const ST = {
   integrated:{c:'var(--st-done)',     g:'✓',  zh:'已集成' },
   done:     { c:'var(--st-done)',     g:'✓',  zh:'完成' },
   cancelled:{ c:'var(--st-cancel)',   g:'×',  zh:'已取消' },
-  unknown:  { c:'var(--st-draft)',    g:'?',  zh:'未知' }
+  unknown:  { c:'var(--st-draft)',    g:'?',  zh:'未知' },
+  agg:      { c:'var(--st-done)',     g:'✓',  zh:'已收尾' }
 };
+const EDGE_ZH = {
+  blocks: { zh:'硬依赖 blocks', note:'上游 done 前下游不可领取(与 claim-next 闸门同谓词)' },
+  produces_context_for: { zh:'产出 context', note:'上游产出物是下游的 must_read;hydrate 时按 refs 注入' },
+  soft_depends_on: { zh:'软依赖', note:'只提示阅读顺序,不参与领取闸门,不影响分层' }
+};
+const DECISION_ZH = { approve:['通过','var(--st-approved)'], request_changes:['要求修改','var(--st-alert)'], block:['阻塞','var(--st-alert)'] };
 const USTATE = {
   needs_you:        { c:'var(--st-alert)',    zh:'等你处理' },
   awaiting_publish: { c:'var(--st-ready)',    zh:'待发布' },
@@ -524,10 +633,28 @@ const TOOL_SHORT = { 'claude-code':'CC', 'codex':'CX' };
 /* ================= 状态 ================= */
 let selRun = 'RUN-0007';
 let selTask = 'TASK-0004';
+let selEdge = null;          // 与 selTask 互斥:选边看关系,选节点看任务
 let tab = 'dag';
+let collapseDone = false;    // DAG 完成组折叠
+let hideClosed = false;      // 任务表隐藏已收尾
+const FOLD = new Set(['done','integrated','cancelled']);
+let LAST_DAG = { nodes:[], edges:[] };   // 折叠后的展示图,hover 邻接用
 
 const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const curRun = () => MOCK.runs.find(r => r.run.run_id === selRun);
+function selectNode(id){ selTask = id; selEdge = null; renderAll(); }
+function selectEdge(id){ selEdge = id; renderAll(); }
+/* hover 邻接高亮:非邻接的节点与边淡出(只操作 class,不重渲染) */
+function hov(id){
+  const svg = document.getElementById('dag');
+  if (!id){ svg.querySelectorAll('.fade').forEach(e => e.classList.remove('fade')); return; }
+  const keep = new Set([id]);
+  LAST_DAG.edges.forEach((e,i) => {
+    if (e.from === id || e.to === id){ keep.add(e.from); keep.add(e.to); keep.add(e.edge_id || 'E'+i); }
+  });
+  svg.querySelectorAll('g.node').forEach(g => g.classList.toggle('fade', !keep.has(g.dataset.nid)));
+  svg.querySelectorAll('g.edge').forEach(g => g.classList.toggle('fade', !keep.has(g.dataset.eid)));
+}
 
 /* ================= ② 收件箱 ================= */
 function renderInbox(){
@@ -554,7 +681,7 @@ function renderInbox(){
 }
 function toggleInbox(){ document.getElementById('inbox').classList.toggle('open'); }
 function jumpTo(run, task){
-  selRun = run; selTask = task;
+  selRun = run; selTask = task; selEdge = null;
   renderAll();
 }
 
@@ -628,11 +755,28 @@ function renderPane(){
 const NW = 142, NH = 52, HG = 32, VG = 16, PAD = 16;
 function renderDag(){
   const r = curRun();
-  const nodes = r.graph.nodes || [], edges = r.graph.edges || [];
+  document.getElementById('foldChip')?.classList.toggle('on', collapseDone);
+  let nodes = (r.graph.nodes || []).slice(), edges = (r.graph.edges || []).slice();
+  /* 完成组折叠:done/integrated/cancelled 收进一个聚合节点(历史不删除,只收纳) */
+  if (collapseDone && nodes.some(n => FOLD.has(n.status))){
+    const folded = nodes.filter(n => FOLD.has(n.status));
+    const fid = new Set(folded.map(n => n.task_id));
+    nodes = nodes.filter(n => !fid.has(n.task_id));
+    nodes.unshift({ task_id:'__agg', title:`点击展开 ${folded.length} 个`, status:'agg' });
+    const seen = new Set();
+    edges = edges.flatMap(e => {
+      const from = fid.has(e.from) ? '__agg' : e.from;
+      if (fid.has(e.to)) return [];
+      if (from === '__agg'){ const k = e.kind + '>' + e.to; if (seen.has(k)) return []; seen.add(k); }
+      return [{ ...e, from }];
+    });
+    if (selEdge && !edges.some(e => e.edge_id === selEdge)) selEdge = null;
+  }
   const svg = document.getElementById('dag');
   if (!nodes.length){ svg.setAttribute('height', 60);
     svg.innerHTML = '<text x="16" y="34" fill="var(--mut)" font-size="12">此需求没有任务图(轻量模式或已收尾)</text>'; return; }
-  const statusOf = {}; nodes.forEach(n => statusOf[n.task_id] = n.status);
+  const statusOf = {}; (r.graph.nodes || []).forEach(n => statusOf[n.task_id] = n.status);
+  LAST_DAG = { nodes, edges };
   /* 分层:只按 blocks 边 */
   const depth = {}; nodes.forEach(n => depth[n.task_id] = 0);
   const be = edges.filter(e => e.kind === 'blocks');
@@ -657,49 +801,65 @@ function renderDag(){
   </defs>`;
   /* 边:blocks(实线;未满足=琥珀+微标) / produces_context_for(短划+refs 徽标) / soft(点线) */
   const met = st => st === 'done' || st === 'integrated';
-  edges.forEach(e => {
+  edges.forEach((e, i) => {
     const a = pos[e.from], b = pos[e.to]; if (!a || !b) return;
+    const eid = e.edge_id || 'E' + i;
     const x1 = a.x + NW, y1 = a.y + NH/2, x2 = b.x, y2 = b.y + NH/2;
     const mx = (x1+x2)/2, my = (y1+y2)/2;
     const d = `M${x1} ${y1} C${x1+HG*.55} ${y1},${x2-HG*.55} ${y2},${x2} ${y2}`;
+    let vis = '';
     if (e.kind === 'blocks'){
-      const ok = met(statusOf[e.from]);
-      s += `<path d="${d}" fill="none" stroke="${ok?'var(--edge)':'var(--st-ready)'}" stroke-width="1.6"
+      const ok = e.from === '__agg' ? true : met(statusOf[e.from]);
+      vis = `<path class="vis" d="${d}" fill="none" stroke="${ok?'var(--edge)':'var(--st-ready)'}" stroke-width="1.6"
               marker-end="url(#${ok?'ar':'arw'})"${ok?'':' opacity="0.95"'}/>`;
-      if (!ok) s += `<g><rect x="${mx-19}" y="${my-8}" width="38" height="15" rx="7.5"
+      if (!ok) vis += `<rect x="${mx-19}" y="${my-8}" width="38" height="15" rx="7.5"
               fill="color-mix(in srgb,var(--st-ready) 14%,var(--card))" stroke="var(--st-ready)" stroke-width="0.8"/>
-            <text x="${mx}" y="${my+3}" text-anchor="middle" font-size="9" fill="var(--st-ready)">等上游</text></g>`;
+            <text x="${mx}" y="${my+3}" text-anchor="middle" font-size="9" fill="var(--st-ready)">等上游</text>`;
     } else if (e.kind === 'produces_context_for'){
-      s += `<path d="${d}" fill="none" stroke="var(--st-review)" stroke-width="1.4" stroke-dasharray="6 4" opacity="0.75"/>`;
-      if (e.refs) s += `<g><circle cx="${mx}" cy="${my}" r="8" fill="color-mix(in srgb,var(--st-review) 15%,var(--card))"
+      vis = `<path class="vis" d="${d}" fill="none" stroke="var(--st-review)" stroke-width="1.4" stroke-dasharray="6 4" opacity="0.75"/>`;
+      if (e.refs) vis += `<circle cx="${mx}" cy="${my}" r="8" fill="color-mix(in srgb,var(--st-review) 15%,var(--card))"
               stroke="var(--st-review)" stroke-width="0.9"/>
-            <text x="${mx}" y="${my+3}" text-anchor="middle" font-size="9" fill="var(--st-review)">${e.refs}</text></g>`;
+            <text x="${mx}" y="${my+3}" text-anchor="middle" font-size="9" fill="var(--st-review)">${e.refs}</text>`;
     } else {
-      s += `<path d="${d}" fill="none" stroke="var(--edge)" stroke-width="1.3" stroke-dasharray="2 4" opacity="0.6"/>`;
+      vis = `<path class="vis" d="${d}" fill="none" stroke="var(--edge)" stroke-width="1.3" stroke-dasharray="2 4" opacity="0.6"/>`;
     }
+    /* 透明宽命中层让细边可点;点边 → 侧栏关系卡 */
+    s += `<g class="edge${selEdge===eid?' esel':''}" data-eid="${eid}" onclick="selectEdge('${eid}')">
+      ${vis}<path d="${d}" fill="none" stroke="transparent" stroke-width="11" pointer-events="stroke"/></g>`;
   });
   /* 节点 */
   const riskOf = {};
   (r.status.risks||[]).forEach(k => { if (k.task_id) (riskOf[k.task_id] ||= []).push(k); });
+  /* 重试角标数据:previous_attempts 折进风险(表格同源) */
+  nodes.forEach(n => {
+    const at = DETAIL[n.task_id]?.task?.previous_attempts?.length;
+    if (at) (riskOf[n.task_id] ||= []).push({ kind:'retry', n: at });
+  });
   nodes.forEach(n => {
     const p = pos[n.task_id], st = ST[n.status] || ST.unknown;
+    const isAgg = n.task_id === '__agg';
     const cls = ['node']; if (n.status==='draft') cls.push('dim');
     if (n.status==='cancelled') cls.push('cancel'); if (n.task_id===selTask) cls.push('sel');
+    if (n.status==='claimed'||n.status==='working') cls.push('working');
     const t = r.tasks.find(t=>t.task_id===n.task_id) || {};
-    s += `<g class="${cls.join(' ')}" style="--c:${st.c}" onclick="selTask='${n.task_id}';renderAll()">
-      <rect class="bx" x="${p.x}" y="${p.y}" width="${NW}" height="${NH}" rx="9"/>
-      <text class="nid" x="${p.x+10}" y="${p.y+19}">${st.g} ${n.task_id.replace('TASK-','T')}</text>
+    const click = isAgg ? 'collapseDone=false;renderAll()' : `selectNode('${n.task_id}')`;
+    s += `<g class="${cls.join(' ')}" style="--c:${st.c}" data-nid="${n.task_id}" onclick="${click}"
+        onmouseenter="hov('${n.task_id}')" onmouseleave="hov(null)">
+      <rect class="bx" x="${p.x}" y="${p.y}" width="${NW}" height="${NH}" rx="9"${isAgg?' stroke-dasharray="5 4"':''}/>
+      <text class="nid" x="${p.x+10}" y="${p.y+19}">${st.g} ${isAgg?'已收尾组':n.task_id.replace('TASK-','T')}</text>
       <text class="nti" x="${p.x+10}" y="${p.y+37}">${esc(n.title.length>10?n.title.slice(0,9)+'…':n.title)}</text>`;
     if (t.owner_agent_id)
       s += `<text class="now" x="${p.x+NW-8}" y="${p.y+19}" text-anchor="end">${t.owner_agent_id}</text>`;
     const rk = riskOf[n.task_id];
-    if (rk){
+    if (rk && !isAgg){
       const isAlert = rk.some(k=>k.kind==='unresolved_blocker');
       const col = isAlert ? 'var(--st-alert)' : 'var(--st-ready)';
-      const tip = rk.map(k=>k.kind==='stale_lease'?`租约超时 ${k.minutes_overdue} 分钟`:k.kind).join(' / ');
+      const icon = isAlert ? '⛔' : rk.some(k=>k.kind==='stale_lease') ? '⏱' : '↻';
+      const tip = rk.map(k => k.kind==='stale_lease' ? `租约超时 ${k.minutes_overdue} 分钟`
+        : k.kind==='retry' ? `重试第 ${k.n+1} 次(有 previous_attempts)` : k.kind).join(' / ');
       s += `<g><title>${tip}</title><circle cx="${p.x+NW-2}" cy="${p.y+2}" r="8.5"
           fill="color-mix(in srgb,${col} 16%,var(--card))" stroke="${col}" stroke-width="1"/>
-        <text class="rk" x="${p.x+NW-2}" y="${p.y+5.5}" text-anchor="middle" fill="${col}">${isAlert?'⛔':'⏱'}</text></g>`;
+        <text class="rk" x="${p.x+NW-2}" y="${p.y+5.5}" text-anchor="middle" fill="${col}">${rk.length>1?rk.length:icon}</text></g>`;
     }
     s += '</g>';
   });
@@ -713,8 +873,13 @@ function renderTable(){
   const riskOf = {};
   (r.status.risks||[]).forEach(k => { if (k.task_id) (riskOf[k.task_id] ||= []).push(k); });
   const order = ['blocked','changes_requested','reviewing','submitted','working','claimed','approved','ready','draft','verified','integrated','done','cancelled'];
-  const rows = (r.tasks||[]).slice().sort((a,b) =>
+  let rows = (r.tasks||[]).slice().sort((a,b) =>
     (order.indexOf(a.status)-order.indexOf(b.status)) || (a.task_id<b.task_id?-1:1));
+  const total = rows.length;
+  if (hideClosed) rows = rows.filter(t => !FOLD.has(t.status));
+  document.getElementById('hideChip').classList.toggle('on', hideClosed);
+  document.getElementById('tblcount').textContent =
+    hideClosed ? `${rows.length}/${total} 项(已收尾折叠 —— 历史不删除,账本可回放)` : `${total} 项`;
   document.getElementById('tbody').innerHTML = rows.map(t => {
     const st = ST[t.status] || ST.unknown;
     const deps = (t.depends_on||[]).map(d => {
@@ -722,11 +887,13 @@ function renderTable(){
       return `<span class="depchip${unmet?' unmet':''}" title="${unmet?'上游未完成':'上游已完成'}"
         onclick="event.stopPropagation();selTask='${d}';renderAll()">${d.replace('TASK-','T')}</span>`;
     }).join('') || '<span style="color:var(--mut)">—</span>';
-    const rk = (riskOf[t.task_id]||[]).map(k =>
+    const attempts = DETAIL[t.task_id]?.task?.previous_attempts?.length || 0;
+    const rk = ((riskOf[t.task_id]||[]).map(k =>
       k.kind==='stale_lease' ? `<span title="租约超时 ${k.minutes_overdue} 分钟">⏱ ${k.minutes_overdue}m</span>`
       : k.kind==='unresolved_blocker' ? `<span title="阻塞未答">⛔</span>` : '').join(' ')
-      || '<span style="color:var(--mut)">—</span>';
-    return `<tr class="${t.task_id===selTask?'sel':''}" onclick="selTask='${t.task_id}';renderAll()">
+      + (attempts ? ` <span title="第 ${attempts+1} 次尝试,previous_attempts 见侧栏">↻${attempts}</span>` : ''))
+      .trim() || '<span style="color:var(--mut)">—</span>';
+    return `<tr class="${t.task_id===selTask?'sel':''}" onclick="selectNode('${t.task_id}')">
       <td class="mono" style="font-size:11px">${t.task_id}</td>
       <td style="max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.title)}</td>
       <td style="color:var(--mut);font-size:11px">${t.type||'—'}</td>
@@ -742,6 +909,11 @@ function renderTable(){
 function renderSidebar(){
   const r = curRun();
   const el = document.getElementById('sidebar');
+  if (selEdge){
+    const e = (r.graph.edges||[]).find(x => x.edge_id === selEdge);
+    if (e){ renderEdgeCard(el, r, e); return; }
+    selEdge = null;
+  }
   const t = (r.tasks||[]).find(t => t.task_id === selTask);
   if (!t){
     const u = r.run.user_state || {};
@@ -804,7 +976,64 @@ function renderSidebar(){
   } else {
     html.push(`<div class="sec"><h5>Evidence</h5><div style="color:var(--mut);font-size:12px">尚未提交</div></div>`);
   }
-  /* C 时间线 */
+  /* C 评审轮次(reviews/TASK-ID/REVIEW-*-NN.json;失败→返工的完整回路) */
+  const inReview = t.status === 'reviewing' || t.status === 'submitted';
+  if ((d.reviews && d.reviews.length) || inReview){
+    const n0 = (d.reviews||[]).length;
+    const cards = (d.reviews||[]).map(rv => {
+      const dz = DECISION_ZH[rv.decision] || [rv.decision,'var(--st-draft)'];
+      return `<div class="rev"><div class="l1"><span class="rid mono">${rv.review_id}</span>
+          <span class="ckpill" style="--c:${dz[1]}">${dz[0]}</span>
+          <span class="chip">评审人 ${rv.reviewer_agent_id}</span>
+          <span class="chip">evidence 第 ${rv.evidence_revision} 版</span>
+          <span class="when">${rv.completed_at}</span></div>
+        ${(rv.findings||[]).map(f => `<div class="find"><span class="mf${f.severity==='must_fix'?'':' ok'}">${f.severity==='must_fix'?'must_fix':'建议'}</span>
+          <span>${esc(f.message)}${f.message_ref?` <span class="chip mono">${f.message_ref}</span>`:''}</span></div>`).join('')}
+        ${rv.scope_check && rv.scope_check.out_of_scope_files.length ? `<div class="find"><span class="mf">越界</span>
+          <span class="mono" style="font-size:11px">${rv.scope_check.out_of_scope_files.map(esc).join(', ')}</span></div>` : ''}
+      </div>`;
+    }).join('');
+    html.push(`<div class="sec"><h5>评审轮次 · ${n0}</h5>${cards}
+      ${t.status==='reviewing' ? `<div style="font-size:11.5px;color:var(--st-review);margin-top:4px">◐ 第 ${n0+1} 轮评审进行中 · ${esc((d.claim&&d.claim.gate)||'')}</div>`
+        : t.status==='submitted' ? `<div style="font-size:11.5px;color:var(--st-review);margin-top:4px">◐ 已提交,等第 ${n0+1} 轮评审认领</div>` : ''}</div>`);
+  }
+  /* D 验证记录(verification/VERIFY-*.json) */
+  if (d.verify !== undefined && d.verify !== null){
+    if (d.verify === 'pending'){
+      html.push(`<div class="sec"><h5>验证</h5><div class="riskline warn">◑ 等独立验证 —— 认领命令在收件箱</div></div>`);
+    } else {
+      const v = d.verify;
+      html.push(`<div class="sec"><h5>验证 · ${v.verify_id}</h5><div class="rev">
+        <div class="l1"><span class="ckpill" style="--c:${v.verdict==='pass'?'var(--st-done)':'var(--st-alert)'}">${v.verdict==='pass'?'✓ 通过':'✗ 未过'}</span>
+          <span class="chip">验证人 ${v.verifier_agent_id}</span><span class="when">${v.executed_at}</span></div>
+        ${v.checks.map(c => `<div class="ck"><code>${esc(c.name)}</code>
+          <span style="font-size:10.5px;color:var(--mut)">exit ${c.exit_code}</span>
+          <span class="ckpill" style="--c:${c.status==='pass'?'var(--st-approved)':'var(--st-alert)'}">${c.status}</span></div>`).join('')}
+        ${v.failures_mapped && v.failures_mapped.length ? `<div class="find"><span class="mf">映射</span><span>${v.failures_mapped.map(esc).join('; ')}</span></div>` : ''}
+      </div></div>`);
+    }
+  }
+  /* E 重试档案(task.previous_attempts,reclaim/release 落笔;worktree 遗留可见) */
+  if (d.task.previous_attempts && d.task.previous_attempts.length){
+    html.push(`<div class="sec"><h5>重试档案 · ${d.task.previous_attempts.length} 次前尝试</h5>
+      ${d.task.previous_attempts.map(a => `<div class="att"><span class="no">↻${a.attempt}</span>
+        <span><span class="mono">${a.agent_id}</span> 的租约被回收(${a.reclaim_reason==='lease_expired_sweep'?'超时清扫':esc(a.reclaim_reason)})· ${a.ended_at}
+        ${a.branch?`<br>遗留分支 <span class="mono" style="font-size:10.5px">${a.branch}</span> · worktree 已弃 ——
+          <button class="copy" onclick="copyText(this,'git worktree remove ${a.worktree_path} --force')">复制清理命令</button>`:''}</span></div>`).join('')}
+    </div>`);
+  }
+  /* F 消息线程(context/messages.jsonl 按 task 过滤) */
+  if (d.messages && d.messages.length){
+    html.push(`<div class="sec"><h5>消息</h5>
+      ${d.messages.map(m => {
+        const mc = (m.type==='blocker'||m.type==='request_changes') ? 'var(--st-alert)' : m.type==='answer' ? 'var(--st-approved)' : 'var(--st-ready)';
+        return `<div class="msgc" style="--c:${mc}"><div class="l1"><span class="ty2">${m.type}</span>
+          <span class="chip mono">${m.message_id}</span><span class="chip">来自 ${m.from}</span>
+          ${m.status==='open' ? `<span style="font-size:10.5px;color:var(--st-alert)">未答 · 挂了 ${m.age}</span>` : `<span style="font-size:10.5px;color:var(--st-approved)">已答</span>`}</div>
+          <div class="bd2">${esc(m.body)}</div></div>`;}).join('')}
+    </div>`);
+  }
+  /* G 时间线 */
   html.push(`<div class="sec"><h5>事件时间线</h5><div class="tl">
     ${d.events.map(e => {
       const stc = EV_STATUS[e.event] ? ST[EV_STATUS[e.event]].c : 'var(--st-draft)';
@@ -819,6 +1048,35 @@ function renderSidebar(){
       <button class="copy" onclick="copyText(this,'sigmarun events ${r.run.run_id} --task=${t.task_id} --limit=0')">复制完整命令</button></div>`:''}
   </div>`);
   el.innerHTML = html.join('');
+}
+
+/* 边详情卡:点边 → 关系视图(kind、端点、闸门判定 / refs 清单) */
+function renderEdgeCard(el, r, e){
+  const k = EDGE_ZH[e.kind] || { zh:e.kind, note:'' };
+  const fromSt = ((r.graph.nodes||[]).find(n => n.task_id === e.from) || {}).status;
+  const met = fromSt === 'done' || fromSt === 'integrated';
+  const kc = e.kind==='produces_context_for' ? 'var(--st-review)'
+    : e.kind==='blocks' ? (met ? 'var(--st-approved)' : 'var(--st-ready)') : 'var(--edge)';
+  let body = '';
+  if (e.kind === 'blocks'){
+    body = `<div class="kv"><b>闸门</b><div class="v">上游 done 前,下游不可被 claim-next 领取(required=${e.required!==false})</div></div>
+      <div class="kv"><b>判定</b><div class="v">${met
+        ? `<span style="color:var(--st-approved);font-weight:650">已满足</span> —— 上游 ${e.from} 已「${(ST[fromSt]||ST.unknown).zh}」`
+        : `<span style="color:var(--st-ready);font-weight:650">未满足</span> —— 上游 ${e.from} 还在「${(ST[fromSt]||ST.unknown).zh}」,${e.to} 因此不可领`}</div></div>`;
+  } else if (e.kind === 'produces_context_for'){
+    body = `<div class="kv"><b>refs</b><div class="v">${(e.refs_list||[]).map(x => `<div class="refline"><code>${esc(x)}</code></div>`).join('') || '—'}</div></div>
+      <div class="kv"><b>hydrate</b><div class="v">下游认领时,上述 refs 作为 must_read 注入(context_ack 对账为演进项)</div></div>`;
+  }
+  el.innerHTML = `<div class="edgehead">
+      <div class="l1"><b class="mono" style="font-size:13px">${e.edge_id||'边'}</b>
+        <span class="pill" style="--c:${kc}">${k.zh}</span>
+        <button class="copy" style="margin-left:auto" onclick="selEdge=null;renderAll()">✕ 关闭</button></div>
+      <div class="l1" style="margin-top:8px">
+        <span class="chip click" onclick="selectNode('${e.from}')">${e.from}</span><span class="earrow">→</span>
+        <span class="chip click" onclick="selectNode('${e.to}')">${e.to}</span></div>
+    </div>
+    <div class="sec"><h5>关系</h5>${body}
+      <div class="kv"><b>说明</b><div class="v">${k.note}</div></div></div>`;
 }
 
 /* ================= 主题 / 复制 / 汇总 ================= */
