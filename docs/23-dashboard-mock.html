@@ -336,6 +336,9 @@ const MOCK = {
           { kind:'awaiting_verify', task_id:'TASK-0003',
             detail:'TASK-0003 awaits INDEPENDENT verification — register a different agent in a second window first (INV-008).',
             command:'sigmarun claim-next RUN-0007 --agent="<verifier AGENT-ID>" --role=verifier' },
+          { kind:'handoff_unstructured', task_id:'TASK-0004',
+            detail:"TASK-0004's latest handoff is thin or unstructured (docs/14 §2.4) — the next agent inherits it as hydrate must_read. Judge its usability during review; if the next agent could not work from it, request changes so the owner resubmits a restructured one.",
+            command:'sigmarun evidence show RUN-0007 TASK-0004' },
           { kind:'approval_pending', task_id:'TASK-0007',
             detail:'TASK-0007 needs approval for: migrations/**',
             command:'sigmarun approve-paths RUN-0007 TASK-0007 --paths=migrations/**' }
@@ -605,6 +608,7 @@ const KIND = {
   awaiting_rework: { c:'var(--st-ready)',    ic:'↩',  zh:'待返工' },
   awaiting_review: { c:'var(--st-review)',   ic:'◐',  zh:'等独立评审' },
   awaiting_verify: { c:'var(--st-review)',   ic:'◑',  zh:'等独立验证' },
+  handoff_unstructured:{ c:'var(--st-review)', ic:'¶', zh:'交接欠结构' },
   ready_to_integrate:{c:'var(--st-approved)',ic:'⇣', zh:'可以集成' },
   ready_to_report: { c:'var(--st-approved)', ic:'✓',  zh:'可以收尾' }
 };

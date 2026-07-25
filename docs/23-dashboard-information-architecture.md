@@ -87,7 +87,7 @@ runs: [                                     → ③ 需求清单(每 run 一卡)
 词汇表(全部来自 core/watch,展示层不造词):
 
 - `user_state.state` ∈ `closed | paused | awaiting_publish | awaiting_gates | ready_to_integrate | ready_to_report | needs_you | in_progress | ready_to_work`(progress.ts `deriveUserState`)。
-- `needs_user.kind` ∈ `ledger_broken | reclaim_confirm | blocker | blocked_unblock | open_question | approval_pending | awaiting_review | awaiting_verify | stale_owner | awaiting_rework | deps_dead | ready_to_integrate | ready_to_report`(progress.ts;`ledger_broken` 恒排首位)。
+- `needs_user.kind` ∈ `ledger_broken | reclaim_confirm | blocker | blocked_unblock | open_question | approval_pending | awaiting_review | awaiting_verify | stale_owner | awaiting_rework | handoff_unstructured | deps_dead | ready_to_integrate | ready_to_report`(progress.ts;`ledger_broken` 恒排首位,`handoff_unstructured` 恒排同任务 gate 条目之后)。
 - task `status` ∈ 13 态(core/state-machine.ts `TASK_STATUSES`);edge `kind` MVP 三种 `blocks | produces_context_for | soft_depends_on`([13](13-design-audit-and-next-breakdown.md) §7)。
 
 ### 3.2 需新增的只读聚合(⑥ 侧栏与 ④ 明细的数据缺口)
@@ -129,7 +129,7 @@ runs: [                                     → ③ 需求清单(每 run 一卡)
 
 | 元素 | 字段 | 展示 |
 |---|---|---|
-| 条目图标 + kind 标签 | `needs_user[].kind` | kind→中文短语 + severity 色图标(如 blocker→「阻塞待答」红;awaiting_review→「等独立评审」紫;approval_pending→「路径待批准」琥珀;ready_to_report→「可以收尾」绿) |
+| 条目图标 + kind 标签 | `needs_user[].kind` | kind→中文短语 + severity 色图标(如 blocker→「阻塞待答」红;awaiting_review→「等独立评审」紫;handoff_unstructured→「交接欠结构」紫;approval_pending→「路径待批准」琥珀;ready_to_report→「可以收尾」绿) |
 | 归属 chips | 外层 run 的 `run_id` + `needs_user[].task_id?` | run chip 恒显(收件箱是跨 run 的);task chip 点击=选中该 run+task 联动 ⑤⑥ |
 | 正文 | `detail` | 最多两行,溢出折叠 |
 | 命令行 | `command` | mono 一行 + 「复制」按钮(唯一动作,B4);无任何「运行」 |
@@ -359,6 +359,7 @@ CLI 等价:`sigmarun task show / evidence show / events / msg list`(reviews/veri
 | `awaiting_publish` `ready_to_work` | 就绪琥珀 | | `blocker` `blocked_unblock` `reclaim_confirm` `stale_owner` `deps_dead` | warn·琥珀→红(等待人裁决) |
 | `in_progress` | 执行蓝 | | `open_question` `approval_pending` `awaiting_rework` | warn·琥珀 |
 | `awaiting_gates` | 评审紫 | | `awaiting_review` `awaiting_verify` | 评审紫(缺独立第二窗口) |
+| | | | `handoff_unstructured` | 评审紫·warn(评审窗口内的交接质量提示,[14](14-evidence-review-verification-contract.md) §2.4/AUD-041;数据源 `evidence_submitted` payload 旗标,恒排同任务 gate 条目之后;task 过窗即静默,长尾归 audit) |
 | `ready_to_integrate` `ready_to_report` | 通过绿 | | `ready_to_integrate` `ready_to_report` | 正向绿(顺利收尾) |
 | `closed` | 完成深绿 | | | |
 | `paused` | 终止灰 | | | |
