@@ -1,6 +1,6 @@
 {
   "name": "@sigmarun/audit",
-  "version": "0.1.0",
+  "version": "0.2.5",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -9,7 +9,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@sigmarun/core": "0.1.0",
-    "@sigmarun/storage": "0.1.0"
+    "@sigmarun/core": "0.2.5",
+    "@sigmarun/storage": "0.2.5"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@sigmarun/cli",
-  "version": "0.1.0",
+  "version": "0.2.5",
   "type": "module",
   "main": "dist/cli.js",
   "types": "dist/cli.d.ts",
@@ -14,12 +14,12 @@
     }
   },
   "dependencies": {
-    "@sigmarun/adapters": "0.1.0",
-    "@sigmarun/audit": "0.1.0",
-    "@sigmarun/context": "0.1.0",
-    "@sigmarun/core": "0.1.0",
-    "@sigmarun/dispatch": "0.1.0",
-    "@sigmarun/storage": "0.1.0",
-    "@sigmarun/watch": "0.1.0"
+    "@sigmarun/adapters": "0.2.5",
+    "@sigmarun/audit": "0.2.5",
+    "@sigmarun/context": "0.2.5",
+    "@sigmarun/core": "0.2.5",
+    "@sigmarun/dispatch": "0.2.5",
+    "@sigmarun/storage": "0.2.5",
+    "@sigmarun/watch": "0.2.5"
   }
 }
