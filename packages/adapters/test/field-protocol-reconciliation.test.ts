@@ -26,6 +26,16 @@ const REQUIRED_FIELDS: Record<string, string[]> = {
   'review draft (review approve/request-changes)': ['findings', 'must_fix'],
 };
 
+/**
+ * Plan-recipes reconciliation (docs/34 §1 ⑤). The PLAN_RECIPES block teaches the planner ROUTE
+ * (mode selection) and the per-mode task shapes; each keyword below is the load-bearing artifact
+ * name of one recipe (bugfix→impact-analysis, hotfix→rollback note, refactor→safety net,
+ * spike→timebox/decision-memo, BDD acceptance→Given). If a keyword drops out of a tool's corpus,
+ * that tool's planner silently loses the recipe. Keywords are matched case-sensitively and must
+ * not be split by line wrapping in the template.
+ */
+const RECIPE_KEYWORDS = ['ROUTE', 'impact-analysis', 'rollback note', 'timebox', 'safety net', 'decision-memo', 'Given'];
+
 describe('field-protocol reconciliation — skill templates name every field the gateway requires', () => {
   for (const tool of Object.keys(TEMPLATES)) {
     const corpus = Object.values(TEMPLATES[tool]!).join('\n\n');
@@ -35,5 +45,9 @@ describe('field-protocol reconciliation — skill templates name every field the
         expect(missing, `${tool} skills omit field(s) the gateway requires for the ${draft} — an AI following the skill would hit a validation failure`).toEqual([]);
       });
     }
+    it(`${tool}: plan recipes teach ROUTE and every recipe's load-bearing artifact (docs/34)`, () => {
+      const missing = RECIPE_KEYWORDS.filter((k) => !corpus.includes(k));
+      expect(missing, `${tool} skills lost plan-recipe keyword(s) — the planner would stop teaching that recipe's required artifact (docs/34 §4)`).toEqual([]);
+    });
   }
 });

@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.6.9';
+export const TEMPLATE_VERSION = '0.6.10';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -102,6 +102,112 @@ export const MIDRUN_BLOCK = `MID-RUN CHANGES (the user says "add a piece" / "dro
   unfinished task list into the new plan payload.
 - Run already reported/closed (\`run_not_active\`)? The shelf is frozen —
   start the extra piece as a fresh /team-plan instead.`;
+
+/**
+ * Plan recipes — docs/34 v2 (derived from ai-dev-methodology: mode-router's
+ * required-artifact tables, minimal trace chains, P4 slicing discipline).
+ * Shared by the plan templates of every tool: ROUTE picks the mode before any
+ * split, the translation table turns methodology numbers into the payload
+ * fields the dispatcher actually consumes, and each recipe compresses one
+ * mode's task shapes. Full artifact tables stay in docs/34 §4 — the recipes
+ * point the AI there. Thresholds pinned 2026-07-25: risk >=31 forces
+ * full+verify; 8 points must re-slice; 21 points spike first.
+ */
+export const PLAN_RECIPES = `PLAN RECIPES (route the goal BEFORE splitting; full spec: docs/34):
+
+ROUTE (docs/34 §2):
+1. Classify the request: feature / bug / hotfix / refactor / docs / spike /
+   review / release / perf / new idea.
+2. Risk check — six dimensions, 0-60 total: user-visible behavior? public
+   API? data/schema? security-compliance? architecture? rollback difficulty?
+   Score >=31 FORCES the full pipeline + policy.require_verification —
+   announce it at the pause, do not ask; 16-30 recommends full; <=15 may
+   stay lightweight.
+3. Pick the SMALLEST mode whose artifact set still verifies this change.
+4. Record it: plan.summary STARTS with a "[Mode decision]" block — mode /
+   skipped artifacts / why / residual risk — and the split-confirmation
+   pause leads with the same line.
+5. Escalation triggers — if one fires mid-run, upgrade the mode and say so:
+   new public API / schema / persistent state; security or compliance; hard
+   rollback or migration; cross-team surface; implementation contradicts a
+   requirement, contract, or ADR; a spike result is asked to ship.
+run.mode mapping: feature→feature · bugfix→bugfix · hotfix→debug ·
+review/audit→review · release→integration · spike→spike · docs→docs ·
+refactor→feature (goal notes refactor) · perf→feature (goal notes perf).
+
+TRANSLATION TABLE (docs/34 §3) — methodology numbers land in payload fields
+the dispatcher REALLY consumes: claim-next hands out work by priority desc →
+depth asc → weight desc, so these are not decoration.
+- MoSCoW → priority: Must=90 / Should=60 / Could=30; +10 on the critical
+  path (longest dependency chain gets dispatched first).
+- Story points → weight: 1/2/3/5/8. An 8-point task MUST be sliced again; a
+  21-point one gets a spike task first.
+- Risk score → the mode choice above; it is not a payload field.
+- Dependencies: HARD ordering → a depends_on edge. SOFT preference → NO edge
+  (an edge would serialize parallelizable work — encode it in priority
+  instead). Cross-team → put a contract/interface task upstream. External →
+  the objective carries a buffer/fallback.
+- Slice VERTICALLY per INVEST (independent, valuable, estimable, testable)
+  — never one UI slice + one API slice + one DB slice. Too big? Find the
+  seam via SPIDR (spike/paths/interfaces/data/rules); happy path and simple
+  rules first.
+- Acceptance is BDD Given/When/Then: "Given <context>, When <action>, Then
+  <auto-checkable outcome with a concrete example>" — scenario IDs
+  BDD-<KEY>-NN, and required_checks test names cite the scenario ID.
+
+RECIPES (docs/34 §4 has the full artifact tables — read it when the route
+lands on one):
+- feature: (risk medium+ or full mode) spec-delta investigation → AC list +
+  affected contracts + the [Mode decision] block (outputs/spec-delta.md) →
+  feat-contract when slices share an interface → feat-<n> vertical slices
+  (weight <=5, BDD acceptance, checks cite BDD IDs) → verify-journey on
+  fine splits. Trace: AC → BDD → task → evidence → verify; handoff carries
+  an interface/contract section; commits carry "Refs: FEAT-XXX" trailers.
+- bugfix: repro (failing case, exit non-0, outputs/repro-before.log) →
+  impact (fill the impact-analysis template: contract changes ×
+  compatibility, modules × TC-REG-xxx case × rollback plan, migrations,
+  perf paths, security five questions → outputs/impact.md) → fix
+  (depends_on both; repro flips red→green in outputs/repro-after.log;
+  regression tests map 1:1 to impact rows; full suite no new failures) →
+  knowledge (root cause into memory). Root cause exposes a
+  requirement/design error → STOP, mark [needs backflow], re-plan feature.
+- hotfix (mode=debug): incident (timeline, root-cause hypothesis, and a
+  "[Gate skipped: …]" list — skipped is never passed) → patch (minimal fix
+  + regression test; objective forbids refactoring; acceptance MUST demand
+  a rollback note — outputs/rollback-note.md with rollback command / flag /
+  data impact) → verify-live → postmortem docs task (may be deferred, MUST
+  exist). Patch touches public behavior or architecture → stop, re-route.
+- refactor (mode=feature, goal notes refactor): safety-net FIRST — an
+  investigation task that inventories tests and back-fills the behavior
+  snapshot until the safety net is green (outputs/safety-before.log; can't
+  build one → stop and ask) → refactor-<n> (depends_on safety-net;
+  acceptance: safety net green after (outputs/safety-after.log), zero
+  behavior change, architecture guards clean). Any public behavior change →
+  stop, re-route as feature.
+- spike: ONE investigation task. Objective carries the question, a timebox
+  (N hours or turns), constraints (what NOT to touch), and the experiment
+  plan; acceptance = outputs/decision-memo.md with what was tried,
+  evidence, and an adopt/reject/explore-again decision (promote it into
+  memory). Spike code is throwaway — its worktree never merges; "keep the
+  prototype" is an escalation trigger → a fresh feature run rebuilds it
+  under production discipline.
+- review: read-only. One type:"review" task per dimension (correctness /
+  security / perf / consistency); acceptance = outputs/findings-<dim>.md
+  (severity / file / one-liner / suggestion) + "git status clean, 0 code
+  changes"; paths.allow []. Fixes become a NEW bugfix run fed by the
+  findings files.
+- release (mode=integration): preflight (full suite + smoke) → version
+  (bump + CHANGELOG; commit carries the Refs trailer) → publish (objective
+  states tag/OTP are executed by the HUMAN) → verify-live (install smoke +
+  registry evidence). policy.max_parallel_tasks=1 keeps the chain serial;
+  the rollback plan (untag/deprecate) goes in the handoff.
+- docs: N type:"docs" slices, each with a consistency check (affected
+  artifacts updated; reconciliation/link checks green). "Docs imply a
+  behavior change" → stop, re-route as feature.
+- perf (mode=feature, goal notes perf): baseline (numbers + a rerunnable
+  script, outputs/baseline.log) → optimize (quantified target, e.g.
+  "p95 < X ms" — never "make it fast") → compare (outputs/compare.log with
+  before/after numbers + full suite shows no regression).`;
 
 /** docs/19 §3.2 steps 1–10 (shared by the Claude command and the Codex skill). */
 const DISPATCH_FLOW = (tool: string) => `Required flow:
@@ -267,7 +373,16 @@ RULES: every \`sigmarun\` call uses \`--json\`; branch only on \`ok\` /
 
 ${COLLAB_BLOCK}
 
+${PLAN_RECIPES}
+
 Flow:
+0. ROUTE (docs/34 §2; the PLAN RECIPES block above): classify the request,
+   run the six-dimension risk check, pick the smallest mode that still
+   verifies the change, and note the matching recipe. Risk >=31 forces the
+   full pipeline + policy.require_verification. Draft the "[Mode decision]"
+   block (mode / skipped artifacts / why / residual risk) — it opens
+   plan.summary in step 3 and leads the pause in step 4. If an escalation
+   trigger fires later, upgrade the mode and say so.
 1. \`sigmarun doctor --json\`. Missing \`.team/\` checks? Fix it YOURSELF per
    RULE 11 (\`sigmarun init --json\`, idempotent) and re-run doctor. Only
    environment problems you truly cannot fix (not a git repo, no write
@@ -280,15 +395,19 @@ Flow:
    A goal that is genuinely ONE small piece is fine as a single-task run —
    never invent an artificial split; instead say so and offer: [single-task
    run] / [just do it directly without sigmarun — a run may be overkill].
+   Shape every task per the recipe ROUTE picked (task chain, weight,
+   priority, depends_on, BDD acceptance — see the TRANSLATION TABLE above).
 3. Write a \`team.plan_payload.v1\` JSON to a temp file — do NOT invent
    run_id / task_id / status. Minimal shape:
    \`{ "schema_version":"team.plan_payload.v1",
        "source":{"tool":"claude-code","command":"/team-plan","prompt":"<goal>","agent_id":"planner"},
-       "run":{"title":"<short>","mode":"feature","goal":"<goal>"},
-       "plan":{"summary":"<one line>"},
+       "run":{"title":"<short>","mode":"<ROUTE result: feature|bugfix|debug|review|integration|spike|docs>","goal":"<goal>"},
+       "plan":{"summary":"[Mode decision] <mode / skips / why / residual risk> — <one line>"},
        "tasks":[{"client_task_key":"<key>","title":"<title>","type":"implementation",
                  "objective":"<one line>","acceptance":["<testable>"],"paths":{"allow":["<glob>"]}}] }\`
-4. PAUSE FOR THE HUMAN — do NOT import yet. Show the split as a numbered list:
+4. PAUSE FOR THE HUMAN — do NOT import yet. Lead with one ROUTE line:
+   mode · risk score · the recipe's minimal trace chain (docs/34 §2).
+   Then show the split as a numbered list:
    each piece's title, one-line objective, the files it will touch, and any
    ordering. Ask whether it's right, or whether to adjust granularity /
    acceptance / merge or split a piece. Offer: [import as-is] / [change …] /
@@ -302,10 +421,13 @@ Flow:
    and that they can now run \`/team-do\` (here or in another window) to have
    a tool pick one up. You may mention the RUN-ID once; they won't need it.
 
-FULL PIPELINE instead? Default is lightweight. Only when the goal itself
-smells high-stakes (payments, auth, a release) ask ONE plain question at the
-step-4 pause: "want independent review + verification on this? usually not
-needed". If they want it (or said --full / "要评审"): import WITHOUT
+FULL PIPELINE instead? ROUTE may have decided already: risk >=31 imports
+full with require_verification — ANNOUNCE it at the step-4 pause (docs/34
+pins this; it is not a question). Below that, default is lightweight. Only
+when the goal still smells high-stakes (payments, auth, a release) ask ONE
+plain question at the step-4 pause: "want independent review + verification
+on this? usually not needed". If they want it (or said --full / "要评审"
+— or ROUTE forced it): import WITHOUT
 \`--lightweight\`, and — because their step-4 confirmation IS the release
 decision — publish immediately: \`sigmarun task publish <RUN-ID> --json\`.
 Then still point them at \`/team-do\`: it reads the run mode and routes full
@@ -729,28 +851,43 @@ ${RULES_BLOCK}
 
 ${COLLAB_BLOCK}
 
+${PLAN_RECIPES}
+
 Break the goal into 1-6 INDEPENDENT pieces any tool can pick up (a genuinely
 single-piece goal is fine as a single-task run — never invent an artificial
 split; offer [single-task run] / [just do it directly]). No goal given? Ask
 what they want to build — one plain question, never an error. Flow:
+step 0 ROUTE (docs/34 §2; PLAN RECIPES above): classify the request -> run
+the six-dimension risk check (>=31 forces full + policy.require_verification)
+-> pick the smallest mode that still verifies the change + its recipe ->
+draft the "[Mode decision]" block (mode / skipped artifacts / why / residual
+risk); escalation trigger fires later -> upgrade the mode and say so ->
 doctor (missing \`.team/\`? fix it YOURSELF per RULE 11 — \`sigmarun init
 --json\` — setup is never the user's errand) -> read the repo (and
-docs/team/MEMORY.md if present) -> build a
+docs/team/MEMORY.md if present) -> shape tasks per the ROUTE recipe (task
+chain, weight, priority, depends_on, BDD acceptance — TRANSLATION TABLE
+above) and build a
 team.plan_payload.v1 JSON: top-level \`schema_version\`:"team.plan_payload.v1",
-\`source\`, \`run\` {title, mode, goal}, \`plan\` {summary}, \`tasks\`; each task
+\`source\`, \`run\` {title, mode = the ROUTE result
+(feature|bugfix|debug|review|integration|spike|docs), goal}, \`plan\`
+{summary — STARTS with the [Mode decision] block}, \`tasks\`; each task
 carries \`client_task_key\`, title, \`type\`, one-line objective, >=1 testable
 acceptance line, paths.allow (do not invent run_id/task_id/status) ->
-PAUSE FOR THE HUMAN: show the numbered split (titles, objectives, the files
-each touches, ordering) and get their go or edits BEFORE importing —
-AUTOPILOT imports the best split and offers to redo ->
+PAUSE FOR THE HUMAN: lead with one ROUTE line (mode · risk score · the
+recipe's minimal trace chain), then show the numbered split (titles,
+objectives, the files each touches, ordering) and get their go or edits
+BEFORE importing — AUTOPILOT imports the best split and offers to redo ->
 \`sigmarun run import <file> --lightweight --json\` (lightweight = claimable
 now, no review/verify/integrate) -> tell the user in plain words what the
 pieces are and that they can run /team-do to pick one up. Do NOT claim.
-FULL PIPELINE: default is lightweight; only for high-stakes goals ask one
-plain question at the pause ("want independent review + verification?").
-If yes (or the user said so): import WITHOUT --lightweight and publish right
-away (\`sigmarun task publish <RUN> --json\`) — their confirmation was the
-release decision. Still point them at /team-do (it auto-routes full runs).
+FULL PIPELINE: ROUTE risk >=31 already forced full + verification — announce
+at the pause, don't ask; below that default is lightweight; only for
+high-stakes goals ask one plain question at the pause ("want independent
+review + verification?").
+If yes (or the user or ROUTE said so): import WITHOUT --lightweight and
+publish right away (\`sigmarun task publish <RUN> --json\`) — their
+confirmation was the release decision. Still point them at /team-do (it
+auto-routes full runs).
 
 ${MIDRUN_BLOCK}
 (tool: codex)
