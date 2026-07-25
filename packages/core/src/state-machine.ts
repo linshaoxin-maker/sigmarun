@@ -18,6 +18,15 @@ export const TASK_STATUSES = [
 /** Task-claim lifecycle (docs/15 §4.1 + the D21-constitutionalized `completed`). */
 export const TASK_CLAIM_STATUSES = ['active', 'submitted', 'completed', 'released', 'reclaimed', 'cancelled'] as const;
 
+/**
+ * Default dependency gate (D20, 2026-07-11): done is only minted at report, so the in-run default
+ * is "past independent verification" — upstream in any of these states unblocks downstream
+ * (docs/10 §6; a run can be stricter via policy.deps_satisfied_when). One table for BOTH the
+ * claim-next guard (dispatch) and every read surface that renders "why is this not claimable"
+ * (dashboard blocks-edge satisfied flag) — docs/23 B6: derive once, never re-implement in a view.
+ */
+export const DEPS_SATISFIED_DEFAULT = ['verified', 'integrated', 'done'];
+
 /** Gate-claim (review/verify lease) lifecycle. */
 export const GATE_CLAIM_STATUSES = ['active', 'completed', 'released'] as const;
 

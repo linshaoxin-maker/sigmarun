@@ -559,6 +559,37 @@ export function evidenceShow(opts: TaskShowOptions): Envelope {
   });
 }
 
+/**
+ * Read-only gate records for one task: review rounds + verification runs (docs/23 §3.2, S4).
+ * reviews/TASK-ID/REVIEW-<TASK>-<round>.json are per-round files (never overwritten, docs/14);
+ * verification/VERIFY-*.json are run-scoped, so filter by target.task_id. Pure read: no lock,
+ * no event — the dashboard sidebar and a future `task show` review/verify section share this.
+ */
+export function gateRecords(opts: TaskShowOptions): Envelope {
+  const startedAt = Date.now();
+  const ctx = openRun(opts);
+  if (ctx instanceof GatewayError) return failEnvelope(ctx.code, ctx.message, { startedAt });
+  if (!existsSync(join(ctx.runDir, 'tasks', opts.taskId, 'task.json'))) {
+    return failEnvelope('task_not_found', `Task ${opts.taskId} does not exist on ${opts.runId}.`, { startedAt });
+  }
+  const revDir = join(ctx.runDir, 'reviews', opts.taskId);
+  const reviews = existsSync(revDir)
+    ? readdirSync(revDir).filter((f) => f.startsWith('REVIEW-') && f.endsWith('.json')).sort()
+        .map((f) => readJsonState(join(revDir, f)).doc)
+    : [];
+  const verDir = join(ctx.runDir, 'verification');
+  const verifications = existsSync(verDir)
+    ? readdirSync(verDir).filter((f) => f.startsWith('VERIFY-') && f.endsWith('.json')).sort()
+        .map((f) => readJsonState(join(verDir, f)).doc as Record<string, unknown> & { target?: { task_id?: string } })
+        .filter((v) => v.target?.task_id === opts.taskId)
+    : [];
+  return okEnvelope({
+    message: `${opts.taskId}: ${reviews.length} review round(s), ${verifications.length} verification(s).`,
+    data: { reviews, verifications },
+    startedAt,
+  });
+}
+
 export interface AgentListOptions extends ResolveOptions {
   runId: string;
 }
@@ -630,6 +661,17 @@ export function taskList(opts: TaskListOptions): Envelope {
   const ctx = openRun(opts);
   if (ctx instanceof GatewayError) return failEnvelope(ctx.code, ctx.message, { startedAt });
   const rows = (readJsonState(join(ctx.runDir, 'team-task-list.json')).doc as { tasks: Array<Row & { type?: string }> }).tasks;
+  // Retry count comes from task.json previous_attempts (the reclaim/release trail, docs/23 §4.5);
+  // the index row never mirrors it, so join it here. A missing/corrupt detail file reads as 0.
+  const attemptsOf = (taskId: string): number => {
+    try {
+      const f = join(ctx.runDir, 'tasks', taskId, 'task.json');
+      if (!existsSync(f)) return 0;
+      return ((readJsonState(f).doc as { previous_attempts?: unknown[] }).previous_attempts ?? []).length;
+    } catch {
+      return 0;
+    }
+  };
   const tasks = rows
     .filter((r) => !opts.status || r.status === opts.status)
     .filter((r) => !opts.owner || r.owner_agent_id === opts.owner)
@@ -641,6 +683,7 @@ export function taskList(opts: TaskListOptions): Envelope {
       status: r.status,
       owner_agent_id: r.owner_agent_id,
       depends_on: r.depends_on ?? [],
+      attempts: attemptsOf(r.task_id),
     }));
   const filters = [opts.status && `status=${opts.status}`, opts.owner && `owner=${opts.owner}`, opts.type && `type=${opts.type}`]
     .filter(Boolean)

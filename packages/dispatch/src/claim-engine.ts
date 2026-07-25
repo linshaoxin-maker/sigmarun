@@ -21,6 +21,7 @@ import {
   failEnvelope,
   okEnvelope,
   pathsOverlapConservative,
+  DEPS_SATISFIED_DEFAULT,
   type Envelope,
   type EventActor,
   type EventInput,
@@ -439,9 +440,8 @@ function depthOf(taskId: string, rows: Map<string, TaskRow>, memo = new Map<stri
 type GuardFailure = { code: ReasonCode; message: string; data?: Record<string, unknown> };
 
 /** Per-candidate BR-001 guards #5..#8; returns null when claimable. */
-/** D20 (2026-07-11): done is only minted at report, so the in-run default gate is verified —
- * upstream past independent verification unblocks downstream (docs/10 §6; stricter via policy). */
-const DEPS_SATISFIED_DEFAULT = ['verified', 'integrated', 'done'];
+// DEPS_SATISFIED_DEFAULT (D20) now lives in core/state-machine.ts — one gate table for the
+// claim-next guard here AND the dashboard's blocks-edge satisfied derivation (docs/23 B6).
 
 function candidateGuard(
   row: TaskRow,

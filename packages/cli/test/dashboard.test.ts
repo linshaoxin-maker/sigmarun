@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Server } from 'node:http';
 import { runCli } from '../src/cli.js';
 import { serveDashboard } from '../src/dashboard.js';
+import { gateRecords } from '../../watch/src/progress.js';
 import { mkTmpGitRepo, cleanup } from '../../storage/test/helpers.js';
 import { validPayload } from '../../core/test/payload-fixture.js';
 
@@ -77,5 +78,55 @@ describe('dashboard — read-only local page over the existing read model (docs/
     const r = runCli(['dashboard', '--port=nope', '--json'], { cwd: repo });
     expect(r.exitCode).toBe(2);
     expect(JSON.parse(r.stdout).code).toBe('usage_error');
+  });
+});
+
+describe('dashboard v0.2.1 — richer read model behind the same read-only shell (docs/23 §3.2/§7)', () => {
+  it('state derives blocks-edge satisfied with the claim-next gate and carries agents + attempts', () => {
+    const repo = seededRepo();
+    const env = JSON.parse(runCli(['dashboard', '--once', '--json'], { cwd: repo }).stdout);
+    const run = env.data.runs[0];
+    const blocks = run.graph.edges.filter((e: { kind: string }) => e.kind === 'blocks');
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].satisfied).toBe(false); // upstream is ready — not past the D20 gate
+    expect(Array.isArray(run.agents)).toBe(true);
+    expect(run.tasks[0].attempts).toBe(0);
+  });
+
+  it('/api/task bundles profile + gate records + messages; /api/events slices the ledger', async () => {
+    const repo = seededRepo();
+    srv = serveDashboard({ cwd: repo, port: 0 });
+    await new Promise((r) => srv!.once('listening', r));
+    const addr = srv.address();
+    const port = typeof addr === 'object' && addr ? addr.port : 0;
+    const bad = await (await fetch(`http://127.0.0.1:${port}/api/task?run=RUN-0001`)).json();
+    expect(bad.ok).toBe(false);
+    expect(bad.code).toBe('usage_error');
+    const t = await (await fetch(`http://127.0.0.1:${port}/api/task?run=RUN-0001&task=TASK-0001`)).json();
+    expect(t.ok).toBe(true);
+    expect(t.data.task.task_id).toBe('TASK-0001');
+    expect(t.data.evidence).toBeNull(); // nothing submitted yet
+    expect(t.data.reviews).toEqual([]);
+    expect(t.data.verifications).toEqual([]);
+    expect(Array.isArray(t.data.messages)).toBe(true);
+    const ev = await (await fetch(`http://127.0.0.1:${port}/api/events?run=RUN-0001&task=TASK-0001`)).json();
+    expect(ev.ok).toBe(true);
+    expect(ev.data.events.length).toBeGreaterThan(0); // task_created + task_published at least
+    expect(ev.data.events.every((e: { task_id: string }) => e.task_id === 'TASK-0001')).toBe(true);
+    const none = await (await fetch(`http://127.0.0.1:${port}/api/events?run=RUN-0001&since=999999`)).json();
+    expect(none.data.shown).toBe(0);
+    const noRun = await (await fetch(`http://127.0.0.1:${port}/api/events`)).json();
+    expect(noRun.code).toBe('usage_error');
+  });
+
+  it('gateRecords reads absent gate dirs as empty arrays and rejects an unknown task', () => {
+    const repo = seededRepo();
+    const g = gateRecords({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-0001' });
+    expect(g.ok).toBe(true);
+    expect((g.data as { reviews: unknown[]; verifications: unknown[] }).reviews).toEqual([]);
+    expect((g.data as { reviews: unknown[]; verifications: unknown[] }).verifications).toEqual([]);
+    const missing = gateRecords({ cwd: repo, runId: 'RUN-0001', taskId: 'TASK-9999' });
+    expect(missing.ok).toBe(false);
+    expect(missing.code).toBe('task_not_found');
   });
 });
