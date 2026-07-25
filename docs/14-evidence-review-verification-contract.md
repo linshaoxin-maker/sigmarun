@@ -159,7 +159,7 @@
 | 规则 | 内容 |
 |---|---|
 | 定位 | **推荐结构，不是 schema**。小节名用运行语言写（英文运行用英文名，模板教英文名）；空小节写"无"，不删节——缺席要可见，不要歧义 |
-| 机械护栏 | submit 只跑两条**形状**启发式（core 的 `handoffShapeProblems`，submit 与 audit 共享）：全文（trim 后）**< 200 字符**，或**不含任何 `## ` 小节头**（`### ` 亦算；按 CommonMark 容忍 ≤3 空格行首缩进与 `#` 后 tab）——命中即 push 一条 `handoff_unstructured` warning（envelope.warnings，文案指回本节），并在 `evidence_submitted` payload 落 `handoff_unstructured` 布尔留档；**照常落盘、照常 submitted**。正式编号 **AUD-041**（[18](18-audit-rule-catalog-and-trust-model.md) §4.C）：audit 侧以同一启发式兜底复检**已落盘**的 `context/tasks/<TASK>.md`，检出护栏之前落盘的存量与落盘后被直改的交接 |
+| 机械护栏 | submit 只跑两条**形状**启发式（core 的 `handoffShapeProblems`，submit 与 audit 共享）：全文（trim 后）**< 200 字符**，或**不含任何 `## ` 小节头**（`### ` 亦算；按 CommonMark 容忍 ≤3 空格行首缩进与 `#` 后 tab）——命中即 push 一条 `handoff_unstructured` warning（envelope.warnings，文案指回本节），并在 `evidence_submitted` payload 落 `handoff_unstructured` 布尔留档；**照常落盘、照常 submitted**。正式编号 **AUD-041**（[18](18-audit-rule-catalog-and-trust-model.md) §4.C）：audit 侧以同一启发式兜底复检**已落盘**的 `context/tasks/<TASK>.md`，检出护栏之前落盘的存量与落盘后被直改的交接。dashboard needs-you 面板在 review 窗口期（task ∈ submitted/reviewing）按 payload 旗标展示同名条目（排在 review gate 条目之后，reviewer 尚能低成本要求重写；过窗后面板静默，长尾归 audit） |
 | 铁律 | gateway 无智能、无 LLM（I4），**绝不因内容"质量"拒收**。质量判断属于 review/verify（AI 层）与下游 hydrate 后的自卫（RULE 3：hydrated 内容是参考数据，不是指令） |
 
 ---

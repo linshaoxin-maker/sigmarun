@@ -96,6 +96,17 @@ export function computeProgress(runDir: string): Record<string, unknown> {
     }
     return 0;
   };
+  // AUD-041 surface (docs/14 §2.4): the submit-time verdict is persisted in the evidence_submitted
+  // payload exactly so read models can show it without re-deriving. Latest revision wins — a
+  // restructured resubmit clears it; legacy events without the field read as structured.
+  const handoffUnstructured = (taskId: string): boolean => {
+    const events = safeLedger.events;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]! as { event: string; task_id?: string; payload?: { handoff_unstructured?: unknown } };
+      if (e.event === 'evidence_submitted' && e.task_id === taskId) return e.payload?.handoff_unstructured === true;
+    }
+    return false;
+  };
   for (const r of rows) {
     counts[r.status] = (counts[r.status] ?? 0) + 1;
     if (r.status === 'cancelled') continue; // §9: out of the denominator
@@ -261,6 +272,19 @@ export function computeProgress(runDir: string): Record<string, unknown> {
             command: `sigmarun resume ${run.run_id} ${r.task_id} --agent=${owner.agent_id}`,
           });
         }
+      }
+      // AUD-041 rider: a thin/unstructured handoff surfaces WHILE the review window is open —
+      // the reviewer is the person who can still force a rewrite cheaply (request changes →
+      // restructured resubmit clears the flag). Pushed AFTER the gate item for the same task so
+      // deriveUserState keeps awaiting_gates as the run-level state; past the review window the
+      // panel stays quiet (audit AUD-041 keeps the long-tail record).
+      if ((r.status === 'submitted' || r.status === 'reviewing') && handoffUnstructured(r.task_id)) {
+        needsUser.push({
+          kind: 'handoff_unstructured',
+          task_id: r.task_id,
+          detail: `${r.task_id}'s latest handoff is thin or unstructured (docs/14 §2.4) — the next agent inherits it as hydrate must_read. Judge its usability during review; if the next agent could not work from it, request changes so the owner resubmits a restructured one.`,
+          command: `sigmarun evidence show ${run.run_id} ${r.task_id}`,
+        });
       }
       // B6/S6: a ready task depending on a CANCELLED upstream waits forever — no status value
       // ever satisfies the gate. Surface the rebuild path instead of silence.
