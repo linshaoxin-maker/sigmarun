@@ -43,3 +43,68 @@ describe('run import must-reject table (BDD-001-02/03; docs/09 §8.1/§9)', () =
     expect((env.data as { run_id: string }).run_id).toBe('RUN-0001');
   });
 });
+
+/**
+ * Run mode labels (docs/34 §2/§7). The enum widened so the planner's routing decision survives
+ * onto the run — collapsing refactor/perf into `feature`, or hotfix into `debug`, silently
+ * disabled the mode-recipe audit rules that key off `run.mode`.
+ */
+describe('run mode enum (docs/34 §2 routing labels)', () => {
+  it.each(['feature', 'bugfix', 'debug', 'review', 'integration', 'spike', 'docs', 'perf', 'refactor', 'hotfix', 'release'])(
+    'accepts routed mode %s',
+    (mode) => {
+      const p = validPayload() as Record<string, any>;
+      p.run.mode = mode;
+      // give every implementation slice a check so this test measures the enum alone, not the
+      // bugfix must-reject exercised below
+      for (const t of p.tasks) t.required_checks ??= ['npm test'];
+      const env = importRun({ cwd: repo, payload: p });
+      expect(env.ok, `mode ${mode} should import`).toBe(true);
+      expect((env.data as { mode?: string }).mode ?? mode).toBe(mode);
+    },
+  );
+
+  it('still rejects a mode outside the enum — a typo must not become a silent label', () => {
+    const p = validPayload() as Record<string, any>;
+    p.run.mode = 'refactoring';
+    const env = importRun({ cwd: repo, payload: p });
+    expect(env.ok).toBe(false);
+    expect(env.code).toBe('schema_invalid');
+    expect(JSON.stringify(env.data)).toContain('mode');
+  });
+});
+
+/**
+ * Mode-aware must-reject (docs/34 §7): a bugfix implementation with no required_checks cannot
+ * show the bug is gone — the recipe's red->green evidence has nowhere to land. Everywhere else
+ * this stays the long-standing `task_without_checks` warning.
+ */
+describe('bugfix runs demand a check on implementation slices', () => {
+  it('rejects a bugfix implementation task with no required_checks', () => {
+    const p = validPayload() as Record<string, any>;
+    p.run.mode = 'bugfix';
+    delete p.tasks[0].required_checks;
+    const env = importRun({ cwd: repo, payload: p });
+    expect(env.ok).toBe(false);
+    expect(env.code).toBe('schema_invalid');
+    expect(JSON.stringify(env.data)).toContain('required_checks');
+  });
+
+  it('exempts the investigation slice — a repro/impact task carries no check by design', () => {
+    const p = validPayload() as Record<string, any>;
+    p.run.mode = 'bugfix';
+    p.tasks[1].type = 'investigation';
+    delete p.tasks[1].required_checks;
+    const env = importRun({ cwd: repo, payload: p });
+    expect(env.ok).toBe(true);
+  });
+
+  it('other modes keep the warning, not a rejection', () => {
+    const p = validPayload() as Record<string, any>;
+    p.run.mode = 'feature';
+    delete p.tasks[0].required_checks;
+    const env = importRun({ cwd: repo, payload: p });
+    expect(env.ok).toBe(true);
+    expect(JSON.stringify(env.warnings ?? [])).toContain('task_without_checks');
+  });
+});

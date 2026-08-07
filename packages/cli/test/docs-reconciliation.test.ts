@@ -128,3 +128,33 @@ describe('docs reconciliation — event catalog (docs/18 §2)', () => {
     expect({ emittedNotCataloged, catalogedNotEmitted }).toEqual({ emittedNotCataloged: [], catalogedNotEmitted: [] });
   });
 });
+
+/**
+ * Fifth reconciliation table (D24): the audit rule catalog. Rules used to live in two hand-synced
+ * places — the engine's RULES arrays and the docs/18 §4 master table — so a rule could ship with no
+ * documented meaning, or the catalog could promise a check nobody wrote. Both directions are drift
+ * users pay for: the first hides a finding's rationale, the second is a coverage claim the gateway
+ * cannot honor. Registered skips (docs/18 §7 honesty-over-coverage) stay documented but unbuilt,
+ * so they are excluded from the code side only.
+ */
+describe('docs reconciliation — audit rule catalog (docs/18 §4)', () => {
+  it('engine rule ids and the docs/18 §4 master table are the SAME set', () => {
+    const engineSrc = readFileSync(join(ROOT, 'packages', 'audit', 'src', 'engine.ts'), 'utf8');
+    const implemented = new Set<string>();
+    for (const m of engineSrc.matchAll(/^\s*id:\s*'(AUD-\d+)'/gm)) implemented.add(m[1]!);
+
+    const sec = doc18.slice(doc18.indexOf('## 4. 规则目录主表'), doc18.indexOf('## 5.'));
+    const cataloged = new Set<string>();
+    for (const line of sec.split('\n')) {
+      const m = /^\|\s*(AUD-\d+)\s*\|/.exec(line);
+      if (m) cataloged.add(m[1]!);
+    }
+
+    expect(implemented.size, 'no AUD ids parsed out of engine.ts — the id: literal shape changed').toBeGreaterThan(40);
+    expect(cataloged.size, 'no AUD rows parsed out of docs/18 §4 — the table shape changed').toBeGreaterThan(40);
+
+    const builtNotCataloged = [...implemented].filter((r) => !cataloged.has(r)).sort();
+    const catalogedNotBuilt = [...cataloged].filter((r) => !implemented.has(r)).sort();
+    expect({ builtNotCataloged, catalogedNotBuilt }).toEqual({ builtNotCataloged: [], catalogedNotBuilt: [] });
+  });
+});

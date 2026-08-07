@@ -3,7 +3,7 @@
  * Command name is `sigmarun` per D12; docs/19 wrote the generic `team` prefix.
  */
 
-export const TEMPLATE_VERSION = '0.6.10';
+export const TEMPLATE_VERSION = '0.6.11';
 
 /** docs/19 §2 — the ten rules, inserted verbatim into every template. */
 export const RULES_BLOCK = `RULES (protocol-critical, non-negotiable):
@@ -131,9 +131,12 @@ ROUTE (docs/34 §2):
    new public API / schema / persistent state; security or compliance; hard
    rollback or migration; cross-team surface; implementation contradicts a
    requirement, contract, or ADR; a spike result is asked to ship.
-run.mode mapping: feature→feature · bugfix→bugfix · hotfix→debug ·
-review/audit→review · release→integration · spike→spike · docs→docs ·
-refactor→feature (goal notes refactor) · perf→feature (goal notes perf).
+run.mode mapping is now one-to-one — route to the label that names what you
+are doing, never a nearby one: feature · bugfix · hotfix · refactor · perf ·
+spike · docs · review (also audits) · release · integration (merge-only
+runs) · debug (plain debugging, NOT a hotfix). The label rides on the run so
+the mode-recipe audit rules (AUD-042..046) can check the artifacts your
+recipe promised; picking a lookalike mode silently disables them.
 
 TRANSLATION TABLE (docs/34 §3) — methodology numbers land in payload fields
 the dispatcher REALLY consumes: claim-next hands out work by priority desc →
@@ -171,13 +174,13 @@ lands on one):
   regression tests map 1:1 to impact rows; full suite no new failures) →
   knowledge (root cause into memory). Root cause exposes a
   requirement/design error → STOP, mark [needs backflow], re-plan feature.
-- hotfix (mode=debug): incident (timeline, root-cause hypothesis, and a
+- hotfix (mode=hotfix): incident (timeline, root-cause hypothesis, and a
   "[Gate skipped: …]" list — skipped is never passed) → patch (minimal fix
   + regression test; objective forbids refactoring; acceptance MUST demand
   a rollback note — outputs/rollback-note.md with rollback command / flag /
   data impact) → verify-live → postmortem docs task (may be deferred, MUST
   exist). Patch touches public behavior or architecture → stop, re-route.
-- refactor (mode=feature, goal notes refactor): safety-net FIRST — an
+- refactor (mode=refactor): safety-net FIRST — an
   investigation task that inventories tests and back-fills the behavior
   snapshot until the safety net is green (outputs/safety-before.log; can't
   build one → stop and ask) → refactor-<n> (depends_on safety-net;
@@ -204,7 +207,7 @@ lands on one):
 - docs: N type:"docs" slices, each with a consistency check (affected
   artifacts updated; reconciliation/link checks green). "Docs imply a
   behavior change" → stop, re-route as feature.
-- perf (mode=feature, goal notes perf): baseline (numbers + a rerunnable
+- perf (mode=perf): baseline (numbers + a rerunnable
   script, outputs/baseline.log) → optimize (quantified target, e.g.
   "p95 < X ms" — never "make it fast") → compare (outputs/compare.log with
   before/after numbers + full suite shows no regression).`;
@@ -401,7 +404,7 @@ Flow:
    run_id / task_id / status. Minimal shape:
    \`{ "schema_version":"team.plan_payload.v1",
        "source":{"tool":"claude-code","command":"/team-plan","prompt":"<goal>","agent_id":"planner"},
-       "run":{"title":"<short>","mode":"<ROUTE result: feature|bugfix|debug|review|integration|spike|docs>","goal":"<goal>"},
+       "run":{"title":"<short>","mode":"<ROUTE result: feature|bugfix|hotfix|refactor|perf|spike|docs|review|release|integration|debug>","goal":"<goal>"},
        "plan":{"summary":"[Mode decision] <mode / skips / why / residual risk> — <one line>"},
        "tasks":[{"client_task_key":"<key>","title":"<title>","type":"implementation",
                  "objective":"<one line>","acceptance":["<testable>"],"paths":{"allow":["<glob>"]}}] }\`
@@ -869,7 +872,8 @@ chain, weight, priority, depends_on, BDD acceptance — TRANSLATION TABLE
 above) and build a
 team.plan_payload.v1 JSON: top-level \`schema_version\`:"team.plan_payload.v1",
 \`source\`, \`run\` {title, mode = the ROUTE result
-(feature|bugfix|debug|review|integration|spike|docs), goal}, \`plan\`
+(feature|bugfix|hotfix|refactor|perf|spike|docs|review|release|integration|debug),
+goal}, \`plan\`
 {summary — STARTS with the [Mode decision] block}, \`tasks\`; each task
 carries \`client_task_key\`, title, \`type\`, one-line objective, >=1 testable
 acceptance line, paths.allow (do not invent run_id/task_id/status) ->

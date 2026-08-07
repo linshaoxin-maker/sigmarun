@@ -4,6 +4,22 @@ import { scanForSecrets } from '@sigmarun/storage';
 
 export const TASK_TYPES = ['implementation', 'investigation', 'review', 'verification', 'integration', 'docs'] as const;
 
+/**
+ * Run mode labels (docs/34 §2 plan recipes). Widened 2026-07-25 with perf/refactor/hotfix/release
+ * so the planner's routing decision survives into the run instead of collapsing into `feature` or
+ * sharing `debug` with plain debugging — the mode-aware audit rules (AUD-042..046) key off it.
+ * The label drives NO state machine branch: lightweight-vs-full is the only capability fork
+ * (see mode.ts `resolveRunMode`, which reads `run.lightweight`).
+ */
+export const RUN_MODES = [
+  'feature', 'bugfix', 'debug', 'review', 'integration', 'spike', 'docs',
+  'perf', 'refactor', 'hotfix', 'release',
+] as const;
+export type RunModeLabel = (typeof RUN_MODES)[number];
+
+/** Modes whose recipe makes an unverifiable task a hard error, not a warning (docs/34 §7). */
+const CHECKS_MANDATORY_MODES = new Set<string>(['bugfix']);
+
 const PathsSchema = z.object({
   allow: z.array(z.string()).optional(),
   avoid: z.array(z.string()).optional(),
@@ -38,7 +54,7 @@ export const PayloadSchema = z.object({
   }).passthrough(),
   run: z.object({
     title: z.string().min(1),
-    mode: z.enum(['feature', 'bugfix', 'debug', 'review', 'integration', 'spike', 'docs']),
+    mode: z.enum(RUN_MODES),
     goal: z.string().min(1),
     base_branch: z.string().optional(),
     worktree_root: z.string().optional(),
@@ -125,7 +141,18 @@ export function validatePayload(raw: unknown): { errors: ValidationIssue[]; warn
       if (isBadPath(pp)) errors.push({ path: `tasks.${i}.paths`, message: `path must be repo-relative without "..": ${pp}` });
     }
     if (!t.paths?.allow?.length) warnings.push({ code: 'task_without_paths', message: `task ${t.client_task_key} has no paths.allow; path-conflict protection is weakened.` });
-    if (!t.required_checks?.length) warnings.push({ code: 'task_without_checks', message: `task ${t.client_task_key} has no required_checks; verification will be unclear.` });
+    // A bugfix task without a check cannot show the bug is gone — the recipe's red->green evidence
+    // has nowhere to land, so this is must-reject rather than the usual warning (docs/34 §7).
+    // Investigation/docs slices (repro capture, impact analysis, knowledge write-up) carry no check
+    // by design; only the code-touching types are held to it.
+    if (!t.required_checks?.length) {
+      const mustHaveChecks = CHECKS_MANDATORY_MODES.has(p.run.mode) && t.type === 'implementation';
+      if (mustHaveChecks) {
+        errors.push({ path: `tasks.${i}.required_checks`, message: `mode "${p.run.mode}" requires at least one required_checks entry on implementation task ${t.client_task_key} — a fix with no check cannot prove the bug is gone (docs/34 §4.2).` });
+      } else {
+        warnings.push({ code: 'task_without_checks', message: `task ${t.client_task_key} has no required_checks; verification will be unclear.` });
+      }
+    }
   });
 
   for (const e of p.task_graph ?? []) {

@@ -956,6 +956,138 @@ const CONTEXT_RULES: Rule[] = [
 ];
 RULES.push(...CONTEXT_RULES);
 
+/**
+ * Mode recipes (AUD-042..046) — docs/34 §4/§5 turned into backstops.
+ *
+ * The plan recipes live in the skill templates, where they are ADVICE: an AI can route a goal to
+ * `bugfix` and still forget the repro slice. These rules check the shape the recipe promised,
+ * against the run's own `run.mode` label. They read what landed and never judge prose quality
+ * (I4: the gateway has no LLM) — every predicate below is a structural or keyword test that a
+ * human can re-run by hand.
+ *
+ * Scope discipline: each rule no-ops unless the run carries the matching mode, so a run planned
+ * before these modes existed (or by a tool that never routes) is silent, not noisy.
+ */
+const MODE_TEXT_FIELDS = (ev: Record<string, unknown> | null): string => {
+  if (!ev) return '';
+  const parts: string[] = [String(ev.summary ?? '')];
+  for (const c of (ev.commands as Array<{ cmd?: string; output_file?: string }> | undefined) ?? []) {
+    parts.push(String(c.cmd ?? ''), String(c.output_file ?? ''));
+  }
+  for (const a of (ev.acceptance as Array<{ item?: string; note?: string }> | undefined) ?? []) {
+    parts.push(String(a.item ?? ''), String(a.note ?? ''));
+  }
+  for (const f of (ev.changed_files as Array<{ path?: string }> | undefined) ?? []) parts.push(String(f.path ?? ''));
+  for (const r of (ev.required_checks_results as Array<{ check?: string }> | undefined) ?? []) parts.push(String(r.check ?? ''));
+  return parts.join('\n').toLowerCase();
+};
+
+const runMode = (ctx: Ctx): string => String(ctx.run.mode ?? '');
+
+const MODE_RULES: Rule[] = [
+  {
+    // docs/34 §4.2: a bugfix without an investigation slice skipped BOTH the failing repro and the
+    // impact analysis — the two artifacts that make the fix verifiable and its blast radius known.
+    id: 'AUD-042',
+    check: (ctx) => {
+      if (runMode(ctx) !== 'bugfix' || ctx.rows.length === 0) return [];
+      const hasInvestigation = ctx.rows.some((r) => String(ctx.taskDetail(r.task_id)?.type ?? '') === 'investigation');
+      if (hasInvestigation) return [];
+      return [finding('AUD-042', 'warn',
+        `Run is mode "bugfix" but carries no investigation task — the failing repro and impact analysis (docs/34 §4.2) have nowhere to land.`,
+        `Add the missing slice: sigmarun task add ${ctx.runId} --file=<repro-or-impact task.json>, or re-plan with /team-plan if the fix already shipped unverified.`,
+        [ctx.runId])];
+    },
+  },
+  {
+    // docs/34 §4.3: hotfix trades gates for speed, so the rollback note is the ONE artifact that
+    // cannot be skipped — it is what makes the shortcut reversible. Keyword test over the evidence
+    // the owner actually filed; `debug` runs are plain debugging and stay out of scope.
+    id: 'AUD-043',
+    check: (ctx) => {
+      if (runMode(ctx) !== 'hotfix') return [];
+      const out: Finding[] = [];
+      for (const row of ctx.rows) {
+        const ev = ctx.evidence(row.task_id);
+        if (!ev) continue; // missing evidence is AUD-011's call, not this rule's
+        if (String(ctx.taskDetail(row.task_id)?.type ?? '') !== 'implementation') continue;
+        if (!MODE_TEXT_FIELDS(ev).includes('rollback')) {
+          out.push(finding('AUD-043', 'warn',
+            `${row.task_id} is a hotfix implementation whose evidence never mentions a rollback — docs/34 §4.3 requires the rollback note (command / flag / data impact) before the shortcut is acceptable.`,
+            `Owner adds outputs/rollback-note.md and resubmits: sigmarun submit ${ctx.runId} ${row.task_id} --agent=<AGENT-ID> --evidence=<file>.`,
+            [row.task_id]));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    // docs/34 §4.4: a refactor with no safety net is an unverifiable rewrite — the before/after
+    // behavior snapshot is what turns "I did not change behavior" from a claim into evidence.
+    id: 'AUD-044',
+    check: (ctx) => {
+      if (runMode(ctx) !== 'refactor') return [];
+      const out: Finding[] = [];
+      for (const row of ctx.rows) {
+        const ev = ctx.evidence(row.task_id);
+        if (!ev) continue;
+        if (String(ctx.taskDetail(row.task_id)?.type ?? '') !== 'implementation') continue;
+        if (!MODE_TEXT_FIELDS(ev).includes('safety')) {
+          out.push(finding('AUD-044', 'warn',
+            `${row.task_id} is a refactor implementation whose evidence shows no safety-net log — docs/34 §4.4 wants the before/after behavior snapshot, not just a green suite.`,
+            `Owner records the safety net (outputs/safety-before.log + safety-after.log) and resubmits; if no net exists, stop and build one first.`,
+            [row.task_id]));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    // docs/34 §4.6/§5: a review slice is READ-ONLY — its deliverable is findings-<dim>.md, and its
+    // fixes belong to a follow-up bugfix run. Adding the findings document is legitimate (submit
+    // requires a non-empty changed_files), so only MODIFIED/DELETED files betray a reviewer who
+    // started fixing. That edit escaped review itself — nobody reviews the reviewer — hence error.
+    id: 'AUD-045',
+    check: (ctx) => {
+      const out: Finding[] = [];
+      for (const row of ctx.rows) {
+        if (String(ctx.taskDetail(row.task_id)?.type ?? '') !== 'review') continue;
+        const ev = ctx.evidence(row.task_id);
+        if (!ev) continue;
+        const touched = ((ev.changed_files as Array<{ path?: string; change_type?: string }> | undefined) ?? [])
+          .filter((f) => f.change_type === 'modified' || f.change_type === 'deleted')
+          .map((f) => String(f.path ?? ''));
+        if (touched.length > 0) {
+          out.push(finding('AUD-045', 'error',
+            `${row.task_id} is a review task but its evidence modifies/deletes ${touched.length} file(s): ${touched.slice(0, 3).join(', ')}${touched.length > 3 ? ' …' : ''} — a review slice stays read-only (docs/34 §4.6); its fixes belong to a follow-up bugfix run.`,
+            `Revert the edits out of the review task, keep the findings document, and hand the fixes to a fresh bugfix run (/team-plan with the findings file as the bug report) — the two recipes are meant to relay.`,
+            [row.task_id, ...touched.slice(0, 3)]));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    // docs/34 §4.5: spike code is throwaway by contract — its worktree must not merge back. A
+    // recorded integration means the prototype shipped without the production discipline a real
+    // feature run would have imposed ("keep the prototype" is an escalation trigger, not a merge).
+    id: 'AUD-046',
+    check: (ctx) => {
+      if (runMode(ctx) !== 'spike') return [];
+      const merged = ctx.events
+        .filter((e) => e.event === 'task_integrated' && Boolean((e.payload as { merge_commit?: string } | undefined)?.merge_commit))
+        .map((e) => e.task_id)
+        .filter((t): t is string => Boolean(t));
+      if (merged.length === 0) return [];
+      return [...new Set(merged)].map((taskId) => finding('AUD-046', 'warn',
+        `${taskId} belongs to a spike run but was merged back — spike code is throwaway (docs/34 §4.5); keeping the prototype is an escalation trigger, not a merge.`,
+        `Confirm this was a deliberate call; the disciplined path is a fresh feature run that rebuilds it with contracts, tests and review.`,
+        [taskId]));
+    },
+  },
+];
+RULES.push(...MODE_RULES);
+
 
 /** Read-only batch audit — findings are data, exit stays 0 (docs/18 §7). */
 export function auditRun(opts: AuditOptions): Envelope {

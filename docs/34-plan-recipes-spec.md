@@ -122,6 +122,16 @@
 
 ---
 
-## 7. 第二刀预告(gateway;独立小版本)
+## 7. 第二刀(gateway;**已落地 2026-07-25**)
 
-枚举 +`perf`/`refactor`(评估 +`hotfix`/`release`);run-import 按 mode 注入 §3 默认(bugfix 缺 required_checks→must-reject;risk 字段若入 payload 另议);audit mode 规则:bugfix 无 investigation 片→warn、hotfix evidence 无 rollback 字样→warn、refactor 无 safety 日志→warn、review 片有代码改动→error、spike worktree 被并回→warn。状态机/门链/防撞车零改动。
+> **实施注**:枚举加宽落 `perf`/`refactor`/**`hotfix`**/**`release`** 四个——括号里的"评估"做完了,结论是**加**。理由:§4.3 原把 hotfix 映射到 `debug`,而 `debug` 同时是普通调试 run 的模式,「hotfix 无 rollback→warn」照那个映射会对每个没有回滚记录的普通调试 run 误报;refactor 同理(原映射塌回 `feature`,规则永远收不到样本)。**枚举与配方从此一一对应**,两侧 plan 模板的 §2 映射表同步改(TEMPLATE 0.6.10→**0.6.11**),模板并写明"选相近的模式会静默关掉这些规则"。
+>
+> 关键事实(对账时确认):`run.mode` **不驱动任何状态机分支**——轻量↔全量才是唯一能力分叉(`mode.ts::resolveRunMode` 读 `run.lightweight`)。所以枚举加宽对状态机/门链/防撞车确实零风险,§7 的承诺成立。
+
+- **枚举**:`feature`/`bugfix`/`debug`/`review`/`integration`/`spike`/`docs` + `perf`/`refactor`/`hotfix`/`release`(`RUN_MODES`,core 导出)。
+- **run-import must-reject**:`mode=="bugfix"` 且 `type=="implementation"` 的任务缺 `required_checks` → **拒收**(修了没检查就无法证明 bug 没了);investigation/docs 片按配方本就无检查,豁免;其余模式维持既有 `task_without_checks` warning。`risk` 字段仍未入 payload(另议)。
+- **audit 模式规则**:AUD-042 bugfix 无 investigation 片→warn · AUD-043 hotfix evidence 无 rollback→warn · AUD-044 refactor 无 safety 日志→warn · AUD-045 review 片改/删文件→error · AUD-046 spike 被并回→warn。判定全是结构/关键词测试(I4:gateway 无 LLM);模式不匹配即整条 no-op,旧 run 不受打扰。细则见 [18](18-audit-rule-catalog-and-trust-model.md) §4.I。
+- **顺带**:补上**第五张机器对账**——引擎 RULES 的 id 集合 ↔ docs/18 §4 主表行双向相等(此前靠人工同步;上线当场逮出 5 条新规则未入文档)。
+- 状态机/门链/防撞车零改动(兑现)。
+
+**AUD-045 的一处规格补白**(实施时定,记录备查):§4.6 写"git status 干净(0 改动)",但 submit 硬性要求 `changed_files` 非空,两者字面冲突。取的口径是——**新增 findings 文档合法,改/删既有文件才是违规**(评审者一旦动手修,那次编辑绕过了评审本身,故 error)。若后续认为评审片应当完全零 changed_files,需先松开 submit 的非空约束,那是另一刀。

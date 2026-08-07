@@ -145,9 +145,9 @@ jsonl 示例（三种 actor）：
 
 ---
 
-## 4. 规则目录主表（AUD-001 … AUD-041）
+## 4. 规则目录主表（AUD-001 … AUD-046）
 
-> **修订注（2026-07-15，D21）**：轻量 run（[26](26-lightweight-mode.md)）下 AUD-011/016/017/019 降为 **info**（文案注明豁免）——直标完成是该模式的正当形态；其余规则口径不变。severity 枚举自此为 error/warn/info。另：`lock_takeover`（#44）自整改 R1 起真实发出（接管后首事件，actor=system/lock-manager）；`task_reclaimed` payload 新增 `parked`（blocker 停靠）与 `forced`（人类强制接管）；`run_reported` payload 新增 `mode`。另（2026-07-25）：新增 **AUD-041 handoff_unstructured**——[14](14-evidence-review-verification-contract.md) §2.4 交接结构护栏的 audit 兜底半；`evidence_submitted` payload 同步新增 `handoff_unstructured`（inline 判定留档）。
+> **修订注（2026-07-15，D21）**：轻量 run（[26](26-lightweight-mode.md)）下 AUD-011/016/017/019 降为 **info**（文案注明豁免）——直标完成是该模式的正当形态；其余规则口径不变。severity 枚举自此为 error/warn/info。另：`lock_takeover`（#44）自整改 R1 起真实发出（接管后首事件，actor=system/lock-manager）；`task_reclaimed` payload 新增 `parked`（blocker 停靠）与 `forced`（人类强制接管）；`run_reported` payload 新增 `mode`。另（2026-07-25）：新增 **AUD-041 handoff_unstructured**——[14](14-evidence-review-verification-contract.md) §2.4 交接结构护栏的 audit 兜底半；`evidence_submitted` payload 同步新增 `handoff_unstructured`（inline 判定留档）。另（2026-07-25，Plan Recipes 第二刀）：新增 **§4.I 模式配方组 AUD-042…046**（[34](34-plan-recipes-spec.md) §7）——`run.mode` 枚举同步加宽 `perf`/`refactor`/`hotfix`/`release`，使路由结果活到 run 上而非塌回 `feature`、或与普通调试共用 `debug`；模式标签**不驱动任何状态机分支**（轻量↔全量仍是唯一能力分叉，见 `mode.ts::resolveRunMode`）。同轮补上**第五张机器对账**：引擎 RULES 的 id 集合 ↔ 本节主表行，双向相等即 CI 绿（此前这两处靠人工同步）。
 
 编号连续、列结构统一，按主题分六组呈现。层级取值见 §1.2；`P0-inline` 规则的"依赖事件"同时是其拒绝时的留痕参考。severity 只取 `error` / `warn`。
 
@@ -229,17 +229,30 @@ jsonl 示例（三种 actor）：
 | AUD-039 | memory_misplaced | `.team/` 目录树、project.json | `.team/` 内出现 project memory 文件（违反 [25](25-project-memory-and-knowledge-promotion.md) §3.1 git-tracked 要求，将随 D4 丢失） | error | 项目记忆位于 .team/ 内：{path} | 迁移至 project_memory_path 并核对 project.json | — | P1-audit |
 | AUD-040 | agent_claim_limit_violation | claims/task-claims.json、agents/*.json、run.json（policy） | 同一 agent_id 的 active task claim 数 > policy.max_active_claims_per_agent（默认 1）（M36/D17；claim-next inline 已拒 `agent_claim_limit`，本条检出绕过与 label 幂等失效造成的多身份囤积） | error | AGENT-{a} 持有 {n} 个 active claim 超上限 | 核对 label 注册幂等性；多余 claim 走 release / reclaim | task_claimed、agent_registered | P1-audit |
 
+### 4.I 模式配方（AUD-042 … AUD-046）
+
+配方规格见 [34](34-plan-recipes-spec.md) §4/§5。配方本身活在 skill 模板里、对 AI 只是**建议**——路由到 `bugfix` 仍可能漏掉复现片。这五条按 run 自己的 `run.mode` 标签复检"配方承诺的形状"是否真落到 `.team/`。**判定全部是结构或关键词测试**（I4：gateway 无 LLM，不判文字质量），人可手工复算。作用域纪律:模式不匹配即整条 no-op——用旧枚举规划的 run(或压根不路由的工具)保持安静而非刷屏。
+
+| 规则ID | 名称 | 输入文件 | 触发条件（字段级） | severity | 消息模板 | next_action | 依赖事件 | 层级 |
+|---|---|---|---|---|---|---|---|---|
+| AUD-042 | bugfix_without_investigation | run.json（mode）、tasks/*/task.json（type） | `run.mode == "bugfix"` 且全部任务无一 `type == "investigation"`（[34](34-plan-recipes-spec.md) §4.2 的失败复现 + 影响分析两件必交工件无处落地） | warn | mode 为 bugfix 的 run 无 investigation 任务 | `task add` 补复现/影响分析片；已无验证地修完则重新规划 | run_imported | P1-audit |
+| AUD-043 | hotfix_without_rollback | run.json（mode）、evidence/TASK-ID/evidence.json | `run.mode == "hotfix"` 且某 `implementation` 任务的 evidence（summary/commands/acceptance/changed_files/required_checks 全文，小写）不含 `rollback` 字样（[34](34-plan-recipes-spec.md) §4.3：hotfix 拿门换速度，回滚说明是唯一不可省的工件——它是这条捷径可逆的凭据）。evidence 缺失归 AUD-011；`debug` 模式是普通调试，不在范围内 | warn | TASK-{t} 是 hotfix 实现但 evidence 无回滚说明 | 补 outputs/rollback-note.md（命令/flag/数据影响）后重新 submit | evidence_submitted | P1-audit |
+| AUD-044 | refactor_without_safety_net | 同上 | `run.mode == "refactor"` 且某 `implementation` 任务的 evidence 全文不含 `safety` 字样（[34](34-plan-recipes-spec.md) §4.4：无安全网的重构是不可验证的重写，before/after 行为快照才把"我没改行为"从声明变成证据） | warn | TASK-{t} 是 refactor 实现但 evidence 无安全网日志 | 补 outputs/safety-before.log + safety-after.log；无网则先停下建网 | evidence_submitted | P1-audit |
+| AUD-045 | review_task_mutates_code | tasks/*/task.json（type）、evidence/TASK-ID/evidence.json | 任一 `type == "review"` 任务的 evidence `changed_files[]` 含 `change_type` 为 `modified` 或 `deleted` 的条目（[34](34-plan-recipes-spec.md) §4.6 评审片只读）。**新增 findings 文档合法**（submit 硬性要求 changed_files 非空），故只判改/删；该编辑绕过了评审本身（无人评审评审者），故 error 而非 warn | error | TASK-{t} 是 review 任务却改/删了 {n} 个文件：{paths} | 把编辑从评审片撤出、保留 findings 文档，修复另开 bugfix run（findings 当 bug report） | evidence_submitted | P1-audit |
+| AUD-046 | spike_merged_back | run.json（mode）、events.jsonl（`task_integrated`） | `run.mode == "spike"` 且存在带 `merge_commit` 的 `task_integrated` 事件（[34](34-plan-recipes-spec.md) §4.5：spike 代码按契约即弃，"想保留原型"是升级触发而非合并理由） | warn | TASK-{t} 属 spike run 却被并回 | 确认是否有意为之；纪律路径是开 feature run 按生产标准重做 | task_integrated | P1-audit |
+
 ### 4.H 子命令映射
 
 | `team audit` 子命令 | 覆盖规则 |
 |---|---|
 | `claims` | AUD-001、003、005–010、020、040 |
 | `paths` | AUD-002、004、014、031 |
-| `evidence` | AUD-011–019、041 |
+| `evidence` | AUD-011–019、041、043–045 |
 | `progress` | AUD-035 |
 | `memory` | AUD-036–039 |
+| `mode` | AUD-042–046（配方兜底；[34](34-plan-recipes-spec.md) §7） |
 | `task <RUN> <TASK>` | 上述规则中按单 task 过滤的子集 + AUD-021–028 相关项 |
-| `run <RUN>` | 全部 41 条（含 AUD-029–034、036–041） |
+| `run <RUN>` | 全部 46 条（含 AUD-029–034、036–046） |
 
 ---
 
